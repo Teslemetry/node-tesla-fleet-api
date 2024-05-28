@@ -6,7 +6,8 @@ import User from './user.ts';
 import Vehicle from './vehicle.ts';
 import { raise_for_status, InvalidRegion, LibraryError, InvalidToken } from './exceptions.ts';*/
 
-import { Method, Region } from "./types.js";
+export type Method = "GET" | "POST" | "PUT" | "DELETE";
+export type Region = "na" | "eu" | "cn";
 
 const servers: Record<Region, string> = {
     na: "https://fleet-api.prd.na.vn.cloud.tesla.com",
@@ -14,7 +15,7 @@ const servers: Record<Region, string> = {
     cn: "https://fleet-api.prd.cn.vn.cloud.tesla.cn",
 };
 
-export class TeslaFleetApi {
+export default class TeslaFleetApi {
     server: string | null = null;
     accessToken: string | null;
     /*

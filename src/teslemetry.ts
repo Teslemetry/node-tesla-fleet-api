@@ -1,4 +1,4 @@
-import { TeslaFleetApi } from "./teslafleetapi.js";
+import TeslaFleetApi from "./teslafleetapi.js";
 
 type Region = "na" | "eu" | "api";
 
