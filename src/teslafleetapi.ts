@@ -6,16 +6,15 @@ import User from './user.ts';
 import Vehicle from './vehicle.ts';
 import { raise_for_status, InvalidRegion, LibraryError, InvalidToken } from './exceptions.ts';*/
 
-type Method = "GET" | "POST" | "PUT" | "DELETE";
+import { Method, Region } from "./types.js";
 
-const servers = {
+const servers: Record<Region, string> = {
     na: "https://fleet-api.prd.na.vn.cloud.tesla.com",
     eu: "https://fleet-api.prd.eu.vn.cloud.tesla.com",
     cn: "https://fleet-api.prd.cn.vn.cloud.tesla.cn",
 };
 
-// Based on https://developer.tesla.com/docs/fleet-api
-class TeslaFleetApi {
+export class TeslaFleetApi {
     server: string | null = null;
     accessToken: string | null;
     /*
@@ -26,22 +25,22 @@ class TeslaFleetApi {
     vehicle?: Vehicle
     */
 
-    constructor(
-        accessToken: string | null = null,
-        region: string | null = null,
-        server: string | null = null,
-        chargingScope: boolean = true,
-        energyScope: boolean = true,
-        partnerScope: boolean = true,
-        userScope: boolean = true,
-        vehicleScope: boolean = true
-    ) {
-        this.accessToken = accessToken;
+    constructor(options: {
+        accessToken?: string;
+        region?: Region;
+        server?: string;
+        chargingScope?: boolean;
+        energyScope?: boolean;
+        partnerScope?: boolean;
+        userScope?: boolean;
+        vehicleScope?: boolean;
+    }) {
+        this.accessToken = options.accessToken;
 
-        if (server) {
-            this.server = server;
-        } else if (region && region in servers) {
-            this.server = servers[region];
+        if (options.server) {
+            this.server = options.server;
+        } else if (options.region && options.region in servers) {
+            this.server = servers[options.region];
         } else {
             throw new Error("Either server or region must be provided.");
         }
@@ -70,7 +69,7 @@ class TeslaFleetApi {
         path: string,
         params: Record<string, any> | null = null,
         json: Record<string, any> | null = null
-    ): Promise<Record<string, any> | string> {
+    ): Promise<Record<string, any>> {
         if (!this.server) {
             throw new Error("Server was not set at init. Call findServer() first.");
         }
@@ -98,20 +97,20 @@ class TeslaFleetApi {
         };
 
         const query = new URLSearchParams(params).toString();
-        console.log(method, headers, json, query);
 
         return fetch(`${this.server}/${path}${query}`, {
             method,
             headers,
-            body: JSON.stringify(json),
+            body: json ? JSON.stringify(json) : null,
         }).then((res) => {
+            console.debug(res.status);
             if (!res.ok) {
                 throw new Error(`HTTP status code ${res.status}`);
             }
-            if (res.headers.get("content-type") === "application/json") {
+            if (res.headers.get("content-type").startsWith("application/json")) {
                 return res.json();
             }
-            return Promise.reject(res.status);
+            throw new Error(`Not JSON ${res.status}`);
         });
     }
 
