@@ -1,16 +1,22 @@
 {
-    "author": {
-        "name": "Brett Adams",
-        "url": "https://github.com/Bre77"
-    },
     "name": "tesla-fleet-api",
-    "module": "tesla-fleet-api",
     "version": "1.0.0",
-    "description": "",
-    "main": "index.js",
-    "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1"
+    "author": {
+        "name": "Teslemetry",
+        "email": "hello@teslemetry.com",
+        "url": "https://teslemetry.com"
     },
-    "keywords": [],
-    "license": "Apache-2.0"
+    "type": "module",
+    "devDependencies": {
+        "@types/node": "^20.12.12",
+        "typescript": "^5.4.5"
+    },
+    "scripts": {
+        "prepare": "tsc",
+        "watch": "tsc -w"
+    },
+    "files": [
+        "dist",
+        "src"
+    ]
 }
