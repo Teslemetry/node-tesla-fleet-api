@@ -1,0 +1,11 @@
+{
+    "compilerOptions": {
+        "module": "system",
+        "noImplicitAny": true,
+        "removeComments": true,
+        "preserveConstEnums": true,
+        "outFile": "tesla-fleet-api.js",
+        "sourceMap": true
+    },
+    "include": ["src/*"]
+}
