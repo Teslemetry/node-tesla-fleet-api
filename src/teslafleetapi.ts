@@ -1,12 +1,11 @@
-/*
-import Charging from './charging.ts';
-import Energy from './energy.ts';
-import Partner from './partner.ts';
-import User from './user.ts';
-import Vehicle from './vehicle.ts';
-import { raise_for_status, InvalidRegion, LibraryError, InvalidToken } from './exceptions.ts';*/
+import Charging from "./charging.js";
+import Energy from "./energy.js";
+//import Partner from './partner.js';
+//import User from './user.js';
+import Vehicle from "./vehicle.js";
 
-export type Method = "GET" | "POST" | "PUT" | "DELETE";
+import { Method } from "./types.js";
+
 export type Region = "na" | "eu" | "cn";
 
 const servers: Record<Region, string> = {
@@ -18,13 +17,11 @@ const servers: Record<Region, string> = {
 export default class TeslaFleetApi {
     server: string | null = null;
     accessToken: string | null;
-    /*
     charging?: Charging;
     energy?: Energy;
-    partner?: Partner;
-    user?: User;
-    vehicle?: Vehicle
-    */
+    //partner?: Partner;
+    //user?: User;
+    vehicle?: Vehicle;
 
     constructor(options: {
         accessToken?: string;
@@ -48,21 +45,22 @@ export default class TeslaFleetApi {
 
         console.debug(`Using server ${this.server}`);
 
-        /*if (chargingScope) {
-        this.charging = new Charging(this);
-    }
-    if (energyScope) {
-        this.energy = new Energy(this);
-    }
-    if (userScope) {
-        this.user = new User(this);
-    }
-    if (partnerScope) {
-        this.partner = new Partner(this);
-    }
-    if (vehicleScope) {
-        this.vehicle = new Vehicle(this);
-    }*/
+        if (options.chargingScope !== false) {
+            this.charging = new Charging(this);
+        }
+        if (options.energyScope !== false) {
+            this.energy = new Energy(this);
+        }
+        if (options.userScope !== false) {
+            //this.user = new User(this);
+        }
+        if (options.partnerScope !== false) {
+            //this.partner = new Partner(this);
+        }
+
+        if (options.vehicleScope !== false) {
+            this.vehicle = new Vehicle(this);
+        }
     }
 
     async _request(
