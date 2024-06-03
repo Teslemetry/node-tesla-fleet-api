@@ -1,3 +1,12 @@
+export type Scope =
+    | "user_data"
+    | "vehicle_device_data"
+    | "vehicle_cmds"
+    | "vehicle_charging_cmds"
+    | "energy_device_data"
+    | "energy_cmds"
+    | "offline_access"
+    | "openid";
 export type Method = "GET" | "POST" | "PUT" | "DELETE";
 
 export interface RequestFunction {

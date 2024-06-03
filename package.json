@@ -18,5 +18,6 @@
     "files": [
         "dist",
         "src"
-    ]
+    ],
+    "license": "Apache-2.0"
 }

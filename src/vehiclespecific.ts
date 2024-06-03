@@ -641,7 +641,7 @@ export default class VehicleSpecific {
     }
 
     /**
-     * Returns vehicles belonging to the account.
+     * Create a Vehicle class for a specific vehicle.
      * @param page Page number
      * @param per_page Number of items per page
      */

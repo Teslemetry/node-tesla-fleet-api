@@ -1,7 +1,7 @@
 import Charging from "./charging.js";
 import Energy from "./energy.js";
-//import Partner from './partner.js';
-//import User from './user.js';
+import Partner from "./partner.js";
+import User from "./user.js";
 import Vehicle from "./vehicle.js";
 
 import { Method } from "./types.js";
@@ -19,8 +19,8 @@ export default class TeslaFleetApi {
     accessToken: string | null;
     charging?: Charging;
     energy?: Energy;
-    //partner?: Partner;
-    //user?: User;
+    partner?: Partner;
+    user?: User;
     vehicle?: Vehicle;
 
     constructor(options: {
@@ -52,10 +52,10 @@ export default class TeslaFleetApi {
             this.energy = new Energy(this);
         }
         if (options.userScope !== false) {
-            //this.user = new User(this);
+            this.user = new User(this);
         }
         if (options.partnerScope !== false) {
-            //this.partner = new Partner(this);
+            this.partner = new Partner(this);
         }
 
         if (options.vehicleScope !== false) {
@@ -63,12 +63,7 @@ export default class TeslaFleetApi {
         }
     }
 
-    async _request(
-        method: Method,
-        path: string,
-        params: Record<string, any> | null = null,
-        json: Record<string, any> | null = null
-    ): Promise<Record<string, any>> {
+    async _request(method: Method, path: string, params: Record<string, any> | null = null, json: Record<string, any> | null = null): Promise<any> {
         if (!this.server) {
             throw new Error("Server was not set at init. Call findServer() first.");
         }
