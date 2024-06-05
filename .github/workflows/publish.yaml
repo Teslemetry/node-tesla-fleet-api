@@ -1,7 +1,10 @@
 name: Publish Package to npmjs
 on:
-    release:
-        types: [published]
+    push:
+        branches:
+            - main
+    create:
+        tags:
 jobs:
     build:
         runs-on: ubuntu-latest
@@ -16,3 +19,12 @@ jobs:
             - run: npm publish --provenance --access public
               env:
                   NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+            - name: Create GitHub Release
+              uses: actions/create-release@v1
+              with:
+                  tag_name: ${{ github.ref }}
+                  release_name: Release ${{ github.ref }}
+                  body: |
+                      This is an automated release created by the GitHub Actions workflow.
+                  draft: false
+                  prerelease: false
