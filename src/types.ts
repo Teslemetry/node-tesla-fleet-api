@@ -1,3 +1,11 @@
+export interface CommandResponse {
+    response: {
+        result: boolean;
+        reason: string;
+    };
+    error: string;
+}
+
 export type Scope =
     | "user_data"
     | "vehicle_device_data"

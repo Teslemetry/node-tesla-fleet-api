@@ -63,6 +63,14 @@ export default class TeslaFleetApi {
         }
     }
 
+    /**
+     * Make a request to the Tesla Fleet API.
+     * @param method
+     * @param path
+     * @param params
+     * @param json
+     * @returns
+     */
     async _request(method: Method, path: string, params: Record<string, any> | null = null, json: Record<string, any> | null = null): Promise<any> {
         if (!this.server) {
             throw new Error("Server was not set at init. Call findServer() first.");

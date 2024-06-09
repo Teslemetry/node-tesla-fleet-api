@@ -6,7 +6,9 @@ export default class Telemetry extends TeslaFleetApi {
         super({ accessToken, server: `https://api.tessie.com`, partnerScope: false, userScope: false });
     }
 
-    /** Get your approved Tesla scopes */
+    /**
+     * Get your approved Tesla scopes
+     */
     async tesla_scopes(): Promise<Scope[]> {
         return this._request("GET", "auth/tesla_scopes");
     }
