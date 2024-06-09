@@ -17,29 +17,14 @@ interface FleetTelemetryConfig {
 export default class VehicleSpecific {
     parent: Vehicle;
     vin: String;
+    model: String;
+    pre2021: Boolean;
 
     constructor(parent: Vehicle, vin: String) {
         this.parent = parent;
         this.vin = vin;
-    }
-
-    // Metadata
-
-    /**
-     * Returns the vehicle's model name.
-     * @returns
-     **/
-    model(): String {
-        return this.parent.model(this.vin);
-    }
-
-    /**
-     * Return if the vehicle was build before 2021 and cannot sleep without a break
-     * @param vin
-     * @returns
-     */
-    pre2021(): Boolean {
-        return this.parent.pre2021(this.vin);
+        this.model = this.parent.model(this.vin);
+        this.pre2021 = this.parent.pre2021(this.vin);
     }
 
     // Vehicle Commands
