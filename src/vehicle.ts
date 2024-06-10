@@ -23,7 +23,7 @@ export default class Vehicle {
      * @param vin
      * @returns
      */
-    specific(vin: String): VehicleSpecific {
+    specific(vin: string): VehicleSpecific {
         return new VehicleSpecific(this, vin);
     }
 
@@ -32,7 +32,7 @@ export default class Vehicle {
      * @param vin
      * @returns
      */
-    model(vin: String): String {
+    model(vin: string): string {
         return Models?.[vin[3]] || "Unknown";
     }
 
@@ -41,7 +41,7 @@ export default class Vehicle {
      * @param vin
      * @returns
      */
-    pre2021(vin: String): Boolean {
+    pre2021(vin: string): boolean {
         return (vin[3] === "S" || vin[3] === "X") && vin[9] < "L";
     }
 
@@ -705,7 +705,7 @@ export default class Vehicle {
      * @param vins list of Vehicle Identification Number
      * @returns
      */
-    async fleet_status(vins: Array<String>): Promise<Record<string, any>> {
+    async fleet_status(vins: Array<string>): Promise<Record<string, any>> {
         return this.parent._request("POST", "api/1/vehicles/fleet_status", null, { vins });
     }
 

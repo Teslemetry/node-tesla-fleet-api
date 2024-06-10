@@ -16,11 +16,11 @@ interface FleetTelemetryConfig {
 
 export default class VehicleSpecific {
     parent: Vehicle;
-    vin: String;
-    model: String;
-    pre2021: Boolean;
+    vin: string;
+    model: string;
+    pre2021: boolean;
 
-    constructor(parent: Vehicle, vin: String) {
+    constructor(parent: Vehicle, vin: string) {
         this.parent = parent;
         this.vin = vin;
         this.model = this.parent.model(this.vin);
@@ -615,7 +615,7 @@ export default class VehicleSpecific {
      * @param vins list of Vehicle Identification Number
      * @returns
      */
-    async fleet_status(vins: Array<String>): Promise<Record<string, any>> {
+    async fleet_status(vins: Array<string>): Promise<Record<string, any>> {
         return this.parent.parent._request("POST", "api/1/vehicles/fleet_status", null, { vins });
     }
 
