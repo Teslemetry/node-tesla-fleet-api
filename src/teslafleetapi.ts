@@ -98,7 +98,7 @@ export default class TeslaFleetApi {
             "X-Library": `node tesla_fleet_api`,
         };
 
-        const query = new URLSearchParams(params).toString();
+        const query = params ? "?" + new URLSearchParams(params).toString() : "";
 
         return fetch(`${this.server}/${path}${query}`, {
             method,
