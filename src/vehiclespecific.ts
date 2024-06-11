@@ -34,7 +34,7 @@ export default class VehicleSpecific {
      * @param which_trunk "front" or "rear"
      */
     async actuate_truck(which_trunk: Trunk): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/actuate_trunk`, null, { which_trunk });
+        return this.parent.actuate_truck(this.vin, which_trunk);
     }
 
     /**
@@ -42,105 +42,105 @@ export default class VehicleSpecific {
      * @param volume A floating point number from 0.0 to 11.0.
      */
     async adjust_volume(volume: number): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/adjust_volume`, null, { volume });
+        return this.parent.adjust_volume(this.vin, volume);
     }
 
     /**
      * Starts climate preconditioning.
      */
     async auto_conditioning_start(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/auto_conditioning_start`);
+        return this.parent.auto_conditioning_start(this.vin);
     }
 
     /**
      * Stops climate preconditioning.
      */
     async auto_conditioning_stop(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/auto_conditioning_stop`);
+        return this.parent.auto_conditioning_stop(this.vin);
     }
 
     /**
      * Cancels the countdown to install the vehicle software update.
      */
     async cancel_software_update(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/cancel_software_update`);
+        return this.parent.cancel_software_update(this.vin);
     }
 
     /**
      * Charges in max range mode -- we recommend limiting the use of this mode to long trips.
      */
     async charge_max_range(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/charge_max_range`);
+        return this.parent.charge_max_range(this.vin);
     }
 
     /**
      * Closes the charge port door.
      */
     async charge_port_door_close(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/charge_port_door_close`);
+        return this.parent.charge_port_door_close(this.vin);
     }
 
     /**
      * Opens the charge port door.
      */
     async charge_port_door_open(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/charge_port_door_open`);
+        return this.parent.charge_port_door_open(this.vin);
     }
 
     /**
      * Charges in Standard mode.
      */
     async charge_standard(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/charge_standard`);
+        return this.parent.charge_standard(this.vin);
     }
 
     /**
      * Starts charging the vehicle.
      */
     async charge_start(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/charge_start`);
+        return this.parent.charge_start(this.vin);
     }
 
     /**
      * Stops charging the vehicle.
      */
     async charge_stop(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/charge_stop`);
+        return this.parent.charge_stop(this.vin);
     }
 
     /**
      * Deactivates PIN to Drive and resets the associated PIN for vehicles running firmware versions 2023.44+. This command is only accessible to fleet managers or owners.
      */
     async clear_pin_to_drive_admin(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/clear_pin_to_drive_admin`);
+        return this.parent.clear_pin_to_drive_admin(this.vin);
     }
 
     /**
      * Locks the vehicle.
      */
     async door_lock(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/door_lock`);
+        return this.parent.door_lock(this.vin);
     }
 
     /**
      * Unlocks the vehicle.
      */
     async door_unlock(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/door_unlock`);
+        return this.parent.door_unlock(this.vin);
     }
 
     /**
      * Erases user's data from the user interface. Requires the vehicle to be in park.
      */
     async erase_user_data(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/erase_user_data`);
+        return this.parent.erase_user_data(this.vin);
     }
 
     /**
      * Briefly flashes the vehicle headlights. Requires the vehicle to be in park.
      */
     async flash_lights(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/flash_lights`);
+        return this.parent.flash_lights(this.vin);
     }
 
     /**
@@ -148,56 +148,56 @@ export default class VehicleSpecific {
      * @param enable `true` or `false`
      */
     async guest_mode(enable: boolean): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/guest_mode`, null, { enable });
+        return this.parent.guest_mode(this.vin);
     }
 
     /**
      * Honks the vehicle horn. Requires the vehicle to be in park.
      */
     async honk_horn(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/honk_horn`);
+        return this.parent.honk_horn(this.vin);
     }
 
     /**
      * Advances media player to next favorite track.
      */
     async media_next_fav(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/media_next_fav`);
+        return this.parent.media_next_fav(this.vin);
     }
 
     /**
      * Advances media player to next track.
      */
     async media_next_track(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/media_next_track`);
+        return this.parent.media_next_track(this.vin);
     }
 
     /**
      * Advances media player to previous favorite track.
      */
     async media_prev_fav(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/media_prev_fav`);
+        return this.parent.media_prev_fav(this.vin);
     }
 
     /**
      * Advances media player to previous track.
      */
     async media_prev_track(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/media_prev_track`);
+        return this.parent.media_prev_track(this.vin);
     }
 
     /**
      * Toggles current play/pause state.
      */
     async media_toggle_playback(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/media_toggle_playback`);
+        return this.parent.media_toggle_playback(this.vin);
     }
 
     /**
      * Turns the volume down by one.
      */
     async media_volume_down(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/media_volume_down`);
+        return this.parent.media_volume_down(this.vin);
     }
 
     /**
@@ -207,7 +207,7 @@ export default class VehicleSpecific {
      * @param order Order of multiple stops
      */
     async navigation_gps_request(lat: number, lon: number, order?: number): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/navigation_gps_request`, null, { lat, lon, order });
+        return this.parent.navigation_gps_request(this.vin, lat, lon, order);
     }
 
     /**
@@ -217,14 +217,7 @@ export default class VehicleSpecific {
      * @param timestamp_ms
      */
     async navigation_request(value: string, locale: string, type: string = "share_ext_content_raw"): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/navigation_request`, null, {
-            type,
-            locale,
-            timestamp_ms: String(Date.now()),
-            value: {
-                "android.intent.extra.TEXT": value,
-            },
-        });
+        return this.parent.navigation_request(this.vin, value, locale, type);
     }
 
     /**
@@ -234,7 +227,7 @@ export default class VehicleSpecific {
      * @returns
      */
     async navigation_sc_request(id: number, order?: number): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/navigation_sc_request`, null, { id, order });
+        return this.parent.navigation_sc_request(this.vin, id, order);
     }
 
     /**
@@ -243,13 +236,7 @@ export default class VehicleSpecific {
      * @param auto_climate_on `true` or `false`
      */
     async remote_auto_seat_climate_request(auto_seat_position: Seat | number, auto_climate_on: boolean): Promise<CommandResponse> {
-        if (typeof auto_seat_position === "string") {
-            auto_seat_position = Seats[auto_seat_position];
-        }
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/remote_auto_seat_climate_request`, null, {
-            auto_seat_position,
-            auto_climate_on,
-        });
+        return this.parent.remote_auto_seat_climate_request(this.vin, auto_seat_position, auto_climate_on);
     }
 
     /**
@@ -257,7 +244,7 @@ export default class VehicleSpecific {
      * @param on `true` or `false`
      */
     async remote_auto_steering_wheel_heat_climate_request(on: boolean): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/remote_auto_steering_wheel_heat_climate_request`, null, { on });
+        return this.parent.remote_auto_steering_wheel_heat_climate_request(this.vin, on);
     }
 
     /**
@@ -265,7 +252,7 @@ export default class VehicleSpecific {
      * @param sound Fart is `0`, Locate ping is `2000`
      */
     async remote_boombox(sound: number = 0): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/remote_boombox`, null, { sound });
+        return this.parent.remote_boombox(this.vin, sound);
     }
 
     /**
@@ -274,13 +261,7 @@ export default class VehicleSpecific {
      * @param seat_cooler_level Cooling level
      */
     async remote_seat_cooler_request(seat_position: Seat | number, seat_cooler_level: Level): Promise<CommandResponse> {
-        if (typeof seat_position === "string") {
-            seat_position = Seats[seat_position];
-        }
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/remote_seat_cooler_request`, null, {
-            seat_position,
-            seat_cooler_level,
-        });
+        return this.parent.remote_seat_cooler_request(this.vin, seat_position, seat_cooler_level);
     }
 
     /**
@@ -289,20 +270,14 @@ export default class VehicleSpecific {
      * @param seat_heater_level Heating level
      */
     async remote_seat_heater_request(seat_position: Seat | number, seat_heater_level: Level): Promise<CommandResponse> {
-        if (typeof seat_position === "string") {
-            seat_position = Seats[seat_position];
-        }
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/remote_seat_heater_request`, null, {
-            seat_position,
-            seat_heater_level,
-        });
+        this.parent.remote_auto_seat_climate_request(this.vin, seat_position, false);
     }
 
     /**
      * Starts the vehicle remotely. Requires keyless driving to be enabled.
      */
     async remote_start_drive(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/remote_start_drive`);
+        return this.parent.remote_start_drive(this.vin);
     }
 
     /**
@@ -310,7 +285,7 @@ export default class VehicleSpecific {
      * @param level Heating level
      */
     async remote_steering_wheel_heat_level_request(level: Level): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/remote_steering_wheel_heat_level_request`, null, { level });
+        return this.parent.remote_steering_wheel_heat_level_request(this.vin, level);
     }
 
     /**
@@ -318,14 +293,14 @@ export default class VehicleSpecific {
      * @param on `true` or `false`
      */
     async remote_steering_wheel_heater_request(on: boolean): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/remote_steering_wheel_heater_request`, null, { on });
+        return this.parent.remote_steering_wheel_heater_request(this.vin, on);
     }
 
     /**
      * Removes PIN to Drive. Requires the car to be in Pin to Drive mode and not in Valet mode. Note that this only works if PIN to Drive is not active. This command also requires the Tesla Vehicle Command Protocol - for more information, please see refer to the documentation here.
      */
     async reset_pin_to_drive_pin(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/reset_pin_to_drive_pin`);
+        return this.parent.reset_pin_to_drive_pin(this.vin);
     }
 
     /**
@@ -340,7 +315,7 @@ export default class VehicleSpecific {
      * @param offset_sec Offset in seconds
      */
     async schedule_software_update(offset_sec: number): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/schedule_software_update`, null, { offset_sec });
+        return this.parent.schedule_software_update(this.vin, offset_sec);
     }
 
     /**
@@ -349,7 +324,7 @@ export default class VehicleSpecific {
      * @param manual_override `true` or `false`
      */
     async set_bioweapon_mode(on: boolean, manual_override: boolean): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/set_bioweapon_mode`, null, { on, manual_override });
+        return this.parent.set_bioweapon_mode(this.vin, on, manual_override);
     }
 
     /**
@@ -358,7 +333,7 @@ export default class VehicleSpecific {
      * @param fan_only `true` or `false`
      */
     async set_cabin_overheat_protection(on: boolean, fan_only: boolean): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/set_cabin_overheat_protection`, null, { on, fan_only });
+        return this.parent.set_cabin_overheat_protection(this.vin, on, fan_only);
     }
 
     /**
@@ -366,7 +341,7 @@ export default class VehicleSpecific {
      * @param percent Charge limit percentage typically between 50-100
      */
     async set_charge_limit(percent: number): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/set_charge_limit`, null, { percent });
+        return this.parent.set_charge_limit(this.vin, percent);
     }
 
     /**
@@ -374,7 +349,7 @@ export default class VehicleSpecific {
      * @param percent Current limit in Amps typically between 5-32
      */
     async set_charging_amps(charging_amps: number): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/set_charging_amps`, null, { charging_amps });
+        return this.parent.set_charging_amps(this.vin, charging_amps);
     }
 
     /**
@@ -382,10 +357,7 @@ export default class VehicleSpecific {
      * @param climate_keeper_mode `0` is Off, `1` is Keep, `2` is Dog, `3` is Camp
      */
     async set_climate_keeper_mode(climate_keeper_mode: number | ClimateMode): Promise<CommandResponse> {
-        if (typeof climate_keeper_mode === "string") {
-            climate_keeper_mode = ClimateModes[climate_keeper_mode];
-        }
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/set_climate_keeper_mode`, null, { climate_keeper_mode });
+        return this.parent.set_climate_keeper_mode(this.vin, climate_keeper_mode);
     }
 
     /**
@@ -393,13 +365,7 @@ export default class VehicleSpecific {
      * @param cop_temp Integer representing Low (0/30C/90F), Medium (1/35C/95F), or High (2/40C/100F)
      */
     async set_cop_temp(cop_temp: 0 | 1 | 2 | 30 | 35 | 40 | 90 | 95 | 100): Promise<CommandResponse> {
-        if (cop_temp >= 90) {
-            cop_temp = (cop_temp - 90) / 5;
-        } else if (cop_temp >= 30) {
-            cop_temp = (cop_temp - 30) / 5;
-        }
-
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/set_cop_temp`, null, { cop_temp });
+        return this.parent.set_cop_temp(this.vin, cop_temp);
     }
 
     /**
@@ -408,7 +374,7 @@ export default class VehicleSpecific {
      * @param password Four-digit passcode
      */
     async set_pin_to_drive(on: boolean, password: string | number): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/set_pin_to_drive`, null, { on, password: String(password) });
+        return this.parent.set_pin_to_drive(this.vin, on, password);
     }
 
     /**
@@ -418,7 +384,7 @@ export default class VehicleSpecific {
      * @param manual_override `true` or `false`
      */
     async set_preconditioning_max(on: boolean, manual_override: boolean): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/set_preconditioning_max`, null, { on, manual_override });
+        return this.parent.set_preconditioning_max(this.vin, on, manual_override);
     }
 
     /**
@@ -427,7 +393,7 @@ export default class VehicleSpecific {
      * @param time Minutes after midnight
      */
     async set_scheduled_charging(enable: boolean, time: number): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/set_scheduled_charging`, null, { enable, time });
+        return this.parent.set_scheduled_charging(this.vin, enable, time);
     }
 
     /**
@@ -449,15 +415,16 @@ export default class VehicleSpecific {
         off_peak_charging_weekdays_only: boolean = false,
         end_off_peak_time: number = 0
     ): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/set_scheduled_departure`, null, {
+        return this.parent.set_scheduled_departure(
+            this.vin,
             enable,
             preconditioning_enabled,
             preconditioning_weekdays_only,
             departure_time,
             off_peak_charging_enabled,
             off_peak_charging_weekdays_only,
-            end_off_peak_time,
-        });
+            end_off_peak_time
+        );
     }
 
     /**
@@ -465,7 +432,7 @@ export default class VehicleSpecific {
      * @param on `true` or `false`
      */
     async set_sentry_mode(on: boolean): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/set_sentry_mode`, null, { on });
+        return this.parent.set_sentry_mode(this.vin, on);
     }
 
     /**
@@ -752,8 +719,7 @@ export default class VehicleSpecific {
      * @param endpoints
      */
     async vehicle_data(endpoints?: VehicleDataEndpoint[] | string): Promise<Record<string, any>> {
-        if (typeof endpoints === "object") endpoints = endpoints.join(";");
-        return this.parent.parent._request("GET", `api/1/vehicles/${this.vin}/vehicle_data`, null, { endpoints });
+        return this.parent.vehicle_data(this.vin, endpoints);
     }
 
     /**

@@ -856,7 +856,7 @@ export default class Vehicle {
      */
     async vehicle_data(vehicle_tag: string | number, endpoints?: VehicleDataEndpoint[] | string): Promise<Record<string, any>> {
         if (typeof endpoints === "object") endpoints = endpoints.join(";");
-        return this.parent._request("GET", `api/1/vehicles/${vehicle_tag}/vehicle_data`, null, { endpoints });
+        return this.parent._request("GET", `api/1/vehicles/${vehicle_tag}/vehicle_data`, { endpoints });
     }
 
     /**
