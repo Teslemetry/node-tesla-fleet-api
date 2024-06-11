@@ -148,7 +148,7 @@ export default class VehicleSpecific {
      * @param enable `true` or `false`
      */
     async guest_mode(enable: boolean): Promise<CommandResponse> {
-        return this.parent.guest_mode(this.vin);
+        return this.parent.guest_mode(this.vin, enable);
     }
 
     /**
