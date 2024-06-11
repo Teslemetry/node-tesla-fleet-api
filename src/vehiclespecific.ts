@@ -270,7 +270,7 @@ export default class VehicleSpecific {
      * @param seat_heater_level Heating level
      */
     async remote_seat_heater_request(seat_position: Seat | number, seat_heater_level: Level): Promise<CommandResponse> {
-        this.parent.remote_auto_seat_climate_request(this.vin, seat_position, false);
+        return this.parent.remote_seat_heater_request(this.vin, seat_position, seat_heater_level);
     }
 
     /**
@@ -307,7 +307,7 @@ export default class VehicleSpecific {
      * Removes PIN for Valet Mode.
      */
     async reset_valet_pin(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/reset_valet_pin`);
+        return this.parent.reset_valet_pin(this.vin);
     }
 
     /**
@@ -441,7 +441,7 @@ export default class VehicleSpecific {
      * @param passenger_temp Passenger temperature
      */
     async set_temps(driver_temp: number, passenger_temp: number): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/set_temps`, null, { driver_temp, passenger_temp });
+        return this.parent.set_temps(this.vin, driver_temp, passenger_temp);
     }
 
     /**
@@ -450,7 +450,7 @@ export default class VehicleSpecific {
      * @param password Four-digit passcode
      */
     async set_valet_mode(on: boolean, password: string | number): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/set_valet_mode`, null, { on, password: String(password) });
+        return this.parent.set_valet_mode(this.vin, on, password);
     }
 
     /**
@@ -458,7 +458,7 @@ export default class VehicleSpecific {
      * @param vehicle_name New name
      */
     async set_vehicle_name(vehicle_name: string): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/set_vehicle_name`, null, { vehicle_name });
+        return this.parent.set_vehicle_name(this.vin, vehicle_name);
     }
 
     /**
@@ -466,7 +466,7 @@ export default class VehicleSpecific {
      * @param pin Four-digit PIN
      */
     async speed_limit_activate(pin: string | number): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/speed_limit_activate`, null, { pin: String(pin) });
+        return this.parent.speed_limit_activate(this.vin, pin);
     }
 
     /**
@@ -474,14 +474,14 @@ export default class VehicleSpecific {
      * @param pin Four-digit PIN
      */
     async speed_limit_clear_pin(pin: string | number): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/speed_limit_clear_pin`, null, { pin: String(pin) });
+        return this.parent.speed_limit_clear_pin(this.vin, pin);
     }
 
     /**
      * Deactivates Speed Limit Mode and resets the associated PIN for vehicles running firmware versions 2023.38+. This command is only accessible to fleet managers or owners.
      */
     async speed_limit_clear_pin_admin(): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/speed_limit_clear_pin_admin`);
+        return this.parent.speed_limit_clear_pin_admin(this.vin);
     }
 
     /**
@@ -489,7 +489,7 @@ export default class VehicleSpecific {
      * @param pin Four-digit PIN
      */
     async speed_limit_deactivate(pin: string | number): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/speed_limit_deactivate`, null, { pin: String(pin) });
+        return this.parent.speed_limit_deactivate(this.vin, pin);
     }
 
     /**
@@ -497,7 +497,7 @@ export default class VehicleSpecific {
      * @param limit_mph Maximum speed in MPH
      */
     async speed_limit_set_limit(limit_mph: number): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/speed_limit_set_limit`, null, { limit_mph });
+        return this.parent.speed_limit_set_limit(this.vin, limit_mph);
     }
 
     /**
@@ -505,7 +505,7 @@ export default class VehicleSpecific {
      * @param state "stop", "close" or "vent"
      */
     async sun_roof_control(state: "stop" | "close" | "vent"): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/sun_roof_control`, null, { state });
+        return this.parent.sun_roof_control(this.vin, state);
     }
 
     /**
@@ -513,7 +513,7 @@ export default class VehicleSpecific {
      * @param note Drive note
      */
     async take_drivenote(note: string): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/take_drivenote`, null, { note });
+        return this.parent.take_drivenote(this.vin, note);
     }
 
     /**
@@ -523,7 +523,7 @@ export default class VehicleSpecific {
      * @param lon Longitude
      */
     async trigger_homelink(lat: number, lon: number, token?: string): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/trigger_homelink`, null, { token, lat, lon });
+        return this.parent.trigger_homelink(this.vin, lat, lon, token);
     }
 
     /**
@@ -531,7 +531,7 @@ export default class VehicleSpecific {
      * @param calendar_data Calendar data
      */
     async upcoming_calendar_entries(calendar_data: string): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/upcoming_calendar_entries`, null, { calendar_data });
+        return this.parent.upcoming_calendar_entries(this.vin, calendar_data);
     }
 
     /**
@@ -541,7 +541,7 @@ export default class VehicleSpecific {
      * @param lon Longitude
      */
     async window_control(command: "vent" | "close", lat: number, lon: number): Promise<CommandResponse> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/command/window_control`, null, { command, lat, lon });
+        return this.parent.window_control(this.vin, command, lat, lon);
     }
 
     // Vehicle Endpoints
@@ -550,7 +550,7 @@ export default class VehicleSpecific {
      * Returns all allowed drivers for a vehicle. This endpoint is only available for the vehicle owner.
      */
     async drivers(): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", `api/1/vehicles/${this.vin}/drivers`);
+        return this.parent.drivers(this.vin);
     }
 
     /**
@@ -558,23 +558,23 @@ export default class VehicleSpecific {
      * @param share_user_id
      */
     async drivers_remove(share_user_id?: number): Promise<Record<string, any>> {
-        return this.parent.parent._request("DELETE", `api/1/vehicles/${this.vin}/drivers`, null, { share_user_id });
+        return this.parent.drivers_remove(this.vin, share_user_id);
     }
 
     /**
      * Returns eligible vehicle subscriptions.
      * @param vin Vehicle Identification Number
      */
-    async eligible_subscriptions(vin: string): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", "/api/1/dx/vehicles/subscriptions/eligibility", { vin });
+    async eligible_subscriptions(): Promise<Record<string, any>> {
+        return this.parent.eligible_subscriptions(this.vin);
     }
 
     /**
      * Returns eligibile vehicle upgrades.
      * @param vin Vehicle Identification Number
      */
-    async eligible_upgrades(vin: string): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", "/api/1/dx/vehicles/upgrades/eligibility", { vin });
+    async eligible_upgrades(): Promise<Record<string, any>> {
+        return this.parent.eligible_upgrades(this.vin);
     }
 
     /**
@@ -582,8 +582,8 @@ export default class VehicleSpecific {
      * @param vins list of Vehicle Identification Number
      * @returns
      */
-    async fleet_status(vins: Array<string>): Promise<Record<string, any>> {
-        return this.parent.parent._request("POST", "api/1/vehicles/fleet_status", null, { vins });
+    async fleet_status(): Promise<Record<string, any>> {
+        return this.parent.fleet_status([this.vin]);
     }
 
     /**
@@ -592,7 +592,10 @@ export default class VehicleSpecific {
      * @returns
      */
     async fleet_telemetry_config(config: FleetTelemetryConfig): Promise<Record<string, any>> {
-        return this.parent.parent._request("POST", "api/1/vehicles/fleet_telemetry_config", null, { vins: [this.vin], config });
+        return this.parent.fleet_telemetry_config({
+            vins: [this.vin],
+            config,
+        });
     }
 
     /**
@@ -600,7 +603,7 @@ export default class VehicleSpecific {
      * @returns
      */
     async fleet_telemetry_config_delete(): Promise<Record<string, any>> {
-        return this.parent.parent._request("DELETE", `api/1/vehicles/${this.vin}/fleet_telemetry_config`);
+        return this.parent.fleet_telemetry_config_delete(this.vin);
     }
 
     /**
@@ -608,23 +611,14 @@ export default class VehicleSpecific {
      * @returns
      */
     async fleet_telemetry_config_get(): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", `api/1/vehicles/${this.vin}/fleet_telemetry_config`);
-    }
-
-    /**
-     * Create a Vehicle class for a specific vehicle.
-     * @param page Page number
-     * @param per_page Number of items per page
-     */
-    async list(page?: number, per_page?: number): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", "api/1/vehicles", { page, per_page });
+        return this.parent.fleet_telemetry_config_get(this.vin);
     }
 
     /**
      * Returns whether or not mobile access is enabled for the vehicle.
      */
     async mobile_enabled(): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", `api/1/vehicles/${this.vin}/mobile_enabled`);
+        return this.parent.mobile_enabled(this.vin);
     }
 
     /**
@@ -634,7 +628,7 @@ export default class VehicleSpecific {
      * @param detail
      */
     async nearby_charging_sites(count?: number, radius?: number, detail?: boolean): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", `api/1/vehicles/${this.vin}/nearby_charging_sites`, { count, radius, detail });
+        return this.parent.nearby_charging_sites(this.vin, count, radius, detail);
     }
 
     /**
@@ -642,14 +636,14 @@ export default class VehicleSpecific {
      * @param vin Vehicle Identification Number
      */
     async options(vin: string): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", "api/1/dx/vehicles/options", { vin });
+        return this.parent.options(this.vin);
     }
 
     /**
      * List of recent alerts
      */
     async recent_alerts(): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", `api/1/vehicles/${this.vin}/recent_alerts`);
+        return this.parent.recent_alerts(this.vin);
     }
 
     /**
@@ -659,36 +653,28 @@ export default class VehicleSpecific {
      */
 
     async release_notes(staged?: boolean, language?: string): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", `api/1/vehicles/${this.vin}/release_notes`, { staged, language });
+        return this.parent.release_notes(this.vin, staged, language);
     }
 
     /**
      * Returns service data.
      */
     async service_data(): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", `api/1/vehicles/${this.vin}/service_data`);
+        return this.parent.service_data(this.vin);
     }
 
     /**
      * Returns the share invites for a vehicle.
      */
     async share_invites(): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", `api/1/vehicles/${this.vin}/invitations`);
+        return this.parent.share_invites(this.vin);
     }
 
     /**
      * Creates a share invite for a vehicle.
      */
     async share_invites_create(): Promise<Record<string, any>> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/invitations`);
-    }
-
-    /**
-     * Redeems a share invite.
-     * @param code
-     */
-    async share_invites_redeem(code: string): Promise<Record<string, any>> {
-        return this.parent.parent._request("POST", "api/1/invitations/redeem", { code });
+        return this.parent.share_invites_create(this.vin);
     }
 
     /**
@@ -696,7 +682,7 @@ export default class VehicleSpecific {
      * @param id
      */
     async share_invites_revoke(id: string): Promise<Record<string, any>> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/invitations/${id}/revoke`);
+        return this.parent.share_invites_revoke(this.vin, id);
     }
 
     /**
@@ -704,14 +690,14 @@ export default class VehicleSpecific {
      * @param routable_message
      */
     async signed_command(routable_message: string): Promise<Record<string, any>> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/signed_command`, null, { routable_message });
+        return this.parent.signed_command(this.vin, routable_message);
     }
 
     /**
      * Returns information about a vehicle.
      */
     async vehicle(): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", `api/1/vehicles/${this.vin}`);
+        return this.parent.vehicle(this.vin);
     }
 
     /**
@@ -726,14 +712,14 @@ export default class VehicleSpecific {
      * Wakes the vehicle from sleep, which is a state to minimize idle energy consumption.
      */
     async wake_up(): Promise<Record<string, any>> {
-        return this.parent.parent._request("POST", `api/1/vehicles/${this.vin}/wake_up`);
+        return this.parent.wake_up(this.vin);
     }
 
     /**
      * Returns warranty details.
      * @param vin
      */
-    async warranty_details(vin: string): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", "api/1/dx/warranty/details", { vin });
+    async warranty_details(): Promise<Record<string, any>> {
+        return this.parent.warranty_details(this.vin);
     }
 }

@@ -16,7 +16,7 @@ export default class EnergySpecific {
      * @returns
      */
     async backup(backup_reserve_percent: number): Promise<Record<string, any>> {
-        return this.parent.parent._request("POST", `api/1/energy_sites/${this.energy_site_id}/backup`, null, { backup_reserve_percent });
+        return this.parent.backup(this.energy_site_id, backup_reserve_percent);
     }
 
     /**
@@ -29,13 +29,7 @@ export default class EnergySpecific {
      * @returns
      */
     async backup_history(kind: string, start_date: string, end_date: string, period: string, time_zone: string): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", `api/1/energy_sites/${this.energy_site_id}/calendar_history`, null, {
-            kind,
-            start_date,
-            end_date,
-            period,
-            time_zone,
-        });
+        return this.parent.backup_history(this.energy_site_id, kind, start_date, end_date, period, time_zone);
     }
 
     /**
@@ -47,12 +41,7 @@ export default class EnergySpecific {
      * @returns
      */
     async charge_history(kind: string, start_date: string, end_date: string, time_zone: string): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", `api/1/energy_sites/${this.energy_site_id}/telemetry_history`, null, {
-            kind,
-            start_date,
-            end_date,
-            time_zone,
-        });
+        return this.parent.charge_history(this.energy_site_id, kind, start_date, end_date, time_zone);
     }
 
     /**
@@ -65,13 +54,7 @@ export default class EnergySpecific {
      * @returns
      */
     async energy_history(kind: string, start_date: string, end_date: string, period: string, time_zone: string): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", `api/1/energy_sites/${this.energy_site_id}/calendar_history`, null, {
-            kind,
-            start_date,
-            end_date,
-            period,
-            time_zone,
-        });
+        return this.parent.energy_history(this.energy_site_id, kind, start_date, end_date, period, time_zone);
     }
 
     /**
@@ -84,10 +67,7 @@ export default class EnergySpecific {
         disallow_charge_from_grid_with_solar_installed: boolean | null = null,
         customer_preferred_export_rule: string | null = null
     ): Promise<Record<string, any>> {
-        return this.parent.parent._request("POST", `api/1/energy_sites/${this.energy_site_id}/grid_import_export`, null, {
-            disallow_charge_from_grid_with_solar_installed,
-            customer_preferred_export_rule,
-        });
+        return this.parent.grid_import_export(this.energy_site_id, disallow_charge_from_grid_with_solar_installed, customer_preferred_export_rule);
     }
 
     /**
@@ -95,7 +75,7 @@ export default class EnergySpecific {
      * @returns
      */
     async live_status(): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", `api/1/energy_sites/${this.energy_site_id}/live_status`);
+        return this.parent.live_status(this.energy_site_id);
     }
 
     /**
@@ -104,9 +84,7 @@ export default class EnergySpecific {
      * @returns
      */
     async off_grid_vehicle_charging_reserve(off_grid_vehicle_charging_reserve_percent: number): Promise<Record<string, any>> {
-        return this.parent.parent._request("POST", `api/1/energy_sites/${this.energy_site_id}/off_grid_vehicle_charging_reserve`, null, {
-            off_grid_vehicle_charging_reserve_percent,
-        });
+        return this.parent.off_grid_vehicle_charging_reserve(this.energy_site_id, off_grid_vehicle_charging_reserve_percent);
     }
 
     /**
@@ -115,14 +93,14 @@ export default class EnergySpecific {
      * @returns
      */
     async operation(default_real_mode: string): Promise<Record<string, any>> {
-        return this.parent.parent._request("POST", `api/1/energy_sites/${this.energy_site_id}/operation`, null, { default_real_mode });
+        return this.parent.operation(this.energy_site_id, default_real_mode);
     }
 
     /**
      * Returns information about the site. Things like assets (has solar, etc), settings (backup reserve, etc), and features (storm_mode_capable, etc).
      */
     async site_info(): Promise<Record<string, any>> {
-        return this.parent.parent._request("GET", `api/1/energy_sites/${this.energy_site_id}/site_info`);
+        return this.parent.site_info(this.energy_site_id);
     }
 
     /**
@@ -131,6 +109,6 @@ export default class EnergySpecific {
      * @returns
      */
     async storm_mode(enabled: boolean): Promise<Record<string, any>> {
-        return this.parent.parent._request("POST", `api/1/energy_sites/${this.energy_site_id}/storm_mode`, null, { enabled });
+        return this.parent.storm_mode(this.energy_site_id, enabled);
     }
 }
