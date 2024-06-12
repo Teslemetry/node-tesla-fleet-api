@@ -1,10 +1,12 @@
 import { VehicleResponse } from "./vehicle.js";
 import { VehicleConfig } from "./vehicle_data.js";
 
-export type ProductsResponse = {
-    response: (VehicleProduct | EnergyProduct)[];
+export type ProductsData = {
+    response: ProductsResponse;
     count: number;
 };
+
+export type ProductsResponse = (VehicleProduct | EnergyProduct)[];
 
 export type VehicleProduct = VehicleResponse & {
     vehicle_config: VehicleConfig;
