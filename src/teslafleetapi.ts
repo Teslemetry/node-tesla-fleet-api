@@ -4,7 +4,7 @@ import Partner from "./partner.js";
 import User from "./user.js";
 import Vehicle from "./vehicle.js";
 
-import { ProductsResponse } from "./types/products.js";
+import { EnergyProduct, ProductsResponse, VehicleProduct } from "./types/products.js";
 
 type Region = "na" | "eu" | "cn";
 type Method = "GET" | "POST" | "PUT" | "DELETE";
@@ -14,6 +14,8 @@ const servers: Record<Region, string> = {
     eu: "https://fleet-api.prd.eu.vn.cloud.tesla.com",
     cn: "https://fleet-api.prd.cn.vn.cloud.tesla.cn",
 };
+
+export type ProductsByType = { vehicles: VehicleProduct[]; energy_sites: EnergyProduct[] };
 
 export default class TeslaFleetApi {
     server: string | null = null;
@@ -117,7 +119,22 @@ export default class TeslaFleetApi {
         });
     }
 
+    /**
+     * Returns products mapped to user.
+     * @returns An array of products including both vehicles and energy sites.
+     */
     async products(): Promise<ProductsResponse> {
-        return this._request("GET", "api/1/products").then(({ data }) => data.response);
+        return this._request("GET", "api/1/products").then((data) => data.response);
+    }
+
+    /**
+     * Return Tesla products separated into vehicles and energy_sites
+     * @returns A dictionary of vehicles and energy sites, each with an array of those products
+     */
+    async products_by_type(): Promise<ProductsByType> {
+        return this.products().then((products) => ({
+            vehicles: products.filter((product): product is VehicleProduct => "vin" in product),
+            energy_sites: products.filter((product): product is EnergyProduct => "energy_site_id" in product),
+        }));
     }
 }
