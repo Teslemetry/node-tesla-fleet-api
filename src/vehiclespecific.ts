@@ -1,4 +1,7 @@
-import { AlertTypes, ClimateMode, ClimateModes, CommandResponse, Level, Seat, Seats, Trunk, VehicleDataEndpoint } from "./types/index.js";
+import { AlertTypes, ClimateMode, ClimateModes, CommandResponse, Level, Seat, Seats, Trunk, VehicleDataEndpoint } from "./types/commands.js";
+import { OptionsResponse } from "./types/responses.js";
+import { VehicleResponse } from "./types/vehicle.js";
+import { VehicleDataResponse } from "./types/vehicle_data.js";
 import Vehicle from "./vehicle.js";
 
 interface FleetTelemetryConfig {
@@ -635,7 +638,7 @@ export default class VehicleSpecific {
      * Returns vehicle option details.
      * @param vin Vehicle Identification Number
      */
-    async options(vin: string): Promise<Record<string, any>> {
+    async options(vin: string): Promise<OptionsResponse> {
         return this.parent.options(this.vin);
     }
 
@@ -696,7 +699,7 @@ export default class VehicleSpecific {
     /**
      * Returns information about a vehicle.
      */
-    async vehicle(): Promise<Record<string, any>> {
+    async vehicle(): Promise<VehicleResponse> {
         return this.parent.vehicle(this.vin);
     }
 
@@ -704,7 +707,7 @@ export default class VehicleSpecific {
      * Makes a live call to the vehicle. This may return cached data if the vehicle is offline. For vehicles running firmware versions 2023.38+, location_data is required to fetch vehicle location. This will result in a location sharing icon to show on the vehicle UI.
      * @param endpoints
      */
-    async vehicle_data(endpoints?: VehicleDataEndpoint[] | string): Promise<Record<string, any>> {
+    async vehicle_data(endpoints?: VehicleDataEndpoint[] | string): Promise<VehicleDataResponse> {
         return this.parent.vehicle_data(this.vin, endpoints);
     }
 

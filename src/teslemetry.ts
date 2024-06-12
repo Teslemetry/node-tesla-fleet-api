@@ -1,5 +1,5 @@
 import TeslaFleetApi from "./teslafleetapi.js";
-import { Scope } from "./types/index.js";
+import { Scope } from "./types/commands.js";
 
 type Region = "na" | "eu" | "api";
 

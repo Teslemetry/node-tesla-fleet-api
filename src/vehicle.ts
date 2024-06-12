@@ -1,5 +1,6 @@
 import TeslaFleetApi from "./teslafleetapi.js";
-import { ClimateMode, ClimateModes, CommandResponse, FleetTelemetryConfig, Level, Seat, Seats, Trunk, VehicleDataEndpoint } from "./types/index.js";
+import { ClimateMode, ClimateModes, CommandResponse, FleetTelemetryConfig, Level, Seat, Seats, Trunk, VehicleDataEndpoint } from "./types/commands.js";
+import { OptionsResponse } from "./types/responses.js";
 import { VehicleResponse } from "./types/vehicle.js";
 import { VehicleDataResponse } from "./types/vehicle_data.js";
 import VehicleSpecific from "./vehiclespecific.js";
@@ -673,8 +674,8 @@ export default class Vehicle {
      * Returns all allowed drivers for a vehicle. This endpoint is only available for the vehicle owner.
      * @param vehicle_tag VIN or id field of a vehicle
      */
-    async drivers(vehicle_tag: string | number): Promise<Record<string, any>> {
-        return this.parent._request("GET", `api/1/vehicles/${vehicle_tag}/drivers`);
+    async drivers(vehicle_tag: string | number): Promise<Record<string, any>[]> {
+        return this.parent._request("GET", `api/1/vehicles/${vehicle_tag}/drivers`).then(({ response }) => response);
     }
 
     /**
@@ -770,8 +771,8 @@ export default class Vehicle {
      * Returns vehicle option details.
      * @param vin Vehicle Identification Number
      */
-    async options(vin: string): Promise<Record<string, any>> {
-        return this.parent._request("GET", "api/1/dx/vehicles/options", { vin });
+    async options(vin: string): Promise<OptionsResponse> {
+        return this.parent._request("GET", "api/1/dx/vehicles/options", { vin }).then(({ codes }) => codes);
     }
 
     /**

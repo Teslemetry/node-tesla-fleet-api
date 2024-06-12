@@ -3,7 +3,7 @@ export interface CommandResponse {
         result: boolean;
         reason: string;
     };
-    error: string;
+    error?: string;
 }
 
 export type Scope =
@@ -15,8 +15,6 @@ export type Scope =
     | "energy_cmds"
     | "offline_access"
     | "openid";
-
-
 
 // Vehicles
 

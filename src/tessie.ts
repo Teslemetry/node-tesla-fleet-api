@@ -1,5 +1,5 @@
 import TeslaFleetApi from "./teslafleetapi.js";
-import { Scope } from "./types/index.js";
+import { Scope } from "./types/commands.js";
 
 export default class Telemetry extends TeslaFleetApi {
     constructor(accessToken: string) {

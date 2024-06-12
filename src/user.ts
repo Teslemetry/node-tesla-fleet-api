@@ -1,5 +1,5 @@
 import TeslaFleetApi from "./teslafleetapi.js";
-import { CommandResponse } from "./types/index.js";
+import { CommandResponse } from "./types/commands.js";
 
 export default class User {
     parent: TeslaFleetApi;

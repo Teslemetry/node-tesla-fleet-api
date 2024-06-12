@@ -1,4 +1,4 @@
-import { CommandResponse } from "./types/index.js";
+import { CommandResponse } from "./types/commands.js";
 
 export const validate = async (body: CommandResponse): Promise<void> => {
     if (body?.error) {

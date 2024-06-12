@@ -1,5 +1,7 @@
 import EnergySpecific from "./energyspecific.js";
 import TeslaFleetApi from "./teslafleetapi.js";
+import { LiveStatusResponse } from "./types/live_status.js";
+import { SiteInfoResponse } from "./types/site_info.js";
 
 // Energy Class
 export default class Energy {
@@ -106,8 +108,8 @@ export default class Energy {
      * @param energy_site_id
      * @returns
      */
-    async live_status(energy_site_id: number): Promise<Record<string, any>> {
-        return this.parent._request("GET", `api/1/energy_sites/${energy_site_id}/live_status`);
+    async live_status(energy_site_id: number): Promise<LiveStatusResponse> {
+        return this.parent._request("GET", `api/1/energy_sites/${energy_site_id}/live_status`).then(({ data }) => data.response);
     }
 
     /**
@@ -137,8 +139,8 @@ export default class Energy {
      * @param energy_site_id ID field of an energy site from /api/1/products endpoint.
      * @returns
      */
-    async site_info(energy_site_id: number): Promise<Record<string, any>> {
-        return this.parent._request("GET", `api/1/energy_sites/${energy_site_id}/site_info`);
+    async site_info(energy_site_id: number): Promise<SiteInfoResponse> {
+        return this.parent._request("GET", `api/1/energy_sites/${energy_site_id}/site_info`).then(({ data }) => data.response);
     }
 
     /**

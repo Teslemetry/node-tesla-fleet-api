@@ -1,4 +1,6 @@
 import Energy from "./energy.js";
+import { LiveStatusResponse } from "./types/live_status.js";
+import { SiteInfoResponse } from "./types/site_info.js";
 
 // Energy Class
 export default class EnergySpecific {
@@ -74,7 +76,7 @@ export default class EnergySpecific {
      * Returns the live status of the site.
      * @returns
      */
-    async live_status(): Promise<Record<string, any>> {
+    async live_status(): Promise<LiveStatusResponse> {
         return this.parent.live_status(this.energy_site_id);
     }
 
@@ -99,7 +101,7 @@ export default class EnergySpecific {
     /**
      * Returns information about the site. Things like assets (has solar, etc), settings (backup reserve, etc), and features (storm_mode_capable, etc).
      */
-    async site_info(): Promise<Record<string, any>> {
+    async site_info(): Promise<SiteInfoResponse> {
         return this.parent.site_info(this.energy_site_id);
     }
 
