@@ -109,7 +109,7 @@ export default class Energy {
      * @returns
      */
     async live_status(energy_site_id: number): Promise<LiveStatusResponse> {
-        return this.parent._request("GET", `api/1/energy_sites/${energy_site_id}/live_status`).then(({ data }) => data.response);
+        return this.parent._request("GET", `api/1/energy_sites/${energy_site_id}/live_status`).then(({response}) => response);
     }
 
     /**
@@ -140,7 +140,7 @@ export default class Energy {
      * @returns
      */
     async site_info(energy_site_id: number): Promise<SiteInfoResponse> {
-        return this.parent._request("GET", `api/1/energy_sites/${energy_site_id}/site_info`).then(({ data }) => data.response);
+        return this.parent._request("GET", `api/1/energy_sites/${energy_site_id}/site_info`).then(({response}) => response);
     }
 
     /**

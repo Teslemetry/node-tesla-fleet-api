@@ -124,7 +124,7 @@ export default class TeslaFleetApi {
      * @returns An array of products including both vehicles and energy sites.
      */
     async products(): Promise<ProductsResponse> {
-        return this._request("GET", "api/1/products").then((data) => data.response);
+        return this._request("GET", "api/1/products").then(({response}) => response);
     }
 
     /**

@@ -849,7 +849,7 @@ export default class Vehicle {
      * @param vehicle_tag VIN or id field of a vehicle
      */
     async vehicle(vehicle_tag: string | number): Promise<VehicleResponse> {
-        return this.parent._request("GET", `api/1/vehicles/${vehicle_tag}`).then(({ data }) => data.response);
+        return this.parent._request("GET", `api/1/vehicles/${vehicle_tag}`).then(({ response }) => response);
     }
 
     /**
@@ -859,7 +859,7 @@ export default class Vehicle {
      */
     async vehicle_data(vehicle_tag: string | number, endpoints?: VehicleDataEndpoint[] | string): Promise<VehicleDataResponse> {
         if (typeof endpoints === "object") endpoints = endpoints.join(";");
-        return this.parent._request("GET", `api/1/vehicles/${vehicle_tag}/vehicle_data`, { endpoints }).then(({ data }) => data.response);
+        return this.parent._request("GET", `api/1/vehicles/${vehicle_tag}/vehicle_data`, { endpoints }).then(({ response }) => response);
     }
 
     /**
