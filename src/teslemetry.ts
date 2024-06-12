@@ -1,6 +1,16 @@
 import TeslaFleetApi from "./teslafleetapi.js";
+import { Scope } from "./types/index.js";
 
 type Region = "na" | "eu" | "api";
+
+type Test = { response: boolean };
+
+type Metadata = {
+    uid: string;
+    region: "NA" | "EU";
+    scopes: Scope[];
+    vins: string[];
+};
 
 export default class Telemetry extends TeslaFleetApi {
     constructor(accessToken: string, region: Region = "api") {
@@ -10,18 +20,18 @@ export default class Telemetry extends TeslaFleetApi {
     /**
      * Test the connection to Teslemetry
      */
-    async test() {
-        return this._request("GET", "/api/test");
+    async test(): Promise<Test> {
+        return this._request("GET", "/api/test").then(({ response }) => response);
     }
 
     /**
      * Get details about your Teslemetry account
      * @param update_region Update the server URL based on the region in the metadata
      */
-    async metadata(update_region = true) {
-        this._request("GET", "/api/metadata").then((metadata) => {
+    async metadata(update_region = true): Promise<Metadata> {
+        return this._request("GET", "/api/metadata").then((metadata) => {
             if (update_region) {
-                this.server = `https://${metadata.region}.teslemetry.com`;
+                this.server = `https://${metadata.region.toLowerCase()}.teslemetry.com`;
             }
             return metadata;
         });

@@ -4,9 +4,10 @@ import Partner from "./partner.js";
 import User from "./user.js";
 import Vehicle from "./vehicle.js";
 
-import { Method } from "./types.js";
+import { ProductsResponse } from "./types/products.js";
 
-export type Region = "na" | "eu" | "cn";
+type Region = "na" | "eu" | "cn";
+type Method = "GET" | "POST" | "PUT" | "DELETE";
 
 const servers: Record<Region, string> = {
     na: "https://fleet-api.prd.na.vn.cloud.tesla.com",
@@ -116,7 +117,7 @@ export default class TeslaFleetApi {
         });
     }
 
-    async products(): Promise<Record<string, any>> {
-        return this._request("GET", "api/1/products");
+    async products(): Promise<ProductsResponse> {
+        return this._request("GET", "api/1/products").then(({ data }) => data.response);
     }
 }

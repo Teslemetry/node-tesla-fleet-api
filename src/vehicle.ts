@@ -1,5 +1,7 @@
 import TeslaFleetApi from "./teslafleetapi.js";
-import { ClimateMode, ClimateModes, CommandResponse, FleetTelemetryConfig, Level, Seat, Seats, Trunk, VehicleDataEndpoint } from "./types.js";
+import { ClimateMode, ClimateModes, CommandResponse, FleetTelemetryConfig, Level, Seat, Seats, Trunk, VehicleDataEndpoint } from "./types/index.js";
+import { VehicleResponse } from "./types/vehicle.js";
+import { VehicleDataResponse } from "./types/vehicle_data.js";
 import VehicleSpecific from "./vehiclespecific.js";
 
 const Models: Record<string, string> = {
@@ -845,8 +847,8 @@ export default class Vehicle {
      * Returns information about a vehicle.
      * @param vehicle_tag VIN or id field of a vehicle
      */
-    async vehicle(vehicle_tag: string | number): Promise<Record<string, any>> {
-        return this.parent._request("GET", `api/1/vehicles/${vehicle_tag}`);
+    async vehicle(vehicle_tag: string | number): Promise<VehicleResponse> {
+        return this.parent._request("GET", `api/1/vehicles/${vehicle_tag}`).then(({ data }) => data.response);
     }
 
     /**
@@ -854,9 +856,9 @@ export default class Vehicle {
      * @param vehicle_tag VIN or id field of a vehicle
      * @param endpoints
      */
-    async vehicle_data(vehicle_tag: string | number, endpoints?: VehicleDataEndpoint[] | string): Promise<Record<string, any>> {
+    async vehicle_data(vehicle_tag: string | number, endpoints?: VehicleDataEndpoint[] | string): Promise<VehicleDataResponse> {
         if (typeof endpoints === "object") endpoints = endpoints.join(";");
-        return this.parent._request("GET", `api/1/vehicles/${vehicle_tag}/vehicle_data`, { endpoints });
+        return this.parent._request("GET", `api/1/vehicles/${vehicle_tag}/vehicle_data`, { endpoints }).then(({ data }) => data.response);
     }
 
     /**

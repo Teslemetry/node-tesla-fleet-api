@@ -1,4 +1,4 @@
-import { AlertTypes, ClimateMode, ClimateModes, CommandResponse, Level, Seat, Seats, Trunk, VehicleDataEndpoint } from "./types.js";
+import { AlertTypes, ClimateMode, ClimateModes, CommandResponse, Level, Seat, Seats, Trunk, VehicleDataEndpoint } from "./types/index.js";
 import Vehicle from "./vehicle.js";
 
 interface FleetTelemetryConfig {

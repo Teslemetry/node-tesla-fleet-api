@@ -15,11 +15,8 @@ export type Scope =
     | "energy_cmds"
     | "offline_access"
     | "openid";
-export type Method = "GET" | "POST" | "PUT" | "DELETE";
 
-export interface RequestFunction {
-    (method: Method, endpoint: string, data?: Record<string, any>): Promise<Record<string, any>>;
-}
+
 
 // Vehicles
 
