@@ -109,13 +109,10 @@ export default class TeslaFleetApi {
             body: json ? JSON.stringify(json) : null,
         }).then((res) => {
             console.debug(res.status);
-            if (!res.ok) {
-                throw new Error(`HTTP status code ${res.status}`);
-            }
-            if (res.headers.get("content-type").startsWith("application/json")) {
-                return res.json();
-            }
-            throw new Error(`Not JSON ${res.status}`);
+            return res
+                .json()
+                .then(res.ok ? Promise.resolve : Promise.reject)
+                .catch(() => Promise.reject("Not JSON"));
         });
     }
 
@@ -124,7 +121,7 @@ export default class TeslaFleetApi {
      * @returns An array of products including both vehicles and energy sites.
      */
     async products(): Promise<ProductsResponse> {
-        return this._request("GET", "api/1/products").then(({response}) => response);
+        return this._request("GET", "api/1/products").then(({ response }) => response);
     }
 
     /**
