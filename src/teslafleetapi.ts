@@ -111,7 +111,12 @@ export default class TeslaFleetApi {
             console.debug(res.status);
             return res
                 .json()
-                .then((data) => res.ok ? Promise.resolve(data) : Promise.reject(data), (e) => Promise.reject(e));
+                .then((data) => {
+                    if (res.ok) return data
+                    data.status = res.status;
+                    return Promise.reject(data)
+                }, (e) => Promise.reject(e)
+                )
         });
     }
 
