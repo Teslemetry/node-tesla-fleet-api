@@ -19,6 +19,12 @@
         "dist",
         "src"
     ],
+    "keywords":[
+        "tesla",
+        "tesla fleet api",
+        "teslemetry",
+        "tessie"
+    ],
     "main": "dist/index.js",
     "license": "Apache-2.0"
 }

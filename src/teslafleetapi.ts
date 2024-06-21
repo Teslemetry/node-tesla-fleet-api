@@ -114,7 +114,7 @@ export default class TeslaFleetApi {
                 .then((data) => {
                     console.debug("Data: ", data)
                     if (res.ok) return data
-                    return Promise.reject({ status: data.status, data })
+                    return Promise.reject({ status: res.status, data })
                 }, (e) => Promise.reject(e)
                 )
         });
