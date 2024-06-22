@@ -108,11 +108,10 @@ export default class TeslaFleetApi {
             headers,
             body: json ? JSON.stringify(json) : null,
         }).then((res) => {
-            console.debug("Status: ", res.status);
+
             return res
                 .json()
                 .then((data) => {
-                    console.debug("Data: ", data)
                     if (res.ok) return data
                     return Promise.reject({ status: res.status, data })
                 }, (e) => Promise.reject(e)
