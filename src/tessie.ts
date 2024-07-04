@@ -20,6 +20,10 @@ export default class Telemetry extends TeslaFleetApi {
         return this._request("GET", "auth/tesla_scopes").then(({ scopes }) => scopes)
     }
 
+    async metadata(): Promise<{ scopes: Scope[] }> {
+        return this._request("GET", "auth/tesla_scopes")
+    }
+
     async status(vin: string): Promise<"asleep" | "waiting_for_sleep" | "awake"> {
         return this._request("GET", `${vin}/status`).then(({ status }) => status);
     }
