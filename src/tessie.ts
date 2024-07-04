@@ -17,7 +17,7 @@ export default class Telemetry extends TeslaFleetApi {
      * Get your approved Tesla scopes
      */
     async tesla_scopes(): Promise<Scope[]> {
-        return this._request("GET", "auth/tesla_scopes");
+        return this._request("GET", "auth/tesla_scopes").then(({ scopes }) => scopes)
     }
 
     async status(vin: string): Promise<"asleep" | "waiting_for_sleep" | "awake"> {
