@@ -3,8 +3,8 @@ import Energy from "./energy.js";
 import Partner from "./partner.js";
 import User from "./user.js";
 import Vehicle from "./vehicle.js";
-
 import { EnergyProduct, ProductsResponse, VehicleProduct } from "./types/products.js";
+
 
 type Region = "na" | "eu" | "cn";
 type Method = "GET" | "POST" | "PUT" | "DELETE";
@@ -25,6 +25,7 @@ export default class TeslaFleetApi {
     partner?: Partner;
     user?: User;
     vehicle?: Vehicle;
+    debug: boolean = false;
 
     constructor(options: {
         accessToken?: string;
@@ -35,7 +36,9 @@ export default class TeslaFleetApi {
         partnerScope?: boolean;
         userScope?: boolean;
         vehicleScope?: boolean;
+        debug?: boolean;
     }) {
+        this.debug = !!options.debug
         this.accessToken = options.accessToken;
 
         if (options.server) {
@@ -46,7 +49,7 @@ export default class TeslaFleetApi {
             throw new Error("Either server or region must be provided.");
         }
 
-        console.debug(`Using server ${this.server}`);
+        this.debug && console.debug(`Using server ${this.server}`);
 
         if (options.chargingScope !== false) {
             this.charging = new Charging(this);
@@ -83,16 +86,16 @@ export default class TeslaFleetApi {
             throw new Error("GET requests cannot have a body.");
         }
 
-        console.debug(`Sending request to ${path}`);
+        this.debug && console.debug(`Sending request to ${path}`);
 
         // Remove null and undefined values from params and json
         if (params) {
             params = Object.fromEntries(Object.entries(params).filter(([_, v]) => v != null));
-            console.debug(`Parameters: ${JSON.stringify(params)}`);
+            this.debug && console.debug(`Parameters: ${JSON.stringify(params)}`);
         }
         if (json) {
             json = Object.fromEntries(Object.entries(json).filter(([_, v]) => v != null));
-            console.debug(`Body: ${JSON.stringify(json)}`);
+            this.debug && console.debug(`Body: ${JSON.stringify(json)}`);
         }
 
         const headers = {
