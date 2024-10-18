@@ -9,6 +9,7 @@
     "type": "module",
     "devDependencies": {
         "@types/node": "^20.12.12",
+        "ts-protoc-gen": "^0.15.0",
         "typescript": "^5.4.5"
     },
     "scripts": {
