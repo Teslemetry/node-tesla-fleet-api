@@ -11,6 +11,11 @@ export class KeyIdentity extends jspb.Message {
   getPublicKey_asB64(): string;
   setPublicKey(value: Uint8Array | string): void;
 
+  hasHandle(): boolean;
+  clearHandle(): void;
+  getHandle(): number;
+  setHandle(value: number): void;
+
   getIdentityTypeCase(): KeyIdentity.IdentityTypeCase;
   serializeBinary(): Uint8Array;
   toObject(includeInstance?: boolean): KeyIdentity.AsObject;
@@ -25,11 +30,13 @@ export class KeyIdentity extends jspb.Message {
 export namespace KeyIdentity {
   export type AsObject = {
     publicKey: Uint8Array | string,
+    handle: number,
   }
 
   export enum IdentityTypeCase {
     IDENTITY_TYPE_NOT_SET = 0,
     PUBLIC_KEY = 1,
+    HANDLE = 3,
   }
 }
 
@@ -223,6 +230,9 @@ export class SessionInfo extends jspb.Message {
   getStatus(): Session_Info_StatusMap[keyof Session_Info_StatusMap];
   setStatus(value: Session_Info_StatusMap[keyof Session_Info_StatusMap]): void;
 
+  getHandle(): number;
+  setHandle(value: number): void;
+
   serializeBinary(): Uint8Array;
   toObject(includeInstance?: boolean): SessionInfo.AsObject;
   static toObject(includeInstance: boolean, msg: SessionInfo): SessionInfo.AsObject;
@@ -240,6 +250,7 @@ export namespace SessionInfo {
     epoch: Uint8Array | string,
     clockTime: number,
     status: Session_Info_StatusMap[keyof Session_Info_StatusMap],
+    handle: number,
   }
 }
 

@@ -259,6 +259,9 @@ export class ClosureMoveRequest extends jspb.Message {
   getChargeport(): ClosureMoveType_EMap[keyof ClosureMoveType_EMap];
   setChargeport(value: ClosureMoveType_EMap[keyof ClosureMoveType_EMap]): void;
 
+  getTonneau(): ClosureMoveType_EMap[keyof ClosureMoveType_EMap];
+  setTonneau(value: ClosureMoveType_EMap[keyof ClosureMoveType_EMap]): void;
+
   serializeBinary(): Uint8Array;
   toObject(includeInstance?: boolean): ClosureMoveRequest.AsObject;
   static toObject(includeInstance: boolean, msg: ClosureMoveRequest): ClosureMoveRequest.AsObject;
@@ -278,6 +281,7 @@ export namespace ClosureMoveRequest {
     reartrunk: ClosureMoveType_EMap[keyof ClosureMoveType_EMap],
     fronttrunk: ClosureMoveType_EMap[keyof ClosureMoveType_EMap],
     chargeport: ClosureMoveType_EMap[keyof ClosureMoveType_EMap],
+    tonneau: ClosureMoveType_EMap[keyof ClosureMoveType_EMap],
   }
 }
 
@@ -599,7 +603,120 @@ export namespace UnsignedMessage {
   }
 }
 
+export class ClosureStatuses extends jspb.Message {
+  getFrontdriverdoor(): ClosureState_EMap[keyof ClosureState_EMap];
+  setFrontdriverdoor(value: ClosureState_EMap[keyof ClosureState_EMap]): void;
+
+  getFrontpassengerdoor(): ClosureState_EMap[keyof ClosureState_EMap];
+  setFrontpassengerdoor(value: ClosureState_EMap[keyof ClosureState_EMap]): void;
+
+  getReardriverdoor(): ClosureState_EMap[keyof ClosureState_EMap];
+  setReardriverdoor(value: ClosureState_EMap[keyof ClosureState_EMap]): void;
+
+  getRearpassengerdoor(): ClosureState_EMap[keyof ClosureState_EMap];
+  setRearpassengerdoor(value: ClosureState_EMap[keyof ClosureState_EMap]): void;
+
+  getReartrunk(): ClosureState_EMap[keyof ClosureState_EMap];
+  setReartrunk(value: ClosureState_EMap[keyof ClosureState_EMap]): void;
+
+  getFronttrunk(): ClosureState_EMap[keyof ClosureState_EMap];
+  setFronttrunk(value: ClosureState_EMap[keyof ClosureState_EMap]): void;
+
+  getChargeport(): ClosureState_EMap[keyof ClosureState_EMap];
+  setChargeport(value: ClosureState_EMap[keyof ClosureState_EMap]): void;
+
+  getTonneau(): ClosureState_EMap[keyof ClosureState_EMap];
+  setTonneau(value: ClosureState_EMap[keyof ClosureState_EMap]): void;
+
+  serializeBinary(): Uint8Array;
+  toObject(includeInstance?: boolean): ClosureStatuses.AsObject;
+  static toObject(includeInstance: boolean, msg: ClosureStatuses): ClosureStatuses.AsObject;
+  static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+  static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+  static serializeBinaryToWriter(message: ClosureStatuses, writer: jspb.BinaryWriter): void;
+  static deserializeBinary(bytes: Uint8Array): ClosureStatuses;
+  static deserializeBinaryFromReader(message: ClosureStatuses, reader: jspb.BinaryReader): ClosureStatuses;
+}
+
+export namespace ClosureStatuses {
+  export type AsObject = {
+    frontdriverdoor: ClosureState_EMap[keyof ClosureState_EMap],
+    frontpassengerdoor: ClosureState_EMap[keyof ClosureState_EMap],
+    reardriverdoor: ClosureState_EMap[keyof ClosureState_EMap],
+    rearpassengerdoor: ClosureState_EMap[keyof ClosureState_EMap],
+    reartrunk: ClosureState_EMap[keyof ClosureState_EMap],
+    fronttrunk: ClosureState_EMap[keyof ClosureState_EMap],
+    chargeport: ClosureState_EMap[keyof ClosureState_EMap],
+    tonneau: ClosureState_EMap[keyof ClosureState_EMap],
+  }
+}
+
+export class DetailedClosureStatus extends jspb.Message {
+  getTonneaupercentopen(): number;
+  setTonneaupercentopen(value: number): void;
+
+  serializeBinary(): Uint8Array;
+  toObject(includeInstance?: boolean): DetailedClosureStatus.AsObject;
+  static toObject(includeInstance: boolean, msg: DetailedClosureStatus): DetailedClosureStatus.AsObject;
+  static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+  static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+  static serializeBinaryToWriter(message: DetailedClosureStatus, writer: jspb.BinaryWriter): void;
+  static deserializeBinary(bytes: Uint8Array): DetailedClosureStatus;
+  static deserializeBinaryFromReader(message: DetailedClosureStatus, reader: jspb.BinaryReader): DetailedClosureStatus;
+}
+
+export namespace DetailedClosureStatus {
+  export type AsObject = {
+    tonneaupercentopen: number,
+  }
+}
+
+export class VehicleStatus extends jspb.Message {
+  hasClosurestatuses(): boolean;
+  clearClosurestatuses(): void;
+  getClosurestatuses(): ClosureStatuses | undefined;
+  setClosurestatuses(value?: ClosureStatuses): void;
+
+  getVehiclelockstate(): VehicleLockState_EMap[keyof VehicleLockState_EMap];
+  setVehiclelockstate(value: VehicleLockState_EMap[keyof VehicleLockState_EMap]): void;
+
+  getVehiclesleepstatus(): VehicleSleepStatus_EMap[keyof VehicleSleepStatus_EMap];
+  setVehiclesleepstatus(value: VehicleSleepStatus_EMap[keyof VehicleSleepStatus_EMap]): void;
+
+  getUserpresence(): UserPresence_EMap[keyof UserPresence_EMap];
+  setUserpresence(value: UserPresence_EMap[keyof UserPresence_EMap]): void;
+
+  hasDetailedclosurestatus(): boolean;
+  clearDetailedclosurestatus(): void;
+  getDetailedclosurestatus(): DetailedClosureStatus | undefined;
+  setDetailedclosurestatus(value?: DetailedClosureStatus): void;
+
+  serializeBinary(): Uint8Array;
+  toObject(includeInstance?: boolean): VehicleStatus.AsObject;
+  static toObject(includeInstance: boolean, msg: VehicleStatus): VehicleStatus.AsObject;
+  static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+  static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+  static serializeBinaryToWriter(message: VehicleStatus, writer: jspb.BinaryWriter): void;
+  static deserializeBinary(bytes: Uint8Array): VehicleStatus;
+  static deserializeBinaryFromReader(message: VehicleStatus, reader: jspb.BinaryReader): VehicleStatus;
+}
+
+export namespace VehicleStatus {
+  export type AsObject = {
+    closurestatuses?: ClosureStatuses.AsObject,
+    vehiclelockstate: VehicleLockState_EMap[keyof VehicleLockState_EMap],
+    vehiclesleepstatus: VehicleSleepStatus_EMap[keyof VehicleSleepStatus_EMap],
+    userpresence: UserPresence_EMap[keyof UserPresence_EMap],
+    detailedclosurestatus?: DetailedClosureStatus.AsObject,
+  }
+}
+
 export class FromVCSECMessage extends jspb.Message {
+  hasVehiclestatus(): boolean;
+  clearVehiclestatus(): void;
+  getVehiclestatus(): VehicleStatus | undefined;
+  setVehiclestatus(value?: VehicleStatus): void;
+
   hasCommandstatus(): boolean;
   clearCommandstatus(): void;
   getCommandstatus(): CommandStatus | undefined;
@@ -633,6 +750,7 @@ export class FromVCSECMessage extends jspb.Message {
 
 export namespace FromVCSECMessage {
   export type AsObject = {
+    vehiclestatus?: VehicleStatus.AsObject,
     commandstatus?: CommandStatus.AsObject,
     whitelistinfo?: WhitelistInfo.AsObject,
     whitelistentryinfo?: WhitelistEntryInfo.AsObject,
@@ -641,6 +759,7 @@ export namespace FromVCSECMessage {
 
   export enum SubMessageCase {
     SUB_MESSAGE_NOT_SET = 0,
+    VEHICLESTATUS = 1,
     COMMANDSTATUS = 4,
     WHITELISTINFO = 16,
     WHITELISTENTRYINFO = 17,
@@ -753,4 +872,41 @@ export interface WhitelistOperation_information_EMap {
 }
 
 export const WhitelistOperation_information_E: WhitelistOperation_information_EMap;
+
+export interface ClosureState_EMap {
+  CLOSURESTATE_CLOSED: 0;
+  CLOSURESTATE_OPEN: 1;
+  CLOSURESTATE_AJAR: 2;
+  CLOSURESTATE_UNKNOWN: 3;
+  CLOSURESTATE_FAILED_UNLATCH: 4;
+  CLOSURESTATE_OPENING: 5;
+  CLOSURESTATE_CLOSING: 6;
+}
+
+export const ClosureState_E: ClosureState_EMap;
+
+export interface VehicleLockState_EMap {
+  VEHICLELOCKSTATE_UNLOCKED: 0;
+  VEHICLELOCKSTATE_LOCKED: 1;
+  VEHICLELOCKSTATE_INTERNAL_LOCKED: 2;
+  VEHICLELOCKSTATE_SELECTIVE_UNLOCKED: 3;
+}
+
+export const VehicleLockState_E: VehicleLockState_EMap;
+
+export interface VehicleSleepStatus_EMap {
+  VEHICLE_SLEEP_STATUS_UNKNOWN: 0;
+  VEHICLE_SLEEP_STATUS_AWAKE: 1;
+  VEHICLE_SLEEP_STATUS_ASLEEP: 2;
+}
+
+export const VehicleSleepStatus_E: VehicleSleepStatus_EMap;
+
+export interface UserPresence_EMap {
+  VEHICLE_USER_PRESENCE_UNKNOWN: 0;
+  VEHICLE_USER_PRESENCE_NOT_PRESENT: 1;
+  VEHICLE_USER_PRESENCE_PRESENT: 2;
+}
+
+export const UserPresence_E: UserPresence_EMap;
 

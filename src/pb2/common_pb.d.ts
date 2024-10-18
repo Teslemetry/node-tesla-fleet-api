@@ -113,6 +113,114 @@ export namespace OffPeakChargingTimes {
   }
 }
 
+export class ChargeSchedule extends jspb.Message {
+  getId(): number;
+  setId(value: number): void;
+
+  getName(): string;
+  setName(value: string): void;
+
+  getDaysOfWeek(): number;
+  setDaysOfWeek(value: number): void;
+
+  getStartEnabled(): boolean;
+  setStartEnabled(value: boolean): void;
+
+  getStartTime(): number;
+  setStartTime(value: number): void;
+
+  getEndEnabled(): boolean;
+  setEndEnabled(value: boolean): void;
+
+  getEndTime(): number;
+  setEndTime(value: number): void;
+
+  getOneTime(): boolean;
+  setOneTime(value: boolean): void;
+
+  getEnabled(): boolean;
+  setEnabled(value: boolean): void;
+
+  getLatitude(): number;
+  setLatitude(value: number): void;
+
+  getLongitude(): number;
+  setLongitude(value: number): void;
+
+  serializeBinary(): Uint8Array;
+  toObject(includeInstance?: boolean): ChargeSchedule.AsObject;
+  static toObject(includeInstance: boolean, msg: ChargeSchedule): ChargeSchedule.AsObject;
+  static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+  static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+  static serializeBinaryToWriter(message: ChargeSchedule, writer: jspb.BinaryWriter): void;
+  static deserializeBinary(bytes: Uint8Array): ChargeSchedule;
+  static deserializeBinaryFromReader(message: ChargeSchedule, reader: jspb.BinaryReader): ChargeSchedule;
+}
+
+export namespace ChargeSchedule {
+  export type AsObject = {
+    id: number,
+    name: string,
+    daysOfWeek: number,
+    startEnabled: boolean,
+    startTime: number,
+    endEnabled: boolean,
+    endTime: number,
+    oneTime: boolean,
+    enabled: boolean,
+    latitude: number,
+    longitude: number,
+  }
+}
+
+export class PreconditionSchedule extends jspb.Message {
+  getId(): number;
+  setId(value: number): void;
+
+  getName(): string;
+  setName(value: string): void;
+
+  getDaysOfWeek(): number;
+  setDaysOfWeek(value: number): void;
+
+  getPreconditionTime(): number;
+  setPreconditionTime(value: number): void;
+
+  getOneTime(): boolean;
+  setOneTime(value: boolean): void;
+
+  getEnabled(): boolean;
+  setEnabled(value: boolean): void;
+
+  getLatitude(): number;
+  setLatitude(value: number): void;
+
+  getLongitude(): number;
+  setLongitude(value: number): void;
+
+  serializeBinary(): Uint8Array;
+  toObject(includeInstance?: boolean): PreconditionSchedule.AsObject;
+  static toObject(includeInstance: boolean, msg: PreconditionSchedule): PreconditionSchedule.AsObject;
+  static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+  static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+  static serializeBinaryToWriter(message: PreconditionSchedule, writer: jspb.BinaryWriter): void;
+  static deserializeBinary(bytes: Uint8Array): PreconditionSchedule;
+  static deserializeBinaryFromReader(message: PreconditionSchedule, reader: jspb.BinaryReader): PreconditionSchedule;
+}
+
+export namespace PreconditionSchedule {
+  export type AsObject = {
+    id: number,
+    name: string,
+    daysOfWeek: number,
+    preconditionTime: number,
+    oneTime: boolean,
+    enabled: boolean,
+    latitude: number,
+    longitude: number,
+  }
+}
+
 export interface InvalidMap {
   INVALID: 0;
 }

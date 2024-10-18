@@ -189,14 +189,15 @@ if (goog.DEBUG && !COMPILED) {
  * @private {!Array<!Array<number>>}
  * @const
  */
-proto.Signatures.KeyIdentity.oneofGroups_ = [[1]];
+proto.Signatures.KeyIdentity.oneofGroups_ = [[1,3]];
 
 /**
  * @enum {number}
  */
 proto.Signatures.KeyIdentity.IdentityTypeCase = {
   IDENTITY_TYPE_NOT_SET: 0,
-  PUBLIC_KEY: 1
+  PUBLIC_KEY: 1,
+  HANDLE: 3
 };
 
 /**
@@ -237,7 +238,8 @@ proto.Signatures.KeyIdentity.prototype.toObject = function(opt_includeInstance) 
  */
 proto.Signatures.KeyIdentity.toObject = function(includeInstance, msg) {
   var f, obj = {
-    publicKey: msg.getPublicKey_asB64()
+    publicKey: msg.getPublicKey_asB64(),
+    handle: jspb.Message.getFieldWithDefault(msg, 3, 0)
   };
 
   if (includeInstance) {
@@ -278,6 +280,10 @@ proto.Signatures.KeyIdentity.deserializeBinaryFromReader = function(msg, reader)
       var value = /** @type {!Uint8Array} */ (reader.readBytes());
       msg.setPublicKey(value);
       break;
+    case 3:
+      var value = /** @type {number} */ (reader.readUint32());
+      msg.setHandle(value);
+      break;
     default:
       reader.skipField();
       break;
@@ -311,6 +317,13 @@ proto.Signatures.KeyIdentity.serializeBinaryToWriter = function(message, writer)
   if (f != null) {
     writer.writeBytes(
       1,
+      f
+    );
+  }
+  f = /** @type {number} */ (jspb.Message.getField(message, 3));
+  if (f != null) {
+    writer.writeUint32(
+      3,
       f
     );
   }
@@ -374,6 +387,42 @@ proto.Signatures.KeyIdentity.prototype.clearPublicKey = function() {
  */
 proto.Signatures.KeyIdentity.prototype.hasPublicKey = function() {
   return jspb.Message.getField(this, 1) != null;
+};
+
+
+/**
+ * optional uint32 handle = 3;
+ * @return {number}
+ */
+proto.Signatures.KeyIdentity.prototype.getHandle = function() {
+  return /** @type {number} */ (jspb.Message.getFieldWithDefault(this, 3, 0));
+};
+
+
+/**
+ * @param {number} value
+ * @return {!proto.Signatures.KeyIdentity} returns this
+ */
+proto.Signatures.KeyIdentity.prototype.setHandle = function(value) {
+  return jspb.Message.setOneofField(this, 3, proto.Signatures.KeyIdentity.oneofGroups_[0], value);
+};
+
+
+/**
+ * Clears the field making it undefined.
+ * @return {!proto.Signatures.KeyIdentity} returns this
+ */
+proto.Signatures.KeyIdentity.prototype.clearHandle = function() {
+  return jspb.Message.setOneofField(this, 3, proto.Signatures.KeyIdentity.oneofGroups_[0], undefined);
+};
+
+
+/**
+ * Returns whether this field is set.
+ * @return {boolean}
+ */
+proto.Signatures.KeyIdentity.prototype.hasHandle = function() {
+  return jspb.Message.getField(this, 3) != null;
 };
 
 
@@ -1639,7 +1688,8 @@ proto.Signatures.SessionInfo.toObject = function(includeInstance, msg) {
     publickey: msg.getPublickey_asB64(),
     epoch: msg.getEpoch_asB64(),
     clockTime: jspb.Message.getFieldWithDefault(msg, 4, 0),
-    status: jspb.Message.getFieldWithDefault(msg, 5, 0)
+    status: jspb.Message.getFieldWithDefault(msg, 5, 0),
+    handle: jspb.Message.getFieldWithDefault(msg, 6, 0)
   };
 
   if (includeInstance) {
@@ -1695,6 +1745,10 @@ proto.Signatures.SessionInfo.deserializeBinaryFromReader = function(msg, reader)
     case 5:
       var value = /** @type {!proto.Signatures.Session_Info_Status} */ (reader.readEnum());
       msg.setStatus(value);
+      break;
+    case 6:
+      var value = /** @type {number} */ (reader.readUint32());
+      msg.setHandle(value);
       break;
     default:
       reader.skipField();
@@ -1757,6 +1811,13 @@ proto.Signatures.SessionInfo.serializeBinaryToWriter = function(message, writer)
   if (f !== 0.0) {
     writer.writeEnum(
       5,
+      f
+    );
+  }
+  f = message.getHandle();
+  if (f !== 0) {
+    writer.writeUint32(
+      6,
       f
     );
   }
@@ -1898,6 +1959,24 @@ proto.Signatures.SessionInfo.prototype.getStatus = function() {
  */
 proto.Signatures.SessionInfo.prototype.setStatus = function(value) {
   return jspb.Message.setProto3EnumField(this, 5, value);
+};
+
+
+/**
+ * optional uint32 handle = 6;
+ * @return {number}
+ */
+proto.Signatures.SessionInfo.prototype.getHandle = function() {
+  return /** @type {number} */ (jspb.Message.getFieldWithDefault(this, 6, 0));
+};
+
+
+/**
+ * @param {number} value
+ * @return {!proto.Signatures.SessionInfo} returns this
+ */
+proto.Signatures.SessionInfo.prototype.setHandle = function(value) {
+  return jspb.Message.setProto3IntField(this, 6, value);
 };
 
 

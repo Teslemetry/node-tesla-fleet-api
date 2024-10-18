@@ -81,6 +81,11 @@ export class VehicleAction extends jspb.Message {
   getHvactemperatureadjustmentaction(): HvacTemperatureAdjustmentAction | undefined;
   setHvactemperatureadjustmentaction(value?: HvacTemperatureAdjustmentAction): void;
 
+  hasMediaplayaction(): boolean;
+  clearMediaplayaction(): void;
+  getMediaplayaction(): MediaPlayAction | undefined;
+  setMediaplayaction(value?: MediaPlayAction): void;
+
   hasMediaupdatevolume(): boolean;
   clearMediaupdatevolume(): void;
   getMediaupdatevolume(): MediaUpdateVolume | undefined;
@@ -251,6 +256,36 @@ export class VehicleAction extends jspb.Message {
   getVehiclecontrolresetpintodriveaction(): VehicleControlResetPinToDriveAction | undefined;
   setVehiclecontrolresetpintodriveaction(value?: VehicleControlResetPinToDriveAction): void;
 
+  hasAddchargescheduleaction(): boolean;
+  clearAddchargescheduleaction(): void;
+  getAddchargescheduleaction(): common_pb.ChargeSchedule | undefined;
+  setAddchargescheduleaction(value?: common_pb.ChargeSchedule): void;
+
+  hasRemovechargescheduleaction(): boolean;
+  clearRemovechargescheduleaction(): void;
+  getRemovechargescheduleaction(): RemoveChargeScheduleAction | undefined;
+  setRemovechargescheduleaction(value?: RemoveChargeScheduleAction): void;
+
+  hasAddpreconditionscheduleaction(): boolean;
+  clearAddpreconditionscheduleaction(): void;
+  getAddpreconditionscheduleaction(): common_pb.PreconditionSchedule | undefined;
+  setAddpreconditionscheduleaction(value?: common_pb.PreconditionSchedule): void;
+
+  hasRemovepreconditionscheduleaction(): boolean;
+  clearRemovepreconditionscheduleaction(): void;
+  getRemovepreconditionscheduleaction(): RemovePreconditionScheduleAction | undefined;
+  setRemovepreconditionscheduleaction(value?: RemovePreconditionScheduleAction): void;
+
+  hasBatchremovepreconditionschedulesaction(): boolean;
+  clearBatchremovepreconditionschedulesaction(): void;
+  getBatchremovepreconditionschedulesaction(): BatchRemovePreconditionSchedulesAction | undefined;
+  setBatchremovepreconditionschedulesaction(value?: BatchRemovePreconditionSchedulesAction): void;
+
+  hasBatchremovechargeschedulesaction(): boolean;
+  clearBatchremovechargeschedulesaction(): void;
+  getBatchremovechargeschedulesaction(): BatchRemoveChargeSchedulesAction | undefined;
+  setBatchremovechargeschedulesaction(value?: BatchRemoveChargeSchedulesAction): void;
+
   getVehicleActionMsgCase(): VehicleAction.VehicleActionMsgCase;
   serializeBinary(): Uint8Array;
   toObject(includeInstance?: boolean): VehicleAction.AsObject;
@@ -273,6 +308,7 @@ export namespace VehicleAction {
     hvacsetpreconditioningmaxaction?: HvacSetPreconditioningMaxAction.AsObject,
     hvacsteeringwheelheateraction?: HvacSteeringWheelHeaterAction.AsObject,
     hvactemperatureadjustmentaction?: HvacTemperatureAdjustmentAction.AsObject,
+    mediaplayaction?: MediaPlayAction.AsObject,
     mediaupdatevolume?: MediaUpdateVolume.AsObject,
     medianextfavorite?: MediaNextFavorite.AsObject,
     mediapreviousfavorite?: MediaPreviousFavorite.AsObject,
@@ -307,6 +343,12 @@ export namespace VehicleAction {
     eraseuserdataaction?: EraseUserDataAction.AsObject,
     vehiclecontrolsetpintodriveaction?: VehicleControlSetPinToDriveAction.AsObject,
     vehiclecontrolresetpintodriveaction?: VehicleControlResetPinToDriveAction.AsObject,
+    addchargescheduleaction?: common_pb.ChargeSchedule.AsObject,
+    removechargescheduleaction?: RemoveChargeScheduleAction.AsObject,
+    addpreconditionscheduleaction?: common_pb.PreconditionSchedule.AsObject,
+    removepreconditionscheduleaction?: RemovePreconditionScheduleAction.AsObject,
+    batchremovepreconditionschedulesaction?: BatchRemovePreconditionSchedulesAction.AsObject,
+    batchremovechargeschedulesaction?: BatchRemoveChargeSchedulesAction.AsObject,
   }
 
   export enum VehicleActionMsgCase {
@@ -320,6 +362,7 @@ export namespace VehicleAction {
     HVACSETPRECONDITIONINGMAXACTION = 12,
     HVACSTEERINGWHEELHEATERACTION = 13,
     HVACTEMPERATUREADJUSTMENTACTION = 14,
+    MEDIAPLAYACTION = 15,
     MEDIAUPDATEVOLUME = 16,
     MEDIANEXTFAVORITE = 17,
     MEDIAPREVIOUSFAVORITE = 18,
@@ -354,6 +397,12 @@ export namespace VehicleAction {
     ERASEUSERDATAACTION = 72,
     VEHICLECONTROLSETPINTODRIVEACTION = 77,
     VEHICLECONTROLRESETPINTODRIVEACTION = 78,
+    ADDCHARGESCHEDULEACTION = 97,
+    REMOVECHARGESCHEDULEACTION = 98,
+    ADDPRECONDITIONSCHEDULEACTION = 99,
+    REMOVEPRECONDITIONSCHEDULEACTION = 100,
+    BATCHREMOVEPRECONDITIONSCHEDULESACTION = 107,
+    BATCHREMOVECHARGESCHEDULESACTION = 108,
   }
 }
 
@@ -1247,6 +1296,22 @@ export namespace Superchargers {
   }
 }
 
+export class MediaPlayAction extends jspb.Message {
+  serializeBinary(): Uint8Array;
+  toObject(includeInstance?: boolean): MediaPlayAction.AsObject;
+  static toObject(includeInstance: boolean, msg: MediaPlayAction): MediaPlayAction.AsObject;
+  static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+  static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+  static serializeBinaryToWriter(message: MediaPlayAction, writer: jspb.BinaryWriter): void;
+  static deserializeBinary(bytes: Uint8Array): MediaPlayAction;
+  static deserializeBinaryFromReader(message: MediaPlayAction, reader: jspb.BinaryReader): MediaPlayAction;
+}
+
+export namespace MediaPlayAction {
+  export type AsObject = {
+  }
+}
+
 export class MediaUpdateVolume extends jspb.Message {
   hasVolumeDelta(): boolean;
   clearVolumeDelta(): void;
@@ -1562,11 +1627,6 @@ export namespace VehicleControlTriggerHomelinkAction {
 }
 
 export class VehicleControlWindowAction extends jspb.Message {
-  hasLocation(): boolean;
-  clearLocation(): void;
-  getLocation(): common_pb.LatLong | undefined;
-  setLocation(value?: common_pb.LatLong): void;
-
   hasUnknown(): boolean;
   clearUnknown(): void;
   getUnknown(): common_pb.Void | undefined;
@@ -1595,7 +1655,6 @@ export class VehicleControlWindowAction extends jspb.Message {
 
 export namespace VehicleControlWindowAction {
   export type AsObject = {
-    location?: common_pb.LatLong.AsObject,
     unknown?: common_pb.Void.AsObject,
     vent?: common_pb.Void.AsObject,
     close?: common_pb.Void.AsObject,
@@ -1833,6 +1892,102 @@ export class SetChargingAmpsAction extends jspb.Message {
 export namespace SetChargingAmpsAction {
   export type AsObject = {
     chargingAmps: number,
+  }
+}
+
+export class RemoveChargeScheduleAction extends jspb.Message {
+  getId(): number;
+  setId(value: number): void;
+
+  serializeBinary(): Uint8Array;
+  toObject(includeInstance?: boolean): RemoveChargeScheduleAction.AsObject;
+  static toObject(includeInstance: boolean, msg: RemoveChargeScheduleAction): RemoveChargeScheduleAction.AsObject;
+  static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+  static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+  static serializeBinaryToWriter(message: RemoveChargeScheduleAction, writer: jspb.BinaryWriter): void;
+  static deserializeBinary(bytes: Uint8Array): RemoveChargeScheduleAction;
+  static deserializeBinaryFromReader(message: RemoveChargeScheduleAction, reader: jspb.BinaryReader): RemoveChargeScheduleAction;
+}
+
+export namespace RemoveChargeScheduleAction {
+  export type AsObject = {
+    id: number,
+  }
+}
+
+export class BatchRemoveChargeSchedulesAction extends jspb.Message {
+  getHome(): boolean;
+  setHome(value: boolean): void;
+
+  getWork(): boolean;
+  setWork(value: boolean): void;
+
+  getOther(): boolean;
+  setOther(value: boolean): void;
+
+  serializeBinary(): Uint8Array;
+  toObject(includeInstance?: boolean): BatchRemoveChargeSchedulesAction.AsObject;
+  static toObject(includeInstance: boolean, msg: BatchRemoveChargeSchedulesAction): BatchRemoveChargeSchedulesAction.AsObject;
+  static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+  static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+  static serializeBinaryToWriter(message: BatchRemoveChargeSchedulesAction, writer: jspb.BinaryWriter): void;
+  static deserializeBinary(bytes: Uint8Array): BatchRemoveChargeSchedulesAction;
+  static deserializeBinaryFromReader(message: BatchRemoveChargeSchedulesAction, reader: jspb.BinaryReader): BatchRemoveChargeSchedulesAction;
+}
+
+export namespace BatchRemoveChargeSchedulesAction {
+  export type AsObject = {
+    home: boolean,
+    work: boolean,
+    other: boolean,
+  }
+}
+
+export class BatchRemovePreconditionSchedulesAction extends jspb.Message {
+  getHome(): boolean;
+  setHome(value: boolean): void;
+
+  getWork(): boolean;
+  setWork(value: boolean): void;
+
+  getOther(): boolean;
+  setOther(value: boolean): void;
+
+  serializeBinary(): Uint8Array;
+  toObject(includeInstance?: boolean): BatchRemovePreconditionSchedulesAction.AsObject;
+  static toObject(includeInstance: boolean, msg: BatchRemovePreconditionSchedulesAction): BatchRemovePreconditionSchedulesAction.AsObject;
+  static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+  static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+  static serializeBinaryToWriter(message: BatchRemovePreconditionSchedulesAction, writer: jspb.BinaryWriter): void;
+  static deserializeBinary(bytes: Uint8Array): BatchRemovePreconditionSchedulesAction;
+  static deserializeBinaryFromReader(message: BatchRemovePreconditionSchedulesAction, reader: jspb.BinaryReader): BatchRemovePreconditionSchedulesAction;
+}
+
+export namespace BatchRemovePreconditionSchedulesAction {
+  export type AsObject = {
+    home: boolean,
+    work: boolean,
+    other: boolean,
+  }
+}
+
+export class RemovePreconditionScheduleAction extends jspb.Message {
+  getId(): number;
+  setId(value: number): void;
+
+  serializeBinary(): Uint8Array;
+  toObject(includeInstance?: boolean): RemovePreconditionScheduleAction.AsObject;
+  static toObject(includeInstance: boolean, msg: RemovePreconditionScheduleAction): RemovePreconditionScheduleAction.AsObject;
+  static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+  static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+  static serializeBinaryToWriter(message: RemovePreconditionScheduleAction, writer: jspb.BinaryWriter): void;
+  static deserializeBinary(bytes: Uint8Array): RemovePreconditionScheduleAction;
+  static deserializeBinaryFromReader(message: RemovePreconditionScheduleAction, reader: jspb.BinaryReader): RemovePreconditionScheduleAction;
+}
+
+export namespace RemovePreconditionScheduleAction {
+  export type AsObject = {
+    id: number,
   }
 }
 
