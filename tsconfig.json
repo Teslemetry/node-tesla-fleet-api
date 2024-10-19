@@ -1,15 +1,15 @@
 {
-    "compilerOptions": {
-        "target": "es2020",
-        "module": "nodenext",
-        "esModuleInterop": true,
-        "forceConsistentCasingInFileNames": true,
-        "noImplicitAny": true,
-        "removeComments": false,
-        "preserveConstEnums": true,
-        "sourceMap": true,
-        "outDir": "./dist",
-        "declaration": true
-    },
-    "include": ["src/**.ts"]
+  "compilerOptions": {
+    "target": "es2020",
+    "module": "nodenext",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitAny": true,
+    "removeComments": false,
+    "preserveConstEnums": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "declaration": true
+  },
+  "include": ["src/**.ts"]
 }

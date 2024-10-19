@@ -27,5 +27,8 @@
         "tessie"
     ],
     "main": "dist/index.js",
-    "license": "Apache-2.0"
+    "license": "Apache-2.0",
+    "dependencies": {
+        "google-protobuf": "^3.21.4"
+    }
 }

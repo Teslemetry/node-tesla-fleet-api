@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import {
   AlertTypes,
   ClimateMode,
@@ -9,38 +10,73 @@ import {
   Trunk,
   VehicleDataEndpoint,
 } from "./types/commands.js";
-import { UniversalMessage } from "./pb2/universal_message_pb.js";
+import {
+  RoutableMessage,
+  Domain,
+  OperationStatus_E,
+} from "./pb2/universal_message_pb.js";
+import {
+  HMAC_Personalized_Signature_Data,
+  HMAC_Signature_Data,
+} from "./pb2/signatures_pb.js";
+import * as VcSec from "./pb2/vcsec_pb.js";
+import * as CarServer from "./pb2/car_server_pb.js";
 import { OptionsResponse } from "./types/responses.js";
 import { VehicleResponse } from "./types/vehicle.js";
 import { VehicleDataResponse } from "./types/vehicle_data.js";
+import { FleetTelemetryConfig } from "./types/fleet_telemetry_config.js";
 import Vehicle from "./vehicle.js";
+import VehicleSpecific from "./vehiclespecific.js";
 
-interface FleetTelemetryConfig {
-  hostname: string;
-  ca: string;
-  fields: {
-    [key: string]: {
-      interval_seconds: number;
-    };
-  };
-  alert_types: AlertTypes[];
-  exp: number;
-  port: number;
-}
+/**
+ * A vehicle domain session.
+ */
+export class Session {
+  key: Buffer;
+  counter: number;
+  epoch: Buffer;
+  delta: number;
+  hmac: Buffer;
 
-export default class VehicleSpecific {
-  parent: Vehicle;
-  vin: string;
-  model: string;
-  pre2021: boolean;
+  constructor(key: Buffer, counter: number, epoch: Buffer, delta: number) {
+    this.key = key;
+    this.counter = counter;
+    this.epoch = epoch;
+    this.delta = delta;
 
-  constructor(parent: Vehicle, vin: string) {
-    this.parent = parent;
-    this.vin = vin;
-    this.model = this.parent.model(this.vin);
-    this.pre2021 = this.parent.pre2021(this.vin);
+    let hmac = crypto.createHmac("sha256", key);
+    hmac.update("authenticated command");
+    this.hmac = hmac.digest();
   }
 
+  get(): HMAC_Personalized_Signature_Data {
+    this.counter++;
+    const signature = new HMAC_Personalized_Signature_Data();
+    signature.setCounter(this.counter);
+    signature.setEpoch(this.epoch);
+    signature.setExpiresAt(Math.floor(Date.now() / 1000) - this.delta + 10);
+    return signature;
+  }
+
+  tag(
+    signature: HMAC_Personalized_Signature_Data,
+    command: Buffer,
+    metadata: Buffer,
+  ): HMAC_Personalized_Signature_Data {
+    let hmac = crypto.createHmac("sha256", this.hmac);
+    hmac.update(Buffer.concat([metadata, command]));
+    signature.setTag(hmac.digest());
+    return signature;
+  }
+}
+
+export default class VehicleSigned extends VehicleSpecific {
+  private_key: Buffer;
+  _public_key: Buffer;
+  _from_destination: Buffer;
+  _session: Session[];
+
+}
   // Vehicle Commands
 
   /**
