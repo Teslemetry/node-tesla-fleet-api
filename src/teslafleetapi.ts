@@ -1,6 +1,3 @@
-import { promises as fs } from "fs";
-import crypto from "crypto";
-
 import Charging from "./charging.js";
 import Energy from "./energy.js";
 import Partner from "./partner.js";
@@ -166,12 +163,12 @@ export default class TeslaFleetApi {
 
   async loadPrivateKey(path: string): Promise<void> {
     // Try read file, if not create it
-    return fs.readFile(path, "utf8").then((key) => {
+    return (await import("fs")).promises.readFile(path, "utf8").then((key) => {
       this.accessToken = key;
     }
-    ).catch(() => {
+    ).catch(async () => {
       // Create SECP256R1 private key and save it as a pem file at path
-      const { privateKey } = crypto.generateKeyPairSync("ec", {
+      const { privateKey } = (await import("crypto")).generateKeyPairSync("ec", {
         namedCurve: "secp256r1",
         publicKeyEncoding: { type: "spki", format: "pem" },
         privateKeyEncoding: { type: "pkcs8", format: "pem" },
