@@ -1,12 +1,12 @@
 {
     "name": "tesla-fleet-api",
     "version": "0.2.0",
+    "type": "module",
     "author": {
         "name": "Teslemetry",
         "email": "hello@teslemetry.com",
         "url": "https://teslemetry.com"
     },
-    "type": "module",
     "devDependencies": {
         "@types/node": "^20.12.12",
         "ts-protoc-gen": "^0.15.0",
