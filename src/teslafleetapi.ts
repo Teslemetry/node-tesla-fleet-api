@@ -75,6 +75,10 @@ export default class TeslaFleetApi {
     }
   }
 
+  async _response(resp: Response) {
+    return {status: resp.status, data: await resp.json()};
+  }
+
   /**
    * Make a request to the Tesla Fleet API.
    * @param method
@@ -125,15 +129,15 @@ export default class TeslaFleetApi {
       method,
       headers,
       body: json ? JSON.stringify(json) : null,
-    }).then((res) => {
-      return res.json().then(
-        (data) => {
-          if (res.ok) return data;
-          return Promise.reject({ status: res.status, data });
+    })
+    .then(this._response)
+    .then(
+        ({status,data}) => {
+          if (status <= 299) return data;
+          return Promise.reject({ status, data });
         },
-        (e) => Promise.reject(e),
-      );
-    });
+        (e) => Promise.reject({error: e})
+    );
   }
 
   /**
