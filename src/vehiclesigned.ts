@@ -10,21 +10,11 @@ import {
   Trunk,
   VehicleDataEndpoint,
 } from "./types/commands.js";
-import {
-  RoutableMessage,
-  Domain,
-  OperationStatus_E,
-} from "./pb2/universal_message_pb.js";
-import {
-  HMAC_Personalized_Signature_Data,
-  HMAC_Signature_Data,
-} from "./pb2/signatures_pb.js";
-import * as VcSec from "./pb2/vcsec_pb.js";
-import * as CarServer from "./pb2/car_server_pb.js";
+import { HMACPersonalizedSignatureData } from "@teslemetry/tesla-protocol/command/signatures";
 import { OptionsResponse } from "./types/responses.js";
 import { VehicleResponse } from "./types/vehicle.js";
 import { VehicleDataResponse } from "./types/vehicle_data.js";
-import { FleetTelemetryConfig } from "./types/fleet_telemetry_config.js";
+import { FleetTelemetryConfig } from "./types/commands.js";
 import Vehicle from "./vehicle.js";
 import VehicleSpecific from "./vehiclespecific.js";
 
@@ -49,23 +39,23 @@ export class Session {
     this.hmac = hmac.digest();
   }
 
-  get(): HMAC_Personalized_Signature_Data {
+  get(): HMACPersonalizedSignatureData {
     this.counter++;
-    const signature = new HMAC_Personalized_Signature_Data();
-    signature.setCounter(this.counter);
-    signature.setEpoch(this.epoch);
-    signature.setExpiresAt(Math.floor(Date.now() / 1000) - this.delta + 10);
-    return signature;
+    return HMACPersonalizedSignatureData.create({
+      counter: this.counter,
+      epoch: this.epoch,
+      expiresAt: Math.floor(Date.now() / 1000) - this.delta + 10,
+    });
   }
 
   tag(
-    signature: HMAC_Personalized_Signature_Data,
+    signature: HMACPersonalizedSignatureData,
     command: Buffer,
     metadata: Buffer,
-  ): HMAC_Personalized_Signature_Data {
+  ): HMACPersonalizedSignatureData {
     let hmac = crypto.createHmac("sha256", this.hmac);
     hmac.update(Buffer.concat([metadata, command]));
-    signature.setTag(hmac.digest());
+    signature.tag = hmac.digest();
     return signature;
   }
 }
@@ -76,7 +66,6 @@ export default class VehicleSigned extends VehicleSpecific {
   _from_destination: Buffer;
   _session: Session[];
 
-}
   // Vehicle Commands
 
   /**
@@ -723,7 +712,7 @@ export default class VehicleSigned extends VehicleSpecific {
    * @returns
    */
   async fleet_telemetry_config(
-    config: FleetTelemetryConfig,
+    config: FleetTelemetryConfig["config"],
   ): Promise<Record<string, any>> {
     return this.parent.fleet_telemetry_config({
       vins: [this.vin],

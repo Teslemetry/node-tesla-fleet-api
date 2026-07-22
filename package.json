@@ -8,9 +8,8 @@
         "url": "https://teslemetry.com"
     },
     "devDependencies": {
-        "@types/node": "^20.12.12",
-        "ts-protoc-gen": "^0.15.0",
-        "typescript": "^5.4.5"
+        "@types/node": "^24.13.3",
+        "typescript": "^5.9.2"
     },
     "scripts": {
         "prepare": "tsc",
@@ -29,6 +28,6 @@
     "main": "dist/index.js",
     "license": "Apache-2.0",
     "dependencies": {
-        "google-protobuf": "^3.21.4"
+        "@teslemetry/tesla-protocol": "^0.5.0"
     }
 }

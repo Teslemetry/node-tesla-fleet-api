@@ -12,7 +12,7 @@ import {
 import { OptionsResponse } from "./types/responses.js";
 import { VehicleResponse } from "./types/vehicle.js";
 import { VehicleDataResponse } from "./types/vehicle_data.js";
-import { FleetTelemetryConfig } from "./types/fleet_telemetry_config.js";
+import { FleetTelemetryConfig } from "./types/commands.js";
 import Vehicle from "./vehicle.js";
 
 export default class VehicleSpecific {
@@ -674,7 +674,7 @@ export default class VehicleSpecific {
    * @returns
    */
   async fleet_telemetry_config(
-    config: FleetTelemetryConfig,
+    config: FleetTelemetryConfig["config"],
   ): Promise<Record<string, any>> {
     return this.parent.fleet_telemetry_config({
       vins: [this.vin],
