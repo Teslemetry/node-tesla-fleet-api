@@ -14,7 +14,7 @@ export default class VehicleSigned extends Commands {
         const encoded = Buffer.from(RoutableMessage.encode(msg).finish()).toString("base64");
         const json = await this.parent.signed_command(this.vin, encoded);
         const resp = RoutableMessage.decode(Buffer.from(json.response, "base64"));
-        this.validateAndUpdateSession(resp);
+        this.validateAndUpdateSession(resp, Buffer.from(msg.uuid));
         return resp;
     }
 }

@@ -10,9 +10,9 @@ const OUR_PRIVATE_KEY = Buffer.from("10181f262d343b424950575e656c737a81888f969da
 const VEHICLE_PRIVATE_KEY = Buffer.from("10a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b72", "hex");
 const VEHICLE_PUBLIC_KEY = publicKeyFor(VEHICLE_PRIVATE_KEY);
 
-const GOLDEN_SHARED_SECRET = "5429a48f08b3ee8543a674deffa553070b6faef735e27ece841d46c66fb52933";
 const GOLDEN_SHARED_KEY = "d2187658dfeca31bf5a01b2c2c240b20";
 const GOLDEN_SESSION_HMAC_KEY = "3b425b48863d8de8801db7105f161f82e0568e809c755e33b880ffa87d4170dd";
+const GOLDEN_SESSION_INFO_KEY = "b8264045b17a92436c6a4c7ed669f0ab84f15a170a534af01e3d26183bbea3e7";
 
 describe("deriveSharedKey", () => {
     it("matches a pinned ECDH + SHA-1 golden vector", () => {
@@ -59,38 +59,81 @@ describe("Session", () => {
         return new Session(Domain.DOMAIN_VEHICLE_SECURITY, (vehiclePublicKey) => deriveSharedKey(OUR_PRIVATE_KEY, vehiclePublicKey));
     }
 
-    it("is not ready before a handshake update", () => {
+    /** Mirrors what `Commands.validateAndUpdateSession` does once a SessionInfo's tag has verified. */
+    function applyInfo(session: Session, overrides: Partial<SessionInfo> = {}): boolean {
+        const info = sessionInfo(overrides);
+        const keys = session.keysFor(Buffer.from(info.publicKey));
+        return session.commit(info, keys);
+    }
+
+    it("is not ready before a handshake commit", () => {
         const session = makeSession();
         expect(session.ready).toBe(false);
     });
 
-    it("becomes ready after update() and derives the golden shared/HMAC keys", () => {
+    it("keysFor derives the golden shared/HMAC/session-info keys without mutating state", () => {
         const session = makeSession();
-        session.update(sessionInfo());
+        const keys = session.keysFor(VEHICLE_PUBLIC_KEY);
+
+        expect(keys.sharedKey.toString("hex")).toBe(GOLDEN_SHARED_KEY);
+        expect(keys.hmacKey.toString("hex")).toBe(GOLDEN_SESSION_HMAC_KEY);
+        expect(keys.sessionInfoKey.toString("hex")).toBe(GOLDEN_SESSION_INFO_KEY);
+        expect(session.ready).toBe(false); // keysFor alone must not commit anything
+    });
+
+    it("becomes ready after commit()", () => {
+        const session = makeSession();
+        expect(applyInfo(session)).toBe(true);
 
         expect(session.ready).toBe(true);
         expect(session.sharedKey?.toString("hex")).toBe(GOLDEN_SHARED_KEY);
         expect(session.hmacKey?.toString("hex")).toBe(GOLDEN_SESSION_HMAC_KEY);
+        expect(session.sessionInfoKey?.toString("hex")).toBe(GOLDEN_SESSION_INFO_KEY);
     });
 
-    it("does not re-derive the shared key when the vehicle public key is unchanged", () => {
+    it("advances the counter across successive commits in the same epoch", () => {
         const session = makeSession();
-        session.update(sessionInfo({ counter: 1 }));
-        const firstSharedKey = session.sharedKey;
-
-        session.update(sessionInfo({ counter: 2 }));
-        expect(session.sharedKey).toBe(firstSharedKey);
+        applyInfo(session, { counter: 1 });
+        applyInfo(session, { counter: 2 });
         expect(session.counter).toBe(2);
     });
 
-    it("re-derives the shared key when the vehicle rotates its public key", () => {
+    it("never rolls the counter backwards within the same epoch, even if a later commit claims a lower value", () => {
         const session = makeSession();
-        session.update(sessionInfo());
+        applyInfo(session, { counter: 10, clockTime: Math.floor(Date.now() / 1000) });
+        applyInfo(session, { counter: 3, clockTime: Math.floor(Date.now() / 1000) + 1 });
+        expect(session.counter).toBe(10);
+    });
+
+    it("rejects (and does not mutate) a clock time that regresses within the same epoch", () => {
+        const session = makeSession();
+        const now = Math.floor(Date.now() / 1000);
+        expect(applyInfo(session, { counter: 5, clockTime: now })).toBe(true);
+        const before = { counter: session.counter, delta: session.delta };
+
+        expect(applyInfo(session, { counter: 6, clockTime: now - 10 })).toBe(false);
+        expect(session.counter).toBe(before.counter);
+        expect(session.delta).toBe(before.delta);
+    });
+
+    it("resets the counter and accepts an earlier clock time when the epoch changes", () => {
+        const session = makeSession();
+        applyInfo(session, { counter: 50, clockTime: Math.floor(Date.now() / 1000) });
+
+        const newEpoch = Buffer.from("aabbccddeeff00112233445566778899", "hex");
+        expect(applyInfo(session, { counter: 1, clockTime: 0, epoch: newEpoch })).toBe(true);
+        expect(session.counter).toBe(1);
+        expect(Buffer.from(session.epoch!).equals(newEpoch)).toBe(true);
+    });
+
+    it("re-derives keys for a rotated vehicle public key on the next commit", () => {
+        const session = makeSession();
+        applyInfo(session);
         const firstSharedKey = session.sharedKey;
 
         const otherVehiclePrivateKey = Buffer.from("10a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b73", "hex");
         const otherVehiclePublicKey = publicKeyFor(otherVehiclePrivateKey);
-        session.update(sessionInfo({ publicKey: otherVehiclePublicKey }));
+        applyInfo(session, { publicKey: otherVehiclePublicKey });
 
         expect(session.sharedKey?.equals(firstSharedKey!)).toBe(false);
     });
@@ -102,7 +145,7 @@ describe("Session", () => {
 
     it("increments the counter and sets an expiry corrected for clock delta", () => {
         const session = makeSession();
-        session.update(sessionInfo({ counter: 1, clockTime: Math.floor(Date.now() / 1000) - 100 }));
+        applyInfo(session, { counter: 1, clockTime: Math.floor(Date.now() / 1000) - 100 });
 
         const before = session.counter;
         const signed = session.hmacPersonalized();

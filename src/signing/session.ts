@@ -5,10 +5,23 @@ import {
     SessionInfo,
 } from "@teslemetry/tesla-protocol/command/signatures";
 
+/** Key material derived (but not yet trusted/committed) for a candidate vehicle public key. */
+export interface SessionKeys {
+    sharedKey: Buffer;
+    hmacKey: Buffer;
+    sessionInfoKey: Buffer;
+}
+
 /**
  * Per-domain (VCSEC / Infotainment) signed-command session: tracks the
  * anti-replay counter/epoch handed out by the vehicle's handshake reply and
- * the HMAC key derived from it.
+ * the HMAC keys derived from it.
+ *
+ * Deriving key material (`keysFor`) is split from committing it (`commit`)
+ * because the caller must authenticate a `SessionInfo` reply - by verifying
+ * its `session_info_tag` against the very keys derived here - *before*
+ * trusting anything in it, including the vehicle public key the shared key
+ * itself is derived from. See `Commands.validateAndUpdateSession`.
  *
  * A `Session` is not itself thread-safe; `withLock` serializes the
  * message-build step (which mutates `counter`) so concurrent commands on the
@@ -21,8 +34,11 @@ export class Session {
     delta?: number;
     sharedKey?: Buffer;
     hmacKey?: Buffer;
+    sessionInfoKey?: Buffer;
     publicKey?: Buffer;
 
+    /** Clock time of the last *authenticated* SessionInfo committed for the current epoch, guarding against replay/rollback. */
+    private lastAuthenticatedClockTime?: number;
     private queue: Promise<void> = Promise.resolve();
 
     constructor(
@@ -38,25 +54,43 @@ export class Session {
     }
 
     /**
-     * Absorb a vehicle `SessionInfo` (from a handshake reply or piggy-backed
-     * on any signed-command reply). The shared key is only re-derived when the
-     * vehicle's public key has changed, so an unrelated counter/epoch refresh
-     * does not force a redundant ECDH.
+     * Derive the shared key and its two HMAC sub-keys for a candidate vehicle
+     * public key, without touching any session state. Pure and side-effect
+     * free so a caller can verify authenticity first and discard the result
+     * if verification fails.
      */
-    update(sessionInfo: SessionInfo): void {
-        this.counter = sessionInfo.counter;
-        this.epoch = Buffer.from(sessionInfo.epoch);
-        this.delta = Math.floor(Date.now() / 1000) - sessionInfo.clockTime;
+    keysFor(vehiclePublicKey: Buffer): SessionKeys {
+        const sharedKey = this.deriveSharedKey(vehiclePublicKey);
+        const hmacKey = crypto.createHmac("sha256", sharedKey).update("authenticated command").digest();
+        const sessionInfoKey = crypto.createHmac("sha256", sharedKey).update("session info").digest();
+        return { sharedKey, hmacKey, sessionInfoKey };
+    }
 
-        const vehiclePublicKey = Buffer.from(sessionInfo.publicKey);
-        if (!this.publicKey || !this.publicKey.equals(vehiclePublicKey)) {
-            this.publicKey = vehiclePublicKey;
-            this.sharedKey = this.deriveSharedKey(vehiclePublicKey);
-            this.hmacKey = crypto
-                .createHmac("sha256", this.sharedKey)
-                .update("authenticated command")
-                .digest();
+    /**
+     * Commit an already-authenticated `SessionInfo` plus the `keysFor` result
+     * derived from its public key. Per the vehicle-command protocol, the
+     * anti-replay counter must never roll back within the same epoch, and a
+     * clock time that regresses within the same epoch marks the reply as
+     * stale/replayed - returns `false` (without mutating any state) in that
+     * case so the caller can reject it.
+     */
+    commit(sessionInfo: SessionInfo, keys: SessionKeys): boolean {
+        const incomingEpoch = Buffer.from(sessionInfo.epoch);
+        const sameEpoch = this.epoch !== undefined && this.epoch.equals(incomingEpoch);
+
+        if (sameEpoch && this.lastAuthenticatedClockTime !== undefined && sessionInfo.clockTime < this.lastAuthenticatedClockTime) {
+            return false;
         }
+
+        this.counter = sameEpoch ? Math.max(this.counter, sessionInfo.counter) : sessionInfo.counter;
+        this.epoch = incomingEpoch;
+        this.delta = Math.floor(Date.now() / 1000) - sessionInfo.clockTime;
+        this.lastAuthenticatedClockTime = sessionInfo.clockTime;
+        this.publicKey = Buffer.from(sessionInfo.publicKey);
+        this.sharedKey = keys.sharedKey;
+        this.hmacKey = keys.hmacKey;
+        this.sessionInfoKey = keys.sessionInfoKey;
+        return true;
     }
 
     /**

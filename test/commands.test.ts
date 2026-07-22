@@ -28,7 +28,7 @@ class TestCommands extends Commands {
         this.sendCount++;
         const replyBytes = this.fakeVehicle.handle(Buffer.from(RoutableMessage.encode(msg).finish()));
         const resp = RoutableMessage.decode(replyBytes);
-        this.validateAndUpdateSession(resp);
+        this.validateAndUpdateSession(resp, Buffer.from(msg.uuid));
         return resp;
     }
 }
@@ -92,6 +92,73 @@ describe("Commands: session handshake", () => {
         const commands = new TestCommands();
         commands.fakeVehicle.rejectNextAsNotWhitelisted();
         await expect(commands.door_lock()).rejects.toThrow(NotOnVehicleWhitelistError);
+    });
+});
+
+describe("Commands: session-info authentication (rejects tampered/spoofed handshake state)", () => {
+    it("rejects a handshake reply whose session_info_tag was tampered with", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.corruptNextSessionInfoTag();
+        await expect(commands.door_lock()).rejects.toThrow(/authentication/i);
+    });
+
+    it("does not adopt the tampered session's epoch/counter after rejecting it", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.corruptNextSessionInfoTag();
+        await expect(commands.door_lock()).rejects.toThrow();
+
+        const vcsecSession = (commands as any).sessions[2];
+        expect(vcsecSession.ready).toBe(false);
+
+        // A retry with an honest handshake must still succeed - the earlier
+        // rejection didn't corrupt any state that would block recovery.
+        await expect(commands.door_lock()).resolves.toEqual({ response: { result: true, reason: "" } });
+    });
+
+    it("rejects a session-info reply replayed against a request it wasn't tagged for", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.spoofNextSessionInfoChallenge();
+        await expect(commands.door_lock()).rejects.toThrow(/outstanding request/i);
+    });
+
+    it("rejects a validly-signed but stale (rolled-back clock, same epoch) session-info resync", async () => {
+        const commands = new TestCommands();
+        // Establish a real, current session first (commits the initial clock time).
+        await commands.door_lock();
+        const vcsecSession = (commands as any).sessions[2];
+        const counterBefore = vcsecSession.counter;
+        const deltaBefore = vcsecSession.delta;
+
+        // Piggy-back an honestly-signed but stale resync (same epoch, clock
+        // far in the past) onto the reply of the *next* ordinary command,
+        // exactly as the spec describes for "Recovering from synchronization
+        // errors" - this must not go through the handshake path at all.
+        commands.fakeVehicle.attachSessionInfoToNextReply();
+        commands.fakeVehicle.replayStaleSessionInfo(1, Math.floor(Date.now() / 1000) - 100000);
+
+        await expect(commands.door_unlock()).rejects.toThrow(/stale/i);
+        // The rejected resync's stale counter (1) and clock must not have been
+        // adopted - the counter only ever moves forward (from signing the
+        // outgoing door_unlock itself), and delta is untouched entirely.
+        expect(vcsecSession.counter).toBeGreaterThan(counterBefore);
+        expect(vcsecSession.delta).toBe(deltaBefore);
+    });
+
+    it("never lowers the counter even when a later (authentic) session-info resync claims a smaller one", async () => {
+        const commands = new TestCommands();
+        await commands.door_lock();
+        await commands.door_lock();
+        const vcsecSession = (commands as any).sessions[2];
+        const counterAfterTwoCommands = vcsecSession.counter;
+        expect(counterAfterTwoCommands).toBeGreaterThanOrEqual(2);
+
+        // An honestly-signed resync, same epoch, non-regressing clock, but a
+        // lower counter - must be clamped, not adopted.
+        commands.fakeVehicle.attachSessionInfoToNextReply();
+        commands.fakeVehicle.replayStaleSessionInfo(1, Math.floor(Date.now() / 1000) + 100000);
+        await commands.door_lock();
+
+        expect(vcsecSession.counter).toBeGreaterThanOrEqual(counterAfterTwoCommands);
     });
 });
 

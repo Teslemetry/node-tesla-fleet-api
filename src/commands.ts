@@ -215,7 +215,8 @@ export default abstract class Commands extends VehicleSpecific {
     /**
      * Transmit a signed (or session-handshake) `RoutableMessage` to the
      * vehicle and return its reply. Implementations must call
-     * `validateAndUpdateSession` on the reply before returning it.
+     * `validateAndUpdateSession(resp, msg.uuid)` on the reply before
+     * returning it.
      */
     protected abstract _send(
         msg: RoutableMessage,
@@ -235,17 +236,60 @@ export default abstract class Commands extends VehicleSpecific {
     /**
      * Absorb session info piggy-backed on any signed-command reply and raise
      * on a whitelist rejection or a terminal message fault. Every concrete
-     * `_send` must call this on the reply before returning it.
+     * `_send` must call this on the reply - passing the `uuid` of the request
+     * it just sent - before returning it.
+     *
+     * A `SessionInfo` is untrusted wire data until its `session_info_tag` is
+     * verified: the tag is an HMAC over the exact bytes received, keyed by a
+     * key derived from the *candidate* vehicle public key carried inside that
+     * same SessionInfo, and bound to this request's `uuid` as a challenge (so
+     * a captured older reply can't be replayed against a newer request). Only
+     * once that tag checks out do we act on anything the message claims -
+     * including its own whitelist-status field - and even then `Session.commit`
+     * still refuses a clock time that regresses within the same epoch.
      */
-    protected validateAndUpdateSession(resp: RoutableMessage): void {
+    protected validateAndUpdateSession(resp: RoutableMessage, requestUuid: Buffer): void {
         if (resp.sessionInfo && resp.sessionInfo.length > 0) {
+            const domain = resp.fromDestination?.domain;
+            const session = domain !== undefined ? this.sessions[domain] : undefined;
+            if (!session) {
+                throw new SignedCommandError("Session info reply is missing a recognized source domain.");
+            }
+
+            if (!resp.requestUuid || resp.requestUuid.length === 0 || !requestUuid.equals(Buffer.from(resp.requestUuid))) {
+                throw new SignedCommandError("Session info reply does not match an outstanding request; discarded.");
+            }
+
             const info = SessionInfo.decode(resp.sessionInfo);
+            const keys = session.keysFor(Buffer.from(info.publicKey));
+
+            const tag = resp.signatureData?.sessionInfoTag?.tag;
+            if (!tag || tag.length === 0) {
+                throw new SignedCommandError("Session info reply is missing its authentication tag; discarded.");
+            }
+            const metadata = Buffer.concat([
+                Buffer.from([Tag.TAG_SIGNATURE_TYPE, 1, SignatureType.SIGNATURE_TYPE_HMAC]),
+                Buffer.from([Tag.TAG_PERSONALIZATION, 17]),
+                Buffer.from(this.vin, "ascii"),
+                Buffer.from([Tag.TAG_CHALLENGE, requestUuid.length]),
+                requestUuid,
+                Buffer.from([Tag.TAG_END]),
+            ]);
+            const expectedTag = crypto
+                .createHmac("sha256", keys.sessionInfoKey)
+                .update(Buffer.concat([metadata, Buffer.from(resp.sessionInfo)]))
+                .digest();
+            const receivedTag = Buffer.from(tag);
+            if (expectedTag.length !== receivedTag.length || !crypto.timingSafeEqual(expectedTag, receivedTag)) {
+                throw new SignedCommandError("Session info reply failed authentication (invalid tag); discarded.");
+            }
+
+            // Only now that the reply is authenticated do we act on its contents.
             if (info.status === SessionInfoStatus.SESSION_INFO_STATUS_KEY_NOT_ON_WHITELIST) {
                 throw new NotOnVehicleWhitelistError();
             }
-            const domain = resp.fromDestination?.domain;
-            if (domain !== undefined && this.sessions[domain]) {
-                this.sessions[domain]!.update(info);
+            if (!session.commit(info, keys)) {
+                throw new SignedCommandError("Session info reply is stale (clock regressed within the same epoch); discarded.");
             }
         }
 
@@ -419,6 +463,11 @@ export default abstract class Commands extends VehicleSpecific {
     }
 
     // Vehicle Commands
+    //
+    // `take_drivenote` and `upcoming_calendar_entries` are intentionally not
+    // overridden here - they are inherited unsigned from `VehicleSpecific`,
+    // matching python-tesla-fleet-api's `Commands`, which excludes them with
+    // the same "doesn't require signing" rationale.
 
     /**
      * Controls the front (which_trunk: "front") or rear (which_trunk: "rear") trunk.
