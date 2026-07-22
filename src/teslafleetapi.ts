@@ -177,5 +177,6 @@ export default class TeslaFleetApi {
         publicKeyEncoding: { type: "spki", format: "pem" },
         privateKeyEncoding: { type: "pkcs8", format: "pem" },
       });
-  });
+    });
+  }
 }

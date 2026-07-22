@@ -8,52 +8,49 @@ importers:
 
   .:
     dependencies:
-      google-protobuf:
-        specifier: ^3.21.4
-        version: 3.21.4
+      '@teslemetry/tesla-protocol':
+        specifier: ^0.5.0
+        version: 0.5.0
     devDependencies:
       '@types/node':
-        specifier: ^20.12.12
-        version: 20.12.12
-      ts-protoc-gen:
-        specifier: ^0.15.0
-        version: 0.15.0
+        specifier: ^24.13.3
+        version: 24.13.3
       typescript:
-        specifier: ^5.4.5
-        version: 5.4.5
+        specifier: ^5.9.2
+        version: 5.9.3
 
 packages:
 
-  '@types/node@20.12.12':
-    resolution: {integrity: sha512-eWLDGF/FOSPtAvEqeRAQ4C8LSA7M1I7i0ky1I8U7kD1J5ITyW3AsRhQrKVoWf5pFKZ2kILsEGJhsI9r93PYnOw==}
+  '@bufbuild/protobuf@2.13.0':
+    resolution: {integrity: sha512-acq7c49vxfm1ggJ95P70TX7ABDM0vxr1SYD3BB0o0jnBLB4OAqeHyKuN+cD3w80gXEDQ2zxHpR6CUeA+O/aU9g==}
 
-  google-protobuf@3.21.4:
-    resolution: {integrity: sha512-MnG7N936zcKTco4Jd2PX2U96Kf9PxygAPKBug+74LHzmHXmceN16MmRcdgZv+DGef/S9YvQAfRsNCn4cjf9yyQ==}
+  '@teslemetry/tesla-protocol@0.5.0':
+    resolution: {integrity: sha512-YAsDboZcBXjB6yI4kKa9K2T5OC1Z6HTMDTwoxtAhOjhhZ/hEgYx69KAO/+6y1riMb/5tnMVH7fpNKt+/NhmWpA==}
+    engines: {node: '>=20'}
 
-  ts-protoc-gen@0.15.0:
-    resolution: {integrity: sha512-TycnzEyrdVDlATJ3bWFTtra3SCiEP0W0vySXReAuEygXCUr1j2uaVyL0DhzjwuUdQoW5oXPwk6oZWeA0955V+g==}
-    hasBin: true
+  '@types/node@24.13.3':
+    resolution: {integrity: sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q==}
 
-  typescript@5.4.5:
-    resolution: {integrity: sha512-vcI4UpRgg81oIRUFwR0WSIHKt11nJ7SAVlYNIu+QpqeyXP+gpQJy/Z4+F0aGxSE4MqwjyXvW/TzgkLAx2AGHwQ==}
+  typescript@5.9.3:
+    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
     hasBin: true
 
-  undici-types@5.26.5:
-    resolution: {integrity: sha512-JlCMO+ehdEIKqlFxk6IfVoAUVmgz7cU7zD/h9XZ0qzeosSHmUJVOzSQvvYSYWXkFXC+IfLKSIffhv0sVZup6pA==}
+  undici-types@7.18.2:
+    resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
 
 snapshots:
 
-  '@types/node@20.12.12':
+  '@bufbuild/protobuf@2.13.0': {}
+
+  '@teslemetry/tesla-protocol@0.5.0':
     dependencies:
-      undici-types: 5.26.5
+      '@bufbuild/protobuf': 2.13.0
 
-  google-protobuf@3.21.4: {}
-
-  ts-protoc-gen@0.15.0:
+  '@types/node@24.13.3':
     dependencies:
-      google-protobuf: 3.21.4
+      undici-types: 7.18.2
 
-  typescript@5.4.5: {}
+  typescript@5.9.3: {}
 
-  undici-types@5.26.5: {}
+  undici-types@7.18.2: {}
