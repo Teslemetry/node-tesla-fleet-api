@@ -45,12 +45,15 @@ function formatParts(date: Date, timeZone: string): Record<string, number> {
     return out;
 }
 
+/** Tesla weekday (Mon=0..Sun=6) for a calendar date, via JS Date.getUTCDay() (Sun=0..Sat=6). */
+function dowFromDate(year: number, month: number, day: number): number {
+    const jsDow = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+    return (jsDow + 6) % 7;
+}
+
 function getWallClock(now: Date, timeZone: string): WallClock {
     const { year, month, day, hour, minute } = formatParts(now, timeZone);
-    // Weekday derived from the site-local date (not name matching): Tesla is Mon=0..Sun=6, JS Date.getUTCDay() is Sun=0..Sat=6.
-    const jsDow = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
-    const dow = (jsDow + 6) % 7;
-    return { year, month, day, dow, minuteOfDay: hour * 60 + minute };
+    return { year, month, day, dow: dowFromDate(year, month, day), minuteOfDay: hour * 60 + minute };
 }
 
 /**
@@ -72,10 +75,19 @@ function wallClockToUtcMillis(year: number, month: number, day: number, hour: nu
     return guess;
 }
 
-/** Adds `deltaMinutes` of wall-clock time (not elapsed real time) to a wall-clock reading. */
-function shiftWallClock(wallClock: WallClock, deltaMinutes: number): { year: number; month: number; day: number; hour: number; minute: number } {
+/**
+ * Adds `deltaMinutes` of wall-clock time (not elapsed real time) to a wall-clock reading, staying
+ * in pure calendar arithmetic throughout - no `timeZone`/`Intl` round trip, so this is safe to use
+ * for "what day/weekday is N minutes from now" even across a DST transition, where a real-time-ms
+ * shift and a wall-clock-minutes shift land on different calendar days.
+ */
+function wallClockAt(wallClock: WallClock, deltaMinutes: number): WallClock {
     const naive = new Date(Date.UTC(wallClock.year, wallClock.month - 1, wallClock.day, 0, wallClock.minuteOfDay + deltaMinutes));
-    return { year: naive.getUTCFullYear(), month: naive.getUTCMonth() + 1, day: naive.getUTCDate(), hour: naive.getUTCHours(), minute: naive.getUTCMinutes() };
+    const year = naive.getUTCFullYear();
+    const month = naive.getUTCMonth() + 1;
+    const day = naive.getUTCDate();
+    const minuteOfDay = naive.getUTCHours() * 60 + naive.getUTCMinutes();
+    return { year, month, day, dow: dowFromDate(year, month, day), minuteOfDay };
 }
 
 function dowInRange(d: number, fromDow: number, toDow: number): boolean {
@@ -146,61 +158,65 @@ function lookupPrice(charges: EnergyCharges | undefined, seasonName: string, per
 
 const EMPTY_RATE: TariffRate = { price: null, periodName: null, seasonName: null };
 
-type PointResolution = {
-    rate: TariffRate;
-    currentStartGM: number;
-    nextChangeGM: number;
+type Schedule = {
+    seasonName: string;
+    /** The segment active right now, or null if `wallClock` falls in a gap between scheduled periods. */
+    current: DaySegment | null;
+    /**
+     * The next minute-of-day boundary (GM units relative to `wallClock`) at which this grid's rate
+     * changes - present whether or not a period is active right now, so a caller can still learn
+     * when a currently-empty grid (a gap) is about to start a period. Null only when neither today
+     * nor tomorrow has anything scheduled at all.
+     */
+    nextChangeGM: number | null;
 };
 
 /**
- * Resolves the rate active at `wallClock` (site-local "now"), and the next minute-of-week
- * boundary at which it changes - capped at the active period's own end so a sparse tariff
- * (a real gap between scheduled periods) reports the gap, not the next period found arbitrarily
- * far in the future. Both values are in GM units: wall-clock minutes relative to `wallClock`.
+ * Resolves one grid's (buy's, or sell's) state at `wallClock`: the active period if any, and the
+ * next boundary regardless of whether a period is currently active - a sparse tariff's gap still
+ * has a "next change" (the gap's own end), just like an active period does (its own end).
  */
-function resolveAt(seasons: Record<string, Season> | undefined, charges: EnergyCharges | undefined, wallClock: WallClock, now: Date, timeZone: string): PointResolution | null {
+function scheduleAt(seasons: Record<string, Season> | undefined, wallClock: WallClock): Schedule | null {
     const matched = findSeason(seasons, wallClock.month, wallClock.day);
     if (!matched) return null;
-    const todaySegs = dayPeriods(matched.season.tou_periods!, wallClock.dow);
-    const current = todaySegs.find((s) => s.startMin <= wallClock.minuteOfDay && wallClock.minuteOfDay < s.endMin);
-    if (!current) return null;
 
+    const todaySegs = dayPeriods(matched.season.tou_periods!, wallClock.dow);
+    const current = todaySegs.find((s) => s.startMin <= wallClock.minuteOfDay && wallClock.minuteOfDay < s.endMin) ?? null;
     const laterTodayStarts = todaySegs.filter((s) => s.startMin > wallClock.minuteOfDay).map((s) => s.startMin);
-    let nextMin = current.endMin;
+
+    let nextMin: number | null = current ? current.endMin : null;
     if (laterTodayStarts.length > 0) {
-        nextMin = Math.min(nextMin, Math.min(...laterTodayStarts));
-    } else if (current.endMin >= MINUTES_PER_DAY) {
-        // The active period runs up to midnight with nothing else scheduled today - check whether
-        // it's the same period continuing tomorrow (a midnight-crossing window) before treating
-        // midnight itself as the boundary.
-        const tomorrowDate = new Date(now.getTime() + (MINUTES_PER_DAY - wallClock.minuteOfDay) * 60_000);
-        const tomorrowWallClock = getWallClock(tomorrowDate, timeZone);
+        nextMin = nextMin === null ? Math.min(...laterTodayStarts) : Math.min(nextMin, Math.min(...laterTodayStarts));
+    } else if (nextMin === null || nextMin >= MINUTES_PER_DAY) {
+        // Either in a gap with nothing left today, or the active period runs up to midnight -
+        // check tomorrow before treating midnight itself as the boundary.
+        const tomorrowWallClock = wallClockAt(wallClock, MINUTES_PER_DAY - wallClock.minuteOfDay);
         const tomorrowMatched = findSeason(seasons, tomorrowWallClock.month, tomorrowWallClock.day);
         const tomorrowSegs = tomorrowMatched ? dayPeriods(tomorrowMatched.season.tou_periods!, tomorrowWallClock.dow) : [];
-        const continuation = tomorrowMatched?.name === matched.name ? tomorrowSegs.find((s) => s.startMin === 0 && s.periodName === current.periodName) : undefined;
+        const continuation = current && tomorrowMatched?.name === matched.name ? tomorrowSegs.find((s) => s.startMin === 0 && s.periodName === current.periodName) : undefined;
         if (continuation) {
             nextMin = MINUTES_PER_DAY + continuation.endMin;
         } else if (tomorrowSegs.length > 0) {
-            nextMin = MINUTES_PER_DAY + Math.min(...tomorrowSegs.map((s) => s.startMin));
+            const tomorrowFirst = MINUTES_PER_DAY + Math.min(...tomorrowSegs.map((s) => s.startMin));
+            nextMin = nextMin === null ? tomorrowFirst : Math.min(nextMin, tomorrowFirst);
         }
     }
 
     return {
-        rate: { price: lookupPrice(charges, matched.name, current.periodName), periodName: current.periodName, seasonName: matched.name },
-        currentStartGM: current.trueStartMin - wallClock.minuteOfDay,
-        nextChangeGM: nextMin - wallClock.minuteOfDay,
+        seasonName: matched.name,
+        current,
+        nextChangeGM: nextMin === null ? null : nextMin - wallClock.minuteOfDay,
     };
 }
 
 type ScheduleSegment = { startGM: number; endGM: number; periodName: string; seasonName: string };
 
-/** Walks one calendar day at a time across the horizon, re-resolving the season fresh on each day so a horizon that crosses a season boundary re-prices and re-labels correctly. */
-function collectSegments(seasons: Record<string, Season> | undefined, wallClock: WallClock, now: Date, timeZone: string, horizonMinutes: number): ScheduleSegment[] {
+/** Walks one calendar day at a time across the horizon, re-resolving the season fresh on each day (via pure wall-clock arithmetic, not elapsed-ms/DST-sensitive arithmetic) so a horizon crossing a season boundary re-prices and re-labels correctly. */
+function collectSegments(seasons: Record<string, Season> | undefined, wallClock: WallClock, horizonMinutes: number): ScheduleSegment[] {
     const segments: ScheduleSegment[] = [];
     let dayStartGM = -wallClock.minuteOfDay;
     while (dayStartGM < horizonMinutes) {
-        const dayDate = new Date(now.getTime() + dayStartGM * 60_000);
-        const dayWallClock = getWallClock(dayDate, timeZone);
+        const dayWallClock = wallClockAt(wallClock, dayStartGM);
         const matched = findSeason(seasons, dayWallClock.month, dayWallClock.day);
         if (matched) {
             for (const seg of dayPeriods(matched.season.tou_periods!, dayWallClock.dow)) {
@@ -232,14 +248,12 @@ function buildUpcoming(
     sellSeasons: Record<string, Season> | undefined,
     sellCharges: EnergyCharges | undefined,
     hasSell: boolean,
-    now: Date,
     wallClock: WallClock,
-    timeZone: string,
     horizonMinutes: number,
     toDate: (gm: number) => Date,
 ): TariffPeriod[] {
-    const buySegs = collectSegments(buySeasons, wallClock, now, timeZone, horizonMinutes);
-    const sellSegs = hasSell ? collectSegments(sellSeasons, wallClock, now, timeZone, horizonMinutes) : [];
+    const buySegs = collectSegments(buySeasons, wallClock, horizonMinutes);
+    const sellSegs = hasSell ? collectSegments(sellSeasons, wallClock, horizonMinutes) : [];
 
     const boundaries = new Set<number>([0, horizonMinutes]);
     const addBoundary = (gm: number): void => {
@@ -283,33 +297,47 @@ export function getTariffPeriods(tariff: TariffContentV2, now: Date, opts?: { ti
     const timeZone = opts.timeZone;
 
     const wallClock = getWallClock(now, timeZone);
-    const buy = resolveAt(tariff.seasons, tariff.energy_charges, wallClock, now, timeZone);
-    if (!buy) return null;
+    const buySchedule = scheduleAt(tariff.seasons, wallClock);
+    if (!buySchedule?.current) return null;
 
     const sellSeasons = tariff.sell_tariff?.seasons ?? tariff.seasons;
-    const sell = tariff.sell_tariff ? resolveAt(sellSeasons, tariff.sell_tariff.energy_charges, wallClock, now, timeZone) : null;
+    const sellSchedule = tariff.sell_tariff ? scheduleAt(sellSeasons, wallClock) : null;
+
+    const buyRate: TariffRate = { price: lookupPrice(tariff.energy_charges, buySchedule.seasonName, buySchedule.current.periodName), periodName: buySchedule.current.periodName, seasonName: buySchedule.seasonName };
+    const sellRate: TariffRate = sellSchedule?.current
+        ? { price: lookupPrice(tariff.sell_tariff!.energy_charges, sellSchedule.seasonName, sellSchedule.current.periodName), periodName: sellSchedule.current.periodName, seasonName: sellSchedule.seasonName }
+        : EMPTY_RATE;
 
     // Boundaries are wall-clock minute deltas, so converting one back to an instant means
     // re-deriving the target wall-clock label and reconverting *that*, not adding elapsed
     // real minutes to `now` - the two differ across a DST transition.
     const toDate = (gm: number): Date => {
-        const target = shiftWallClock(wallClock, gm);
-        return new Date(wallClockToUtcMillis(target.year, target.month, target.day, target.hour, target.minute, timeZone));
+        const target = wallClockAt(wallClock, gm);
+        const hour = Math.floor(target.minuteOfDay / 60);
+        const minute = target.minuteOfDay % 60;
+        return new Date(wallClockToUtcMillis(target.year, target.month, target.day, hour, minute, timeZone));
     };
 
-    const nextChangeGM = sell ? Math.min(buy.nextChangeGM, sell.nextChangeGM) : buy.nextChangeGM;
+    // `scheduleAt` reports a next-boundary GM even for a grid that's currently in a gap (e.g. a
+    // sell/export window not open yet), so combining via the sell side's own next boundary - not
+    // skipping it just because sell has no active period right now - catches "sell starts" too.
+    const nextChangeGM = sellSchedule?.nextChangeGM != null ? Math.min(buySchedule.nextChangeGM!, sellSchedule.nextChangeGM) : buySchedule.nextChangeGM!;
+
+    // When buy and sell schedules differ, the interval the returned pair is valid for only began
+    // once BOTH sides' current periods had started - the later of the two starts, not just buy's.
+    const currentStartGM = sellSchedule?.current ? Math.max(buySchedule.current.trueStartMin - wallClock.minuteOfDay, sellSchedule.current.trueStartMin - wallClock.minuteOfDay) : buySchedule.current.trueStartMin - wallClock.minuteOfDay;
 
     const resolution: TariffResolution = {
-        buy: buy.rate,
-        sell: sell ? sell.rate : EMPTY_RATE,
-        currentStart: toDate(buy.currentStartGM),
+        buy: buyRate,
+        sell: sellRate,
+        currentStart: toDate(currentStartGM),
         nextChange: toDate(nextChangeGM),
         currency: typeof tariff.currency === "string" ? tariff.currency : null,
         upcoming: null,
     };
 
     if (opts.horizonHours) {
-        resolution.upcoming = buildUpcoming(tariff.seasons, tariff.energy_charges, sellSeasons, tariff.sell_tariff?.energy_charges, !!tariff.sell_tariff, now, wallClock, timeZone, opts.horizonHours * 60, toDate);
+        resolution.upcoming = buildUpcoming(tariff.seasons, tariff.energy_charges, sellSeasons, tariff.sell_tariff?.energy_charges, !!tariff.sell_tariff, wallClock, opts.horizonHours * 60, toDate);
     }
 
     return resolution;

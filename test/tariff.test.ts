@@ -359,4 +359,89 @@ describe("getTariffPeriods: DST-observing timezone", () => {
         expect(result!.buy.periodName).toBe("NIGHT");
         expect(result!.nextChange).toEqual(new Date("2026-03-08T07:00:00Z")); // 2026-03-08 03:00 EDT
     });
+
+    it("derives upcoming's day-2 boundary from wall-clock arithmetic, not a 24h-per-day assumption, across a fall-back transition", () => {
+        // America/New_York: clocks fall back 02:00 -> 01:00 on 2026-11-01 (a Sunday), so that day
+        // has 25 real hours. A period keyed only off day-of-week must still flip from Sunday's to
+        // Monday's at the true local midnight, not 24 elapsed hours after the start of Sunday.
+        const FALL_BACK_TARIFF: TariffContentV2 = {
+            version: 1,
+            utility: "Test",
+            code: "TEST",
+            name: "Fall Back",
+            currency: "USD",
+            daily_charges: [],
+            demand_charges: {},
+            energy_charges: { ALL: { rates: { SUNDAY_ONLY: 0.9, OTHER: 0.1 } } },
+            seasons: {
+                ALL: {
+                    fromMonth: 1,
+                    fromDay: 1,
+                    toMonth: 12,
+                    toDay: 31,
+                    tou_periods: {
+                        SUNDAY_ONLY: { periods: [{ fromDayOfWeek: 6, toDayOfWeek: 6, toHour: 24 }] },
+                        OTHER: { periods: [{ fromDayOfWeek: 0, toDayOfWeek: 5, toHour: 24 }] },
+                    },
+                },
+            },
+        };
+        const now = new Date("2026-11-01T04:30:00Z"); // 2026-11-01 00:30 EDT, a Sunday
+        const result = getTariffPeriods(FALL_BACK_TARIFF, now, { timeZone: "America/New_York", horizonHours: 30 });
+        expect(result!.buy).toEqual({ price: 0.9, periodName: "SUNDAY_ONLY", seasonName: "ALL" });
+        const upcoming = result!.upcoming!;
+        const monday = upcoming.find((p) => p.buy.periodName === "OTHER");
+        expect(monday).toBeDefined();
+        expect(monday!.start).toEqual(new Date("2026-11-02T05:00:00Z")); // true Monday 00:00 EST (post-fallback, UTC-5)
+        expect(upcoming.every((p) => p.buy.periodName === "SUNDAY_ONLY" || p.start.getTime() >= monday!.start.getTime())).toBe(true);
+    });
+});
+
+describe("getTariffPeriods: buy/sell schedules differ", () => {
+    // All-day buy rate; sell only opens for a 17:00-19:00 export window - a common "feed-in" shape.
+    const SELL_WINDOW_TARIFF: TariffContentV2 = {
+        version: 1,
+        utility: "Test",
+        code: "TEST",
+        name: "Sell Window",
+        currency: "USD",
+        daily_charges: [],
+        demand_charges: {},
+        energy_charges: { ALL: { rates: { ALL_DAY: 0.3 } } },
+        seasons: { ALL: { fromMonth: 1, fromDay: 1, toMonth: 12, toDay: 31, tou_periods: { ALL_DAY: { periods: [{ toDayOfWeek: 6, toHour: 24 }] } } } },
+        sell_tariff: {
+            energy_charges: { ALL: { rates: { ALL_DAY: 0, EXPORT: 0.5 } } },
+            seasons: {
+                ALL: {
+                    fromMonth: 1,
+                    fromDay: 1,
+                    toMonth: 12,
+                    toDay: 31,
+                    tou_periods: {
+                        ALL_DAY: { periods: [{ toDayOfWeek: 6, toHour: 17 }] },
+                        EXPORT: { periods: [{ toDayOfWeek: 6, fromHour: 17, toHour: 19 }] },
+                        // Nothing scheduled 19:00-24:00: sell is in a gap overnight.
+                    },
+                },
+            },
+        },
+    };
+
+    it("tracks the next sell boundary even while sell is currently in a gap", () => {
+        const now = brisbane(2026, 7, 23, 16, 30);
+        const result = getTariffPeriods(SELL_WINDOW_TARIFF, now, { timeZone: TZ });
+        expect(result!.buy.periodName).toBe("ALL_DAY");
+        expect(result!.sell.periodName).toBe("ALL_DAY");
+        // Sell's own EXPORT window starts at 17:00, well before buy's midnight boundary.
+        expect(result!.nextChange).toEqual(brisbane(2026, 7, 23, 17, 0));
+    });
+
+    it("uses the later of buy/sell currentStart when sell started after buy", () => {
+        const now = brisbane(2026, 7, 23, 18, 0);
+        const result = getTariffPeriods(SELL_WINDOW_TARIFF, now, { timeZone: TZ });
+        expect(result!.sell).toEqual({ price: 0.5, periodName: "EXPORT", seasonName: "ALL" });
+        // Buy's own period started at local midnight, but the returned pair is only valid from
+        // when sell's EXPORT window opened at 17:00.
+        expect(result!.currentStart).toEqual(brisbane(2026, 7, 23, 17, 0));
+    });
 });
