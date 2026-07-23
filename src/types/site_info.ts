@@ -110,20 +110,50 @@ export type UserSettings = {
     off_grid_vehicle_charging_enabled: boolean;
 };
 
+export type TariffPeriodWindow = {
+    fromDayOfWeek?: number;
+    toDayOfWeek?: number;
+    fromHour?: number;
+    toHour?: number;
+    fromMinute?: number;
+    toMinute?: number;
+};
+
+export type TouPeriods = Record<string, { periods: TariffPeriodWindow[] }>;
+
+export type Season = {
+    fromDay?: number;
+    toDay?: number;
+    fromMonth?: number;
+    toMonth?: number;
+    tou_periods?: TouPeriods;
+};
+
+export type EnergyCharges = Record<string, { rates?: Record<string, number> }>;
+
+export type SellTariff = {
+    name?: string;
+    utility?: string;
+    daily_charges?: Record<string, any>[];
+    demand_charges?: Record<string, any>;
+    energy_charges: EnergyCharges;
+    seasons?: Record<string, Season>;
+};
+
 export type TariffContentV2 = {
     version: number;
-    monthly_minimum_bill: number;
-    min_applicable_demand: number;
-    max_applicable_demand: number;
-    monthly_charges: number;
+    monthly_minimum_bill?: number;
+    min_applicable_demand?: number;
+    max_applicable_demand?: number;
+    monthly_charges?: number;
     utility: string;
     code: string;
     name: string;
     currency: string;
     daily_charges: Record<string, any>[];
-    daily_demand_charges: Record<string, any>;
+    daily_demand_charges?: Record<string, any>;
     demand_charges: Record<string, any>;
-    energy_charges: Record<string, any>;
-    seasons: Record<string, any>[];
-    sell_tariff: Record<string, any>;
+    energy_charges: EnergyCharges;
+    seasons: Record<string, Season>;
+    sell_tariff?: SellTariff;
 };
