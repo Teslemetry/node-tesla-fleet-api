@@ -444,4 +444,173 @@ describe("getTariffPeriods: buy/sell schedules differ", () => {
         // when sell's EXPORT window opened at 17:00.
         expect(result!.currentStart).toEqual(brisbane(2026, 7, 23, 17, 0));
     });
+
+    it("folds the sell gap's own start into currentStart after a sell period has already ended", () => {
+        const now = brisbane(2026, 7, 23, 20, 0); // after EXPORT (17:00-19:00) closed
+        const result = getTariffPeriods(SELL_WINDOW_TARIFF, now, { timeZone: TZ });
+        expect(result!.sell).toEqual({ price: null, periodName: null, seasonName: null });
+        // The empty sell rate has only been valid since EXPORT closed at 19:00, not since buy's
+        // own midnight start.
+        expect(result!.currentStart).toEqual(brisbane(2026, 7, 23, 19, 0));
+        // Sell's own gap ends when tomorrow's ALL_DAY reopens at midnight - sooner than buy's.
+        expect(result!.nextChange).toEqual(brisbane(2026, 7, 24, 0, 0));
+    });
+
+    it("uses buy's later start when buy started after sell (the reverse direction)", () => {
+        const tariff: TariffContentV2 = {
+            version: 1,
+            utility: "Test",
+            code: "TEST",
+            name: "Buy Later",
+            currency: "USD",
+            daily_charges: [],
+            demand_charges: {},
+            energy_charges: { ALL: { rates: { NIGHT: 0.1, DAY: 0.2 } } },
+            seasons: {
+                ALL: {
+                    fromMonth: 1,
+                    fromDay: 1,
+                    toMonth: 12,
+                    toDay: 31,
+                    tou_periods: {
+                        NIGHT: { periods: [{ toDayOfWeek: 6, toHour: 12 }] },
+                        DAY: { periods: [{ toDayOfWeek: 6, fromHour: 12, toHour: 24 }] },
+                    },
+                },
+            },
+            sell_tariff: {
+                energy_charges: { ALL: { rates: { ALL_DAY: 0.5 } } },
+                seasons: { ALL: { fromMonth: 1, fromDay: 1, toMonth: 12, toDay: 31, tou_periods: { ALL_DAY: { periods: [{ toDayOfWeek: 6, toHour: 24 }] } } } },
+            },
+        };
+        const now = brisbane(2026, 7, 23, 13, 0); // buy's DAY started at 12:00; sell's ALL_DAY started at midnight
+        const result = getTariffPeriods(tariff, now, { timeZone: TZ });
+        expect(result!.buy.periodName).toBe("DAY");
+        expect(result!.sell.periodName).toBe("ALL_DAY");
+        expect(result!.currentStart).toEqual(brisbane(2026, 7, 23, 12, 0));
+    });
+
+    it("lets buy's own boundary win the nextChange min when it's sooner than sell's", () => {
+        const tariff: TariffContentV2 = {
+            version: 1,
+            utility: "Test",
+            code: "TEST",
+            name: "Two Sided",
+            currency: "USD",
+            daily_charges: [],
+            demand_charges: {},
+            energy_charges: { ALL: { rates: { MORNING: 0.2, EVENING: 0.4 } } },
+            seasons: {
+                ALL: {
+                    fromMonth: 1,
+                    fromDay: 1,
+                    toMonth: 12,
+                    toDay: 31,
+                    tou_periods: {
+                        MORNING: { periods: [{ toDayOfWeek: 6, toHour: 12 }] },
+                        EVENING: { periods: [{ toDayOfWeek: 6, fromHour: 12, toHour: 24 }] },
+                    },
+                },
+            },
+            sell_tariff: {
+                energy_charges: { ALL: { rates: { DAY: 0.5, NIGHT: 0 } } },
+                seasons: {
+                    ALL: {
+                        fromMonth: 1,
+                        fromDay: 1,
+                        toMonth: 12,
+                        toDay: 31,
+                        tou_periods: {
+                            DAY: { periods: [{ toDayOfWeek: 6, toHour: 18 }] },
+                            NIGHT: { periods: [{ toDayOfWeek: 6, fromHour: 18, toHour: 24 }] },
+                        },
+                    },
+                },
+            },
+        };
+        const now = brisbane(2026, 7, 23, 10, 0);
+        const result = getTariffPeriods(tariff, now, { timeZone: TZ });
+        // buy's next change (EVENING at 12:00) is sooner than sell's (NIGHT at 18:00).
+        expect(result!.nextChange).toEqual(brisbane(2026, 7, 23, 12, 0));
+    });
+
+    it("ignores a sell schedule whose season doesn't cover today at all", () => {
+        const tariff: TariffContentV2 = {
+            version: 1,
+            utility: "Test",
+            code: "TEST",
+            name: "Sell Season Mismatch",
+            currency: "USD",
+            daily_charges: [],
+            demand_charges: {},
+            energy_charges: { ALL: { rates: { ALL_DAY: 0.3 } } },
+            seasons: { ALL: { fromMonth: 1, fromDay: 1, toMonth: 12, toDay: 31, tou_periods: { ALL_DAY: { periods: [{ toDayOfWeek: 6, toHour: 24 }] } } } },
+            sell_tariff: {
+                energy_charges: { JanOnly: { rates: { ALL_DAY: 0.6 } } },
+                // Sell's own seasons only cover January - "now" (July) matches no sell season at all.
+                seasons: { JanOnly: { fromMonth: 1, fromDay: 1, toMonth: 1, toDay: 31, tou_periods: { ALL_DAY: { periods: [{ toDayOfWeek: 6, toHour: 24 }] } } } },
+            },
+        };
+        const now = brisbane(2026, 7, 23, 12, 0);
+        const result = getTariffPeriods(tariff, now, { timeZone: TZ });
+        expect(result!.buy).toEqual({ price: 0.3, periodName: "ALL_DAY", seasonName: "ALL" });
+        expect(result!.sell).toEqual({ price: null, periodName: null, seasonName: null });
+        // Sell contributes nothing (no matching season at all) - driven purely by buy.
+        expect(result!.currentStart).toEqual(brisbane(2026, 7, 23, 0, 0));
+    });
+
+    it("ignores a sell schedule with no periods scheduled at all (present season, empty tou_periods)", () => {
+        const tariff: TariffContentV2 = {
+            version: 1,
+            utility: "Test",
+            code: "TEST",
+            name: "Sell Never Scheduled",
+            currency: "USD",
+            daily_charges: [],
+            demand_charges: {},
+            energy_charges: { ALL: { rates: { MORNING: 0.2, EVENING: 0.4 } } },
+            seasons: {
+                ALL: {
+                    fromMonth: 1,
+                    fromDay: 1,
+                    toMonth: 12,
+                    toDay: 31,
+                    tou_periods: {
+                        MORNING: { periods: [{ toDayOfWeek: 6, toHour: 12 }] },
+                        EVENING: { periods: [{ toDayOfWeek: 6, fromHour: 12, toHour: 24 }] },
+                    },
+                },
+            },
+            sell_tariff: {
+                energy_charges: {},
+                // Season matches every day, but defines no periods at all - sell never has a rate.
+                seasons: { ALL: { fromMonth: 1, fromDay: 1, toMonth: 12, toDay: 31, tou_periods: {} } },
+            },
+        };
+        const now = brisbane(2026, 7, 23, 10, 0);
+        const result = getTariffPeriods(tariff, now, { timeZone: TZ });
+        expect(result!.sell).toEqual({ price: null, periodName: null, seasonName: null });
+        // Sell has no data at all (today or yesterday) to bound currentStart/nextChange with, so
+        // both are driven purely by buy: MORNING started at midnight, EVENING starts at noon.
+        expect(result!.currentStart).toEqual(brisbane(2026, 7, 23, 0, 0));
+        expect(result!.nextChange).toEqual(brisbane(2026, 7, 23, 12, 0));
+    });
+
+    it("falls back to the buy seasons/geometry when sell_tariff omits its own seasons", () => {
+        const tariff: TariffContentV2 = {
+            version: 1,
+            utility: "Test",
+            code: "TEST",
+            name: "Sell Reuses Buy Geometry",
+            currency: "USD",
+            daily_charges: [],
+            demand_charges: {},
+            energy_charges: { ALL: { rates: { ALL_DAY: 0.3 } } },
+            seasons: { ALL: { fromMonth: 1, fromDay: 1, toMonth: 12, toDay: 31, tou_periods: { ALL_DAY: { periods: [{ toDayOfWeek: 6, toHour: 24 }] } } } },
+            sell_tariff: { energy_charges: { ALL: { rates: { ALL_DAY: 0.6 } } } },
+        };
+        const now = brisbane(2026, 7, 23, 12, 0);
+        const result = getTariffPeriods(tariff, now, { timeZone: TZ });
+        expect(result!.sell).toEqual({ price: 0.6, periodName: "ALL_DAY", seasonName: "ALL" });
+    });
 });

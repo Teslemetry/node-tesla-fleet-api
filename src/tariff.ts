@@ -169,12 +169,22 @@ type Schedule = {
      * nor tomorrow has anything scheduled at all.
      */
     nextChangeGM: number | null;
+    /**
+     * When the *current state* began (GM units relative to `wallClock`) - the active period's true
+     * start if one is active, or the moment the current gap began (the previous period's end)
+     * otherwise, so a currently-empty grid still reports an accurate "valid since". Bounded to at
+     * most one day of lookback (mirrors `nextChangeGM`'s one-day lookahead bound): null only when
+     * neither today nor yesterday has anything scheduled at all (this grid never constrains the
+     * combined `currentStart`).
+     */
+    sinceGM: number | null;
 };
 
 /**
  * Resolves one grid's (buy's, or sell's) state at `wallClock`: the active period if any, and the
  * next boundary regardless of whether a period is currently active - a sparse tariff's gap still
- * has a "next change" (the gap's own end), just like an active period does (its own end).
+ * has a "next change" (the gap's own end) and a "since" (the gap's own start), just like an active
+ * period does (its own end and start).
  */
 function scheduleAt(seasons: Record<string, Season> | undefined, wallClock: WallClock): Schedule | null {
     const matched = findSeason(seasons, wallClock.month, wallClock.day);
@@ -202,10 +212,28 @@ function scheduleAt(seasons: Record<string, Season> | undefined, wallClock: Wall
         }
     }
 
+    let sinceMin: number | null;
+    if (current) {
+        sinceMin = current.trueStartMin;
+    } else {
+        const earlierTodayEnds = todaySegs.filter((s) => s.endMin <= wallClock.minuteOfDay).map((s) => s.endMin);
+        if (earlierTodayEnds.length > 0) {
+            sinceMin = Math.max(...earlierTodayEnds);
+        } else {
+            // Nothing has ended yet today either - the gap may have started yesterday (or earlier).
+            // Peek one day back, same one-day bound as the forward "tomorrow" check above.
+            const yesterdayWallClock = wallClockAt(wallClock, -MINUTES_PER_DAY);
+            const yesterdayMatched = findSeason(seasons, yesterdayWallClock.month, yesterdayWallClock.day);
+            const yesterdaySegs = yesterdayMatched ? dayPeriods(yesterdayMatched.season.tou_periods!, yesterdayWallClock.dow) : [];
+            sinceMin = yesterdaySegs.length > 0 ? Math.max(...yesterdaySegs.map((s) => s.endMin)) - MINUTES_PER_DAY : null;
+        }
+    }
+
     return {
         seasonName: matched.name,
         current,
         nextChangeGM: nextMin === null ? null : nextMin - wallClock.minuteOfDay,
+        sinceGM: sinceMin === null ? null : sinceMin - wallClock.minuteOfDay,
     };
 }
 
@@ -324,8 +352,11 @@ export function getTariffPeriods(tariff: TariffContentV2, now: Date, opts?: { ti
     const nextChangeGM = sellSchedule?.nextChangeGM != null ? Math.min(buySchedule.nextChangeGM!, sellSchedule.nextChangeGM) : buySchedule.nextChangeGM!;
 
     // When buy and sell schedules differ, the interval the returned pair is valid for only began
-    // once BOTH sides' current periods had started - the later of the two starts, not just buy's.
-    const currentStartGM = sellSchedule?.current ? Math.max(buySchedule.current.trueStartMin - wallClock.minuteOfDay, sellSchedule.current.trueStartMin - wallClock.minuteOfDay) : buySchedule.current.trueStartMin - wallClock.minuteOfDay;
+    // once BOTH sides' current *states* began - the later of the two, not just buy's. `sinceGM`
+    // covers sell being in a gap too (e.g. an export window that already closed), not only sell
+    // having its own active period. `buySchedule.sinceGM` is always non-null: buy is guaranteed to
+    // have an active `current` period at this point (checked above), and that branch always sets it.
+    const currentStartGM = sellSchedule?.sinceGM != null ? Math.max(buySchedule.sinceGM!, sellSchedule.sinceGM) : buySchedule.sinceGM!;
 
     const resolution: TariffResolution = {
         buy: buyRate,
