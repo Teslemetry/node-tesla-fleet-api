@@ -183,8 +183,12 @@ function fail(reason: string): CommandResponse {
  * of scope here; see AGENTS.md.
  */
 export default abstract class Commands extends VehicleSpecific {
-    privateKey: Buffer;
-    publicKey: Buffer;
+    // Native private fields (not `protected`/TS-only `private`): the raw key
+    // must not be reachable off the instance, e.g. via a naive
+    // JSON.stringify/structured log, not just inaccessible to outside code
+    // at compile time.
+    #privateKey: Buffer;
+    #publicKey: Buffer;
     /** Delay between WAIT-retries; overridable so tests don't have to wait for real timers. */
     protected retryDelayMs = 2000;
     private readonly fromDestination: Buffer;
@@ -201,11 +205,11 @@ export default abstract class Commands extends VehicleSpecific {
         if (!resolvedPrivateKey) {
             throw new Error("No private key provided for signed commands.");
         }
-        this.privateKey = resolvedPrivateKey;
-        this.publicKey = publicKey ?? publicKeyFor(this.privateKey);
+        this.#privateKey = resolvedPrivateKey;
+        this.#publicKey = publicKey ?? publicKeyFor(this.#privateKey);
 
         this.fromDestination = crypto.randomBytes(16);
-        const deriveKey = (vehiclePublicKey: Buffer) => deriveSharedKey(this.privateKey, vehiclePublicKey);
+        const deriveKey = (vehiclePublicKey: Buffer) => deriveSharedKey(this.#privateKey, vehiclePublicKey);
         this.sessions = {
             [Domain.DOMAIN_VEHICLE_SECURITY]: new Session(Domain.DOMAIN_VEHICLE_SECURITY, deriveKey),
             [Domain.DOMAIN_INFOTAINMENT]: new Session(Domain.DOMAIN_INFOTAINMENT, deriveKey),
@@ -256,7 +260,12 @@ export default abstract class Commands extends VehicleSpecific {
                 throw new SignedCommandError("Session info reply is missing a recognized source domain.");
             }
 
-            if (!resp.requestUuid || resp.requestUuid.length === 0 || !requestUuid.equals(Buffer.from(resp.requestUuid))) {
+            // VCSEC typically leaves request_uuid empty on real vehicles
+            // (memory constraints), so its absence must not be treated as a
+            // rejection - the tag below, which binds the *sent* requestUuid
+            // as TAG_CHALLENGE, is the actual authentication. Only cross-check
+            // the echo when the vehicle chose to populate it.
+            if (resp.requestUuid && resp.requestUuid.length > 0 && !requestUuid.equals(Buffer.from(resp.requestUuid))) {
                 throw new SignedCommandError("Session info reply does not match an outstanding request; discarded.");
             }
 
@@ -303,7 +312,7 @@ export default abstract class Commands extends VehicleSpecific {
         const msg = RoutableMessage.create({
             toDestination: { domain },
             fromDestination: { routingAddress: this.fromDestination },
-            sessionInfoRequest: { publicKey: this.publicKey },
+            sessionInfoRequest: { publicKey: this.#publicKey },
             uuid: crypto.randomBytes(16),
         });
         await this._send(msg, "session_info");
@@ -337,52 +346,71 @@ export default abstract class Commands extends VehicleSpecific {
             protobufMessageAsBytes: command,
             uuid: crypto.randomBytes(16),
             signatureData: {
-                signerIdentity: KeyIdentity.create({ publicKey: this.publicKey }),
+                signerIdentity: KeyIdentity.create({ publicKey: this.#publicKey }),
                 HMACPersonalizedData: { ...personalized, tag },
             },
         });
     }
 
-    /** Build, sign, dispatch (with WAIT/epoch-fault retry), and interpret one domain command. */
+    /**
+     * Build, sign, dispatch (with WAIT/epoch-fault retry), and interpret one
+     * domain command.
+     *
+     * VCSEC requires messages to arrive in strict counter order and warns
+     * clients to avoid simultaneous requests to it at all (unlike
+     * Infotainment, which tolerates a sliding window) - so for
+     * `DOMAIN_VEHICLE_SECURITY` the *entire* dispatch (handshake, build,
+     * send, and any retry) runs under the domain's lock, guaranteeing at
+     * most one VCSEC message is ever in flight. Infotainment keeps the
+     * narrower build-only lock, serializing only counter assignment.
+     */
     private async dispatch(domain: Domain, command: Buffer, expectsData: boolean): Promise<CommandResponse> {
         const session = this.sessionFor(domain);
-        if (!session.ready) {
-            await this.handshake(domain);
-        }
+        const serializeWholeDispatch = domain === Domain.DOMAIN_VEHICLE_SECURITY;
 
-        for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-            const msg = await session.withLock(() => this.buildHmacMessage(session, command));
+        const run = async (): Promise<CommandResponse> => {
+            if (!session.ready) {
+                await this.handshake(domain);
+            }
 
-            let resp: RoutableMessage;
-            try {
-                resp = await this._send(msg, "protobuf_message_as_bytes", expectsData);
-            } catch (error) {
-                if (error instanceof RetryableSignedCommandFaultError && attempt < MAX_ATTEMPTS - 1) {
+            for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+                const msg = serializeWholeDispatch
+                    ? this.buildHmacMessage(session, command)
+                    : await session.withLock(() => this.buildHmacMessage(session, command));
+
+                let resp: RoutableMessage;
+                try {
+                    resp = await this._send(msg, "protobuf_message_as_bytes", expectsData);
+                } catch (error) {
+                    if (error instanceof RetryableSignedCommandFaultError && attempt < MAX_ATTEMPTS - 1) {
+                        continue;
+                    }
+                    throw error;
+                }
+
+                if (resp.signedMessageStatus?.operationStatus === MessageOperationStatusE.OPERATIONSTATUS_WAIT) {
+                    if (attempt >= MAX_ATTEMPTS - 1) {
+                        return fail("Too many retries");
+                    }
+                    await sleep(this.retryDelayMs);
                     continue;
                 }
-                throw error;
-            }
 
-            if (resp.signedMessageStatus?.operationStatus === MessageOperationStatusE.OPERATIONSTATUS_WAIT) {
-                if (attempt >= MAX_ATTEMPTS - 1) {
-                    return fail("Too many retries");
+                const result = this.interpretResponse(resp);
+                if (result === "wait") {
+                    if (attempt >= MAX_ATTEMPTS - 1) {
+                        return fail("Too many retries");
+                    }
+                    await sleep(this.retryDelayMs);
+                    continue;
                 }
-                await sleep(this.retryDelayMs);
-                continue;
+                return result;
             }
 
-            const result = this.interpretResponse(resp);
-            if (result === "wait") {
-                if (attempt >= MAX_ATTEMPTS - 1) {
-                    return fail("Too many retries");
-                }
-                await sleep(this.retryDelayMs);
-                continue;
-            }
-            return result;
-        }
+            return fail("Too many retries");
+        };
 
-        return fail("Too many retries");
+        return serializeWholeDispatch ? session.withLock(run) : run();
     }
 
     private interpretResponse(resp: RoutableMessage): CommandResponse | "wait" {

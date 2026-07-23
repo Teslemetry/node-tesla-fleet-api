@@ -47,6 +47,9 @@ export class FakeVehicle {
     private waitCountRemaining = 0;
     private nextSessionInfoAttack: SessionInfoAttack | null = null;
     private attachSessionInfoOnNextReply = false;
+    private omitRequestUuidEcho = false;
+    /** Counters of every VCSEC command in the order this FakeVehicle actually received them - for concurrency/ordering tests. */
+    readonly vcsecCounterArrivals: number[] = [];
 
     constructor(privateKey?: Buffer) {
         this.privateKey = privateKey ?? crypto.randomBytes(32);
@@ -91,6 +94,17 @@ export class FakeVehicle {
      */
     attachSessionInfoToNextReply(): void {
         this.attachSessionInfoOnNextReply = true;
+    }
+
+    /**
+     * Simulate real VCSEC hardware, which (per protocol.md's "memory
+     * constraints" note) typically leaves `request_uuid` empty on its
+     * replies rather than echoing the request's `uuid` back. The
+     * `session_info_tag` is still computed against the real challenge the
+     * client sent - only the outer echo field is left unset.
+     */
+    omitRequestUuidLikeRealVcsec(): void {
+        this.omitRequestUuidEcho = true;
     }
 
     private stateFor(domain: Domain): DomainState {
@@ -158,7 +172,11 @@ export class FakeVehicle {
             tag[0] ^= 0xff;
         }
 
-        return { sessionInfo: infoBytes, tag, requestUuid: effectiveRequestUuid };
+        // The tag always binds the real challenge (`effectiveRequestUuid`);
+        // only the *echoed* request_uuid field on the envelope is ever
+        // omitted, matching real VCSEC hardware.
+        const echoedRequestUuid = this.omitRequestUuidEcho ? new Uint8Array(0) : effectiveRequestUuid;
+        return { sessionInfo: infoBytes, tag, requestUuid: echoedRequestUuid };
     }
 
     /** Build a dedicated (handshake or whitelist-rejection) session-info reply. */
@@ -207,6 +225,9 @@ export class FakeVehicle {
         const hmacData = msg.signatureData?.HMACPersonalizedData;
         if (!hmacData) {
             throw new Error("FakeVehicle only supports HMAC-personalized requests.");
+        }
+        if (domain === Domain.DOMAIN_VEHICLE_SECURITY) {
+            this.vcsecCounterArrivals.push(hmacData.counter);
         }
         const { hmacKey } = this.keysFor(state);
 

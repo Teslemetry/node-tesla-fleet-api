@@ -4,6 +4,7 @@ import { VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
 import Commands from "../src/commands.js";
 import Vehicle from "../src/vehicle.js";
 import { NotOnVehicleWhitelistError, SignedCommandFaultError } from "../src/signing/errors.js";
+import { publicKeyFor } from "../src/signing/crypto.js";
 import { FakeVehicle } from "./helpers/fakevehicle.js";
 
 const VIN = "5YJXCAE43LF123456";
@@ -18,6 +19,8 @@ function makeParent(): Vehicle {
 class TestCommands extends Commands {
     fakeVehicle = new FakeVehicle();
     sendCount = 0;
+    /** FIFO queue of artificial network delays (ms), one consumed per `_send` call - lets tests force reordering that would occur over a real, unlocked, concurrent network round trip. */
+    sendDelaysMs: number[] = [];
 
     constructor(vin: string = VIN) {
         super(makeParent(), vin, OUR_PRIVATE_KEY);
@@ -26,6 +29,10 @@ class TestCommands extends Commands {
 
     protected async _send(msg: RoutableMessage, _requires: string, _expectsData?: boolean, _confirmBroadcast?: (status: VehicleStatus) => boolean): Promise<RoutableMessage> {
         this.sendCount++;
+        const delay = this.sendDelaysMs.shift();
+        if (delay) {
+            await new Promise((resolve) => setTimeout(resolve, delay));
+        }
         const replyBytes = this.fakeVehicle.handle(Buffer.from(RoutableMessage.encode(msg).finish()));
         const resp = RoutableMessage.decode(replyBytes);
         this.validateAndUpdateSession(resp, Buffer.from(msg.uuid));
@@ -34,31 +41,47 @@ class TestCommands extends Commands {
 }
 
 describe("Commands: constructor validation", () => {
-    class MinimalCommands extends Commands {
-        protected async _send(): Promise<RoutableMessage> {
-            throw new Error("not exercised in these tests");
+    // privateKey/publicKey are native private fields (not just TS `private`) -
+    // not reachable off the instance at all, so these tests verify key
+    // derivation the same way any real caller would observe it: what
+    // actually goes out on the wire.
+    class RecordingCommands extends Commands {
+        sentMessages: RoutableMessage[] = [];
+
+        protected async _send(msg: RoutableMessage): Promise<RoutableMessage> {
+            this.sentMessages.push(msg);
+            throw new Error("stop-after-send-capture");
         }
     }
 
     it("rejects a VIN that is not 17 characters", () => {
-        expect(() => new MinimalCommands(makeParent(), "TOOSHORT", OUR_PRIVATE_KEY)).toThrow(/17-character/);
+        expect(() => new RecordingCommands(makeParent(), "TOOSHORT", OUR_PRIVATE_KEY)).toThrow(/17-character/);
     });
 
     it("rejects construction with no private key available anywhere", () => {
-        expect(() => new MinimalCommands(makeParent(), VIN)).toThrow(/No private key/);
+        expect(() => new RecordingCommands(makeParent(), VIN)).toThrow(/No private key/);
     });
 
-    it("falls back to the parent Vehicle's private_key when none is passed explicitly", () => {
+    it("falls back to the parent Vehicle's private_key when none is passed explicitly, and uses it for real signing", async () => {
         const parent = makeParent();
         parent.private_key = OUR_PRIVATE_KEY;
-        const commands = new MinimalCommands(parent, VIN);
-        expect(commands.privateKey).toBe(OUR_PRIVATE_KEY);
+        const commands = new RecordingCommands(parent, VIN);
+
+        await expect(commands.door_lock()).rejects.toThrow("stop-after-send-capture");
+
+        const sentPublicKey = Buffer.from(commands.sentMessages[0].sessionInfoRequest!.publicKey);
+        expect(sentPublicKey.toString("hex")).toBe(publicKeyFor(OUR_PRIVATE_KEY).toString("hex"));
     });
 
-    it("derives its own public key from the private key when none is passed", () => {
-        const commands = new MinimalCommands(makeParent(), VIN, OUR_PRIVATE_KEY);
-        expect(commands.publicKey).toHaveLength(65);
-        expect(commands.publicKey[0]).toBe(0x04);
+    it("derives its own public key from the private key when none is passed", async () => {
+        const commands = new RecordingCommands(makeParent(), VIN, OUR_PRIVATE_KEY);
+
+        await expect(commands.door_lock()).rejects.toThrow("stop-after-send-capture");
+
+        const sentPublicKey = Buffer.from(commands.sentMessages[0].sessionInfoRequest!.publicKey);
+        expect(sentPublicKey).toHaveLength(65);
+        expect(sentPublicKey[0]).toBe(0x04);
+        expect(sentPublicKey.toString("hex")).toBe(publicKeyFor(OUR_PRIVATE_KEY).toString("hex"));
     });
 });
 
@@ -92,6 +115,59 @@ describe("Commands: session handshake", () => {
         const commands = new TestCommands();
         commands.fakeVehicle.rejectNextAsNotWhitelisted();
         await expect(commands.door_lock()).rejects.toThrow(NotOnVehicleWhitelistError);
+    });
+
+    // Regression test for a round-2 fix: real VCSEC hardware leaves
+    // request_uuid empty on its replies (protocol.md's handshake section),
+    // so its absence must never be treated as a rejection - only the
+    // session_info_tag (verified separately, and still checked here) is
+    // authentication. A prior fix's overly strict echo guard broke every
+    // VCSEC command - door_lock, door_unlock, trunk, charge port,
+    // remote_start_drive - against real vehicles.
+    it("accepts a real-VCSEC-style handshake reply that omits request_uuid entirely", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.omitRequestUuidLikeRealVcsec();
+
+        await expect(commands.door_lock()).resolves.toEqual({ response: { result: true, reason: "" } });
+
+        const vcsecSession = (commands as any).sessions[2];
+        expect(vcsecSession.ready).toBe(true);
+    });
+
+    it("still rejects a tampered tag even when request_uuid is omitted (the tag remains the real authentication)", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.omitRequestUuidLikeRealVcsec();
+        commands.fakeVehicle.corruptNextSessionInfoTag();
+
+        await expect(commands.door_lock()).rejects.toThrow(/authentication/i);
+    });
+});
+
+describe("Commands: VCSEC dispatch serialization", () => {
+    // Regression test for a round-2 fix: VCSEC requires messages to arrive in
+    // counter order (and the spec warns against simultaneous VCSEC requests
+    // at all), but the lock previously covered only the synchronous
+    // message-build step, releasing it before the network round trip - so
+    // two concurrent VCSEC commands could race and reach the vehicle out of
+    // counter order. `sendDelaysMs` simulates that race deterministically: the
+    // first command's network leg is made slower than the second's, which
+    // would reorder their arrival at the vehicle if dispatch weren't
+    // serialized end-to-end.
+    it("delivers concurrent VCSEC commands to the vehicle in strict counter order", async () => {
+        const commands = new TestCommands();
+        await commands.door_lock(); // establish the session first, outside the race
+
+        commands.sendDelaysMs = [30, 5]; // first command's _send is slower than the second's
+        const [a, b] = await Promise.all([commands.door_unlock(), commands.door_lock()]);
+
+        expect(a).toEqual({ response: { result: true, reason: "" } });
+        expect(b).toEqual({ response: { result: true, reason: "" } });
+
+        const arrivals = commands.fakeVehicle.vcsecCounterArrivals;
+        expect(arrivals.length).toBeGreaterThanOrEqual(2);
+        for (let i = 1; i < arrivals.length; i++) {
+            expect(arrivals[i]).toBeGreaterThan(arrivals[i - 1]);
+        }
     });
 });
 
