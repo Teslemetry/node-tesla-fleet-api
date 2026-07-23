@@ -4,6 +4,7 @@ import { OptionsResponse } from "./types/responses.js";
 import { VehicleResponse } from "./types/vehicle.js";
 import { VehicleDataResponse } from "./types/vehicle_data.js";
 import VehicleSpecific from "./vehiclespecific.js";
+import VehicleSigned from "./vehiclesigned.js";
 
 const Models: Record<string, string> = {
     S: "Model S",
@@ -16,6 +17,8 @@ const Models: Record<string, string> = {
 
 export default class Vehicle {
     parent: TeslaFleetApi;
+    /** Fallback private key for `signed()` when a call site doesn't pass one explicitly. */
+    private_key?: Buffer;
 
     constructor(parent: TeslaFleetApi) {
         this.parent = parent;
@@ -28,6 +31,18 @@ export default class Vehicle {
      */
     specific(vin: string): VehicleSpecific {
         return new VehicleSpecific(this, vin);
+    }
+
+    /**
+     * Returns a class for a single vehicle that signs commands with the
+     * Tesla Vehicle Command Protocol and dispatches them through the Fleet
+     * API `/signed_command` endpoint, instead of the plaintext REST commands.
+     * @param vin
+     * @param private_key Raw 32-byte P-256 private key scalar. Falls back to `this.private_key`.
+     * @param public_key Uncompressed P-256 public key point. Derived from `private_key` if omitted.
+     */
+    signed(vin: string, private_key?: Buffer, public_key?: Buffer): VehicleSigned {
+        return new VehicleSigned(this, vin, private_key, public_key);
     }
 
     /**

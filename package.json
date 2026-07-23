@@ -9,11 +9,14 @@
     },
     "devDependencies": {
         "@types/node": "^24.13.3",
-        "typescript": "^5.9.2"
+        "typescript": "^5.9.2",
+        "vitest": "^4.1.10"
     },
     "scripts": {
         "prepare": "tsc",
-        "watch": "tsc -w"
+        "watch": "tsc -w",
+        "test": "vitest run",
+        "test:watch": "vitest"
     },
     "files": [
         "dist",
