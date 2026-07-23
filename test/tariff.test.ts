@@ -232,4 +232,131 @@ describe("getTariffPeriods: missing / partial data", () => {
         const now = brisbane(2026, 7, 23, 12, 0);
         expect(getTariffPeriods(tariff, now, { timeZone: TZ })).toBeNull();
     });
+
+    it("falls back to ALL when the matched season key has no rates at all (not just an absent key)", () => {
+        const tariff: TariffContentV2 = {
+            version: 1,
+            utility: "Test",
+            code: "TEST",
+            name: "Empty Season Rates",
+            currency: "USD",
+            daily_charges: [],
+            demand_charges: {},
+            // "Solo" is matched by date but carries no `rates` key at all - must still fall back to ALL.
+            energy_charges: { ALL: { rates: { ALL_DAY: 0.6 } }, Solo: {} },
+            seasons: { Solo: { fromMonth: 1, fromDay: 1, toMonth: 12, toDay: 31, tou_periods: { ALL_DAY: { periods: [{ toDayOfWeek: 6, toHour: 24 }] } } } },
+        };
+        const now = brisbane(2026, 7, 23, 12, 0);
+        const result = getTariffPeriods(tariff, now, { timeZone: TZ });
+        expect(result!.buy).toEqual({ price: 0.6, periodName: "ALL_DAY", seasonName: "Solo" });
+    });
+});
+
+describe("getTariffPeriods: sparse schedule (gap between periods)", () => {
+    const SPARSE_TARIFF: TariffContentV2 = {
+        version: 1,
+        utility: "Test",
+        code: "TEST",
+        name: "Sparse",
+        currency: "USD",
+        daily_charges: [],
+        demand_charges: {},
+        energy_charges: { ALL: { rates: { MORNING: 0.4, EVENING: 0.5 } } },
+        seasons: {
+            ALL: {
+                fromMonth: 1,
+                fromDay: 1,
+                toMonth: 12,
+                toDay: 31,
+                tou_periods: {
+                    // 10:00-11:00, then a real gap, then 17:00-18:00 - nothing scheduled in between.
+                    MORNING: { periods: [{ toDayOfWeek: 6, fromHour: 10, toHour: 11 }] },
+                    EVENING: { periods: [{ toDayOfWeek: 6, fromHour: 17, toHour: 18 }] },
+                },
+            },
+        },
+    };
+
+    it("reports nextChange at the active period's own end, not the next period found later", () => {
+        const now = brisbane(2026, 7, 23, 10, 30);
+        const result = getTariffPeriods(SPARSE_TARIFF, now, { timeZone: TZ });
+        expect(result!.buy).toEqual({ price: 0.4, periodName: "MORNING", seasonName: "ALL" });
+        expect(result!.nextChange).toEqual(brisbane(2026, 7, 23, 11, 0));
+    });
+
+    it("returns null while sitting inside the gap itself", () => {
+        const now = brisbane(2026, 7, 23, 12, 0);
+        expect(getTariffPeriods(SPARSE_TARIFF, now, { timeZone: TZ })).toBeNull();
+    });
+
+    it("omits the gap from the upcoming schedule instead of stretching MORNING across it", () => {
+        const now = brisbane(2026, 7, 23, 10, 30);
+        const result = getTariffPeriods(SPARSE_TARIFF, now, { timeZone: TZ, horizonHours: 8 });
+        const upcoming = result!.upcoming!;
+        const morning = upcoming.find((p) => p.buy.periodName === "MORNING")!;
+        expect(morning.end).toEqual(brisbane(2026, 7, 23, 11, 0));
+        const gap = upcoming.find((p) => p.start.getTime() === morning.end.getTime())!;
+        expect(gap.buy).toEqual({ price: null, periodName: null, seasonName: null });
+    });
+});
+
+describe("getTariffPeriods: upcoming re-resolves seasons across a boundary", () => {
+    const SEASON_SWITCH_TARIFF: TariffContentV2 = {
+        version: 1,
+        utility: "Test",
+        code: "TEST",
+        name: "Season Switch",
+        currency: "USD",
+        daily_charges: [],
+        demand_charges: {},
+        energy_charges: { Summer: { rates: { ALL_DAY: 0.5 } }, Winter: { rates: { ALL_DAY: 0.2 } } },
+        seasons: {
+            Summer: { fromMonth: 1, fromDay: 1, toMonth: 7, toDay: 31, tou_periods: { ALL_DAY: { periods: [{ toDayOfWeek: 6, toHour: 24 }] } } },
+            Winter: { fromMonth: 8, fromDay: 1, toMonth: 12, toDay: 31, tou_periods: { ALL_DAY: { periods: [{ toDayOfWeek: 6, toHour: 24 }] } } },
+        },
+    };
+
+    it("relabels and reprices upcoming segments once the horizon crosses into the next season", () => {
+        const now = brisbane(2026, 7, 31, 12, 0);
+        const result = getTariffPeriods(SEASON_SWITCH_TARIFF, now, { timeZone: TZ, horizonHours: 36 });
+        const upcoming = result!.upcoming!;
+        const before = upcoming.find((p) => p.start.getTime() === now.getTime())!;
+        expect(before.buy).toEqual({ price: 0.5, periodName: "ALL_DAY", seasonName: "Summer" });
+        const after = upcoming.find((p) => p.start.getTime() === brisbane(2026, 8, 1, 0, 0).getTime())!;
+        expect(after.buy).toEqual({ price: 0.2, periodName: "ALL_DAY", seasonName: "Winter" });
+    });
+});
+
+describe("getTariffPeriods: DST-observing timezone", () => {
+    const DST_TARIFF: TariffContentV2 = {
+        version: 1,
+        utility: "Test",
+        code: "TEST",
+        name: "DST",
+        currency: "USD",
+        daily_charges: [],
+        demand_charges: {},
+        energy_charges: { ALL: { rates: { NIGHT: 0.1, DAY: 0.3 } } },
+        seasons: {
+            ALL: {
+                fromMonth: 1,
+                fromDay: 1,
+                toMonth: 12,
+                toDay: 31,
+                tou_periods: {
+                    NIGHT: { periods: [{ toDayOfWeek: 6, fromHour: 1, toHour: 3 }] },
+                    DAY: { periods: [{ toDayOfWeek: 6, fromHour: 3, toHour: 1 }] },
+                },
+            },
+        },
+    };
+
+    it("keeps nextChange at the correct wall-clock label across a spring-forward transition", () => {
+        // America/New_York: clocks jump 02:00 -> 03:00 on 2026-03-08. At 01:30 local (still EST,
+        // UTC-5), NIGHT (01:00-03:00) should end at 03:00 EDT (UTC-4) - not 90 elapsed UTC minutes later.
+        const now = new Date("2026-03-08T06:30:00Z"); // 2026-03-08 01:30 EST
+        const result = getTariffPeriods(DST_TARIFF, now, { timeZone: "America/New_York" });
+        expect(result!.buy.periodName).toBe("NIGHT");
+        expect(result!.nextChange).toEqual(new Date("2026-03-08T07:00:00Z")); // 2026-03-08 03:00 EDT
+    });
 });
