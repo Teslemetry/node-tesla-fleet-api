@@ -137,7 +137,7 @@ export type SellTariff = {
     daily_charges?: Record<string, any>[];
     demand_charges?: Record<string, any>;
     energy_charges: EnergyCharges;
-    seasons: Record<string, Season>;
+    seasons?: Record<string, Season>;
 };
 
 export type TariffContentV2 = {
