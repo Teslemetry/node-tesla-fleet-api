@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
+import { Domain, RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
 import { VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
+import { Action, VehicleAction } from "@teslemetry/tesla-protocol/command/car_server";
 import Commands from "../src/commands.js";
 import Vehicle from "../src/vehicle.js";
 import { NotOnVehicleWhitelistError, SignedCommandFaultError } from "../src/signing/errors.js";
@@ -273,6 +274,41 @@ describe("Commands: HMAC round trip against an independent vehicle simulator", (
         commands.fakeVehicle.queueWaits(10);
         const result = await commands.charge_start();
         expect(result).toEqual({ response: { result: false, reason: "Too many retries" } });
+    });
+});
+
+describe("Commands: drivenote and calendar entries are signed, not sent unsigned", () => {
+    // Regression test: take_drivenote and upcoming_calendar_entries are inherited
+    // from VehicleSpecific and previously fell through to the plaintext
+    // /command/... REST endpoint, silently bypassing /signed_command on vehicles
+    // that require the vehicle-command protocol. They are now overridden to sign
+    // and dispatch as Infotainment VehicleActions (matching python-tesla-fleet-api).
+
+    /** Captures every signed Infotainment VehicleAction that actually goes out over `_send`. */
+    class CapturingCommands extends TestCommands {
+        capturedActions: VehicleAction[] = [];
+
+        protected async _send(msg: RoutableMessage, requires: string, expectsData?: boolean, confirmBroadcast?: (status: VehicleStatus) => boolean): Promise<RoutableMessage> {
+            if (msg.protobufMessageAsBytes && msg.protobufMessageAsBytes.length > 0 && msg.toDestination?.domain === Domain.DOMAIN_INFOTAINMENT) {
+                const action = Action.decode(msg.protobufMessageAsBytes);
+                if (action.vehicleAction) {
+                    this.capturedActions.push(action.vehicleAction);
+                }
+            }
+            return super._send(msg, requires, expectsData, confirmBroadcast);
+        }
+    }
+
+    it("signs take_drivenote as an Infotainment VehicleAction instead of falling through unsigned", async () => {
+        const commands = new CapturingCommands();
+        await expect(commands.take_drivenote("check tire pressure")).resolves.toMatchObject({ response: { result: true } });
+        expect(commands.capturedActions.some((a) => a.takeDrivenoteAction?.note === "check tire pressure")).toBe(true);
+    });
+
+    it("signs upcoming_calendar_entries as an Infotainment VehicleAction instead of falling through unsigned", async () => {
+        const commands = new CapturingCommands();
+        await expect(commands.upcoming_calendar_entries("BEGIN:VCALENDAR")).resolves.toMatchObject({ response: { result: true } });
+        expect(commands.capturedActions.some((a) => a.uiSetUpcomingCalendarEntries?.calendarData === "BEGIN:VCALENDAR")).toBe(true);
     });
 });
 

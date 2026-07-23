@@ -76,6 +76,8 @@ import {
     DrivingClearSpeedLimitPinAdminAction,
     ScheduledChargingAction,
     ScheduledDepartureAction,
+    TakeDrivenoteAction,
+    UiSetUpcomingCalendarEntries,
 } from "@teslemetry/tesla-protocol/command/car_server";
 import { Void, LatLong, PreconditioningTimes, OffPeakChargingTimes, StwHeatLevel } from "@teslemetry/tesla-protocol/command/common";
 import { VehicleState_GuestMode, ClimateState_CopActivationTemp } from "@teslemetry/tesla-protocol/command/vehicle";
@@ -491,11 +493,6 @@ export default abstract class Commands extends VehicleSpecific {
     }
 
     // Vehicle Commands
-    //
-    // `take_drivenote` and `upcoming_calendar_entries` are intentionally not
-    // overridden here - they are inherited unsigned from `VehicleSpecific`,
-    // matching python-tesla-fleet-api's `Commands`, which excludes them with
-    // the same "doesn't require signing" rationale.
 
     /**
      * Controls the front (which_trunk: "front") or rear (which_trunk: "rear") trunk.
@@ -1081,6 +1078,17 @@ export default abstract class Commands extends VehicleSpecific {
     }
 
     /**
+     * Records a drive note. Overrides the inherited plaintext command so it is
+     * signed and dispatched over the vehicle-command protocol rather than
+     * silently falling through to the unsigned REST endpoint on vehicles that
+     * require signing.
+     * @param note Drive note
+     */
+    async take_drivenote(note: string): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ takeDrivenoteAction: TakeDrivenoteAction.create({ note }) }));
+    }
+
+    /**
      * Turns on HomeLink (used to open and close garage doors).
      * @param lat Latitude
      * @param lon Longitude
@@ -1094,6 +1102,19 @@ export default abstract class Commands extends VehicleSpecific {
                     token,
                 }),
             }),
+        );
+    }
+
+    /**
+     * Sends upcoming calendar entries to the vehicle. Overrides the inherited
+     * plaintext command so it is signed and dispatched over the vehicle-command
+     * protocol rather than silently falling through to the unsigned REST
+     * endpoint on vehicles that require signing.
+     * @param calendar_data Calendar data
+     */
+    async upcoming_calendar_entries(calendar_data: string): Promise<CommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({ uiSetUpcomingCalendarEntries: UiSetUpcomingCalendarEntries.create({ calendarData: calendar_data }) }),
         );
     }
 
