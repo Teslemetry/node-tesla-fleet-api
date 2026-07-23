@@ -16,3 +16,5 @@ export {
     SignedCommandFaultError,
     RetryableSignedCommandFaultError,
 } from "./signing/errors.js";
+export { getTariffPeriods } from "./tariff.js";
+export type { TariffRate, TariffPeriod, TariffResolution } from "./tariff.js";
