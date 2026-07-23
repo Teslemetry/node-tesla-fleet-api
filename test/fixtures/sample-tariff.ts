@@ -52,8 +52,8 @@ const HALF_HOUR_PERIODS: TouPeriods = {
     PERIOD_23_30: { periods: [{ toDayOfWeek: 6, fromHour: 23, fromMinute: 30, toHour: 24 }] },
 };
 
-/** Live Tariff V2 capture: Teslemetry `get_energy_tariff`, site `Moorinya` (site_id 2533979794926773), 2026-07-23. */
-export const MOORINYA_TARIFF: TariffContentV2 = {
+/** Live Tariff V2 capture: Teslemetry `get_energy_tariff`, site "Test Site" (site_id 1000000000000000), 2026-07-23. */
+export const SAMPLE_TARIFF: TariffContentV2 = {
     code: "POWER_SYNC:FLOW_POWER",
     name: "Flow Power (PowerSync)",
     utility: "Flow Power",

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getTariffPeriods } from "../src/tariff.js";
 import { TariffContentV2 } from "../src/types/site_info.js";
-import { MOORINYA_TARIFF } from "./fixtures/moorinya-tariff.js";
+import { SAMPLE_TARIFF } from "./fixtures/sample-tariff.js";
 
 const TZ = "Australia/Brisbane";
 
@@ -9,10 +9,10 @@ function brisbane(year: number, month: number, day: number, hour: number, minute
     return new Date(Date.UTC(year, month - 1, day, hour - 10, minute));
 }
 
-describe("getTariffPeriods: live Moorinya fixture", () => {
+describe("getTariffPeriods: live sample fixture", () => {
     it("resolves the current buy/sell rate at a normal half-hour boundary", () => {
         const now = brisbane(2026, 7, 23, 7, 15);
-        const result = getTariffPeriods(MOORINYA_TARIFF, now, { timeZone: TZ });
+        const result = getTariffPeriods(SAMPLE_TARIFF, now, { timeZone: TZ });
         expect(result).not.toBeNull();
         expect(result!.buy).toEqual({ price: 0.3294, periodName: "PERIOD_07_00", seasonName: "Summer" });
         expect(result!.currentStart).toEqual(brisbane(2026, 7, 23, 7, 0));
@@ -22,21 +22,21 @@ describe("getTariffPeriods: live Moorinya fixture", () => {
 
     it("returns a real 0.0 sell price, not null (key-presence, not truthiness)", () => {
         const now = brisbane(2026, 7, 23, 10, 15);
-        const result = getTariffPeriods(MOORINYA_TARIFF, now, { timeZone: TZ });
+        const result = getTariffPeriods(SAMPLE_TARIFF, now, { timeZone: TZ });
         expect(result!.sell.price).toBe(0);
         expect(result!.sell.periodName).toBe("PERIOD_10_00");
     });
 
     it("resolves a nonzero sell peak rate", () => {
         const now = brisbane(2026, 7, 23, 18, 15);
-        const result = getTariffPeriods(MOORINYA_TARIFF, now, { timeZone: TZ });
+        const result = getTariffPeriods(SAMPLE_TARIFF, now, { timeZone: TZ });
         expect(result!.sell.price).toBe(0.45);
         expect(result!.sell.periodName).toBe("PERIOD_18_00");
     });
 
     it("normalizes toHour:24 instead of crashing, and rolls nextChange into the next day", () => {
         const now = brisbane(2026, 7, 23, 23, 45);
-        const result = getTariffPeriods(MOORINYA_TARIFF, now, { timeZone: TZ });
+        const result = getTariffPeriods(SAMPLE_TARIFF, now, { timeZone: TZ });
         expect(result!.buy).toEqual({ price: 0.3107, periodName: "PERIOD_23_30", seasonName: "Summer" });
         expect(result!.currentStart).toEqual(brisbane(2026, 7, 23, 23, 30));
         expect(result!.nextChange).toEqual(brisbane(2026, 7, 24, 0, 0));
@@ -44,7 +44,7 @@ describe("getTariffPeriods: live Moorinya fixture", () => {
 
     it("wraps forward past midnight into PERIOD_00_00", () => {
         const now = brisbane(2026, 7, 24, 0, 10);
-        const result = getTariffPeriods(MOORINYA_TARIFF, now, { timeZone: TZ });
+        const result = getTariffPeriods(SAMPLE_TARIFF, now, { timeZone: TZ });
         expect(result!.buy.periodName).toBe("PERIOD_00_00");
         expect(result!.currentStart).toEqual(brisbane(2026, 7, 24, 0, 0));
         expect(result!.nextChange).toEqual(brisbane(2026, 7, 24, 0, 30));
@@ -52,7 +52,7 @@ describe("getTariffPeriods: live Moorinya fixture", () => {
 
     it("builds an upcoming schedule across the requested horizon", () => {
         const now = brisbane(2026, 7, 23, 7, 15);
-        const result = getTariffPeriods(MOORINYA_TARIFF, now, { timeZone: TZ, horizonHours: 1 });
+        const result = getTariffPeriods(SAMPLE_TARIFF, now, { timeZone: TZ, horizonHours: 1 });
         expect(result!.upcoming).not.toBeNull();
         const upcoming = result!.upcoming!;
         expect(upcoming[0].start).toEqual(now);
@@ -63,7 +63,7 @@ describe("getTariffPeriods: live Moorinya fixture", () => {
 
     it("throws when the caller omits the site timeZone", () => {
         const now = brisbane(2026, 7, 23, 7, 15);
-        expect(() => getTariffPeriods(MOORINYA_TARIFF, now)).toThrow(/timeZone/);
+        expect(() => getTariffPeriods(SAMPLE_TARIFF, now)).toThrow(/timeZone/);
     });
 });
 
