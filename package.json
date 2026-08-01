@@ -1,7 +1,11 @@
 {
     "name": "tesla-fleet-api",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "type": "module",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/Teslemetry/node-tesla-fleet-api"
+    },
     "author": {
         "name": "Teslemetry",
         "email": "hello@teslemetry.com",
