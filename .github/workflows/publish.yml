@@ -12,6 +12,7 @@ jobs:
     name: Publish to npm
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       id-token: write # npm OIDC trusted publishing - no NPM_TOKEN secret needed
     steps:
       - uses: actions/checkout@v4
