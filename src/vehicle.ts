@@ -13,6 +13,7 @@ const Models: Record<string, string> = {
     Y: "Model Y",
     C: "Cybertruck",
     T: "Semi",
+    A: "Cybercab",
 };
 
 export default class Vehicle {
