@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { Models } from "../src/index.js";
 import TeslaFleetApi from "../src/teslafleetapi.js";
 import Vehicle from "../src/vehicle.js";
 
@@ -17,5 +18,19 @@ describe("Vehicle.model", () => {
         ["5YJZZZ0000ZZZZZZZ", "Unknown"],
     ])("maps VIN %s to %s", (vin, expected) => {
         expect(vehicle.model(vin)).toBe(expected);
+    });
+});
+
+describe("Models public export", () => {
+    it.each([
+        ["S", "Model S"],
+        ["3", "Model 3"],
+        ["X", "Model X"],
+        ["Y", "Model Y"],
+        ["C", "Cybertruck"],
+        ["T", "Semi"],
+        ["A", "Cybercab"],
+    ])("maps code %s to %s", (code, expected) => {
+        expect(Models[code]).toBe(expected);
     });
 });

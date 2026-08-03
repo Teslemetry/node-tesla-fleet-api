@@ -21,3 +21,13 @@ export type VehicleResponse = {
 export type GranularAccess = {
     hide_private: boolean;
 };
+
+export const Models: Record<string, string> = {
+    S: "Model S",
+    "3": "Model 3",
+    X: "Model X",
+    Y: "Model Y",
+    C: "Cybertruck",
+    T: "Semi",
+    A: "Cybercab",
+};

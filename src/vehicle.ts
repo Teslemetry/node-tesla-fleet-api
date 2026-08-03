@@ -1,20 +1,10 @@
 import TeslaFleetApi from "./teslafleetapi.js";
 import { ClimateMode, ClimateModes, CommandResponse, FleetTelemetryConfig, Level, Seat, Seats, Trunk, VehicleDataEndpoint } from "./types/commands.js";
 import { OptionsResponse } from "./types/responses.js";
-import { VehicleResponse } from "./types/vehicle.js";
+import { Models, VehicleResponse } from "./types/vehicle.js";
 import { VehicleDataResponse } from "./types/vehicle_data.js";
 import VehicleSpecific from "./vehiclespecific.js";
 import VehicleSigned from "./vehiclesigned.js";
-
-const Models: Record<string, string> = {
-    S: "Model S",
-    "3": "Model 3",
-    X: "Model X",
-    Y: "Model Y",
-    C: "Cybertruck",
-    T: "Semi",
-    A: "Cybercab",
-};
 
 export default class Vehicle {
     parent: TeslaFleetApi;
