@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { Domain, RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
 import { VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
 import { Action, VehicleAction } from "@teslemetry/tesla-protocol/command/car_server";

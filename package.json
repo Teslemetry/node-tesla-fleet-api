@@ -12,15 +12,21 @@
         "url": "https://teslemetry.com"
     },
     "devDependencies": {
+        "@eslint/js": "^10.0.1",
         "@types/node": "^24.13.3",
+        "eslint": "^10.8.0",
+        "publint": "^0.3.23",
         "typescript": "^5.9.2",
+        "typescript-eslint": "^8.66.0",
         "vitest": "^4.1.10"
     },
     "scripts": {
         "prepare": "tsc",
         "watch": "tsc -w",
         "test": "vitest run",
-        "test:watch": "vitest"
+        "test:watch": "vitest",
+        "lint": "eslint .",
+        "pack:check": "publint"
     },
     "files": [
         "dist",
