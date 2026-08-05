@@ -24,4 +24,10 @@ jobs:
 
       - run: npx tsc --noEmit
 
+      - run: pnpm run lint
+
       - run: pnpm test
+
+      - run: npx publint
+
+      - run: npm pack --dry-run

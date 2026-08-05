@@ -172,7 +172,7 @@ export default class TeslaFleetApi {
     }
     ).catch(async () => {
       // Create SECP256R1 private key and save it as a pem file at path
-      const { privateKey } = (await import("crypto")).generateKeyPairSync("ec", {
+      const { privateKey: _privateKey } = (await import("crypto")).generateKeyPairSync("ec", {
         namedCurve: "secp256r1",
         publicKeyEncoding: { type: "spki", format: "pem" },
         privateKeyEncoding: { type: "pkcs8", format: "pem" },

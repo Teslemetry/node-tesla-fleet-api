@@ -1,11 +1,8 @@
 import {
-  AlertTypes,
   ClimateMode,
-  ClimateModes,
   CommandResponse,
   Level,
   Seat,
-  Seats,
   Trunk,
   VehicleDataEndpoint,
 } from "./types/commands.js";
@@ -723,7 +720,7 @@ export default class VehicleSpecific {
    * Returns vehicle option details.
    * @param vin Vehicle Identification Number
    */
-  async options(vin: string): Promise<OptionsResponse> {
+  async options(_vin: string): Promise<OptionsResponse> {
     return this.parent.options(this.vin);
   }
 

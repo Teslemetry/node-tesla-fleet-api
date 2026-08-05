@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import TeslaFleetApi from "../src/teslafleetapi.js";
 import Vehicle from "../src/vehicle.js";
-import VehicleSigned from "../src/vehiclesigned.js";
 import { FakeVehicle } from "./helpers/fakevehicle.js";
 
 const VIN = "5YJXCAE43LF123456";
