@@ -12,6 +12,7 @@
         "url": "https://teslemetry.com"
     },
     "devDependencies": {
+        "@changesets/cli": "^2.31.1",
         "@eslint/js": "^10.0.1",
         "@types/node": "^24.13.3",
         "eslint": "^10.8.0",
@@ -26,7 +27,13 @@
         "test": "vitest run",
         "test:watch": "vitest",
         "lint": "eslint .",
-        "pack:check": "publint"
+        "pack:check": "publint",
+        "changeset": "changeset",
+        "ci:publish": "changeset publish"
+    },
+    "publishConfig": {
+        "access": "public",
+        "provenance": true
     },
     "files": [
         "dist",

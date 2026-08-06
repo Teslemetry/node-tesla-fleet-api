@@ -1,18 +1,24 @@
 name: Publish
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
 
-permissions:
-  contents: read
+concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
-  publish:
-    name: Publish to npm
+  validate:
+    name: Validate
+    uses: ./.github/workflows/reusable-ci.yml
+
+  release:
+    name: Release
+    needs: validate
     runs-on: ubuntu-latest
+    environment: production
     permissions:
-      contents: read
+      contents: write
+      pull-requests: write
       id-token: write # npm OIDC trusted publishing - no NPM_TOKEN secret needed
     steps:
       - uses: actions/checkout@v4
@@ -36,5 +42,12 @@ jobs:
       - name: Build
         run: npx tsc
 
-      - name: Publish to npm
-        run: npm publish --provenance --access public
+      - name: Create Release Pull Request or Publish to npm
+        uses: changesets/action@v1
+        with:
+          publish: pnpm run ci:publish
+          commit: "chore: version packages"
+          title: "chore: version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
