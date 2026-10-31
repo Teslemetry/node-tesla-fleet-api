@@ -8,7 +8,7 @@ type TessieVehicleResponse = {
     last_state: VehicleDataResponse,
 }
 
-export default class Telemetry extends TeslaFleetApi {
+export default class Tessie extends TeslaFleetApi {
     constructor(accessToken: string) {
         super({ accessToken, server: `https://api.tessie.com`, partnerScope: false, userScope: false });
     }
