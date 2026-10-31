@@ -3,20 +3,12 @@ import Energy from "./energy.js";
 import Partner from "./partner.js";
 import User from "./user.js";
 import Vehicle from "./vehicle.js";
+import { Method, Region, SERVERS, is_valid_region } from "./const.js";
 import {
   EnergyProduct,
   ProductsResponse,
   VehicleProduct,
 } from "./types/products.js";
-
-type Region = "na" | "eu" | "cn";
-type Method = "GET" | "POST" | "PUT" | "DELETE";
-
-const servers: Record<Region, string> = {
-  na: "https://fleet-api.prd.na.vn.cloud.tesla.com",
-  eu: "https://fleet-api.prd.eu.vn.cloud.tesla.com",
-  cn: "https://fleet-api.prd.cn.vn.cloud.tesla.cn",
-};
 
 export type ProductsByType = {
   vehicles: VehicleProduct[];
@@ -49,8 +41,8 @@ export default class TeslaFleetApi {
 
     if (options.server) {
       this.server = options.server;
-    } else if (options.region && options.region in servers) {
-      this.server = servers[options.region];
+    } else if (options.region && is_valid_region(options.region)) {
+      this.server = SERVERS[options.region];
     } else {
       throw new Error("Either server or region must be provided.");
     }

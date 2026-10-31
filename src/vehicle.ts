@@ -2,6 +2,7 @@ import TeslaFleetApi from "./teslafleetapi.js";
 import { ClimateMode, ClimateModes, CommandResponse, FleetTelemetryConfig, Level, Seat, Seats, Trunk, VehicleDataEndpoint } from "./types/commands.js";
 import { OptionsResponse } from "./types/responses.js";
 import { Models, VehicleResponse } from "./types/vehicle.js";
+import { AutoSeat } from "./const.js";
 import { VehicleDataResponse } from "./types/vehicle_data.js";
 import VehicleSpecific from "./vehiclespecific.js";
 import VehicleSigned from "./vehiclesigned.js";
@@ -297,16 +298,16 @@ export default class Vehicle {
     /**
      * Sets automatic seat heating and cooling.
      * @param vehicle_tag VIN or id field of a vehicle
-     * @param auto_seat_position Seat position
+     * @param auto_seat_position `AutoSeat` position (1-indexed: front left is 1, front right is 2)
      * @param auto_climate_on `true` or `false`
      */
     async remote_auto_seat_climate_request(
         vehicle_tag: string | number,
-        auto_seat_position: Seat | number,
+        auto_seat_position: keyof typeof AutoSeat | number,
         auto_climate_on: boolean
     ): Promise<CommandResponse> {
         if (typeof auto_seat_position === "string") {
-            auto_seat_position = Seats[auto_seat_position];
+            auto_seat_position = AutoSeat[auto_seat_position];
         }
         return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/remote_auto_seat_climate_request`, null, {
             auto_seat_position,

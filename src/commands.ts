@@ -82,6 +82,7 @@ import {
 import { Void, LatLong, PreconditioningTimes, OffPeakChargingTimes, StwHeatLevel } from "@teslemetry/tesla-protocol/command/common";
 import { VehicleState_GuestMode, ClimateState_CopActivationTemp } from "@teslemetry/tesla-protocol/command/vehicle";
 import { ClimateMode, ClimateModes, CommandResponse, Level, Seat, Seats, Trunk } from "./types/commands.js";
+import { AutoSeat } from "./const.js";
 import Vehicle from "./vehicle.js";
 import VehicleSpecific from "./vehiclespecific.js";
 import { Session } from "./signing/session.js";
@@ -108,10 +109,12 @@ const SeatHeaterFields: Partial<Record<number, keyof HvacSeatHeaterActions_HvacS
     [Seats.FRONT_LEFT]: "carSeatFrontLeft",
     [Seats.FRONT_RIGHT]: "carSeatFrontRight",
     [Seats.REAR_LEFT]: "carSeatRearLeft",
+    [Seats.REAR_LEFT_BACK]: "carSeatRearLeftBack",
     [Seats.REAR_CENTER]: "carSeatRearCenter",
     [Seats.REAR_RIGHT]: "carSeatRearRight",
-    [Seats.THIRD_ROW_LEFT]: "carSeatThirdRowLeft",
-    [Seats.THIRD_ROW_RIGHT]: "carSeatThirdRowRight",
+    [Seats.REAR_RIGHT_BACK]: "carSeatRearRightBack",
+    [Seats.THIRD_LEFT]: "carSeatThirdRowLeft",
+    [Seats.THIRD_RIGHT]: "carSeatThirdRowRight",
 };
 
 const SeatHeaterLevels: Array<keyof HvacSeatHeaterActions_HvacSeatHeaterAction> = [
@@ -134,9 +137,10 @@ const SeatCoolerLevels = [
     HvacSeatCoolerActions_HvacSeatCoolerLevelE.HvacSeatCoolerLevel_High,
 ];
 
+/** Keyed by the 1-indexed `AutoSeat` REST value, which equals the proto enum value. */
 const AutoSeatPositions: Partial<Record<number, AutoSeatClimateAction_AutoSeatPositionE>> = {
-    [Seats.FRONT_LEFT]: AutoSeatClimateAction_AutoSeatPositionE.AutoSeatPosition_FrontLeft,
-    [Seats.FRONT_RIGHT]: AutoSeatClimateAction_AutoSeatPositionE.AutoSeatPosition_FrontRight,
+    [AutoSeat.FRONT_LEFT]: AutoSeatClimateAction_AutoSeatPositionE.AutoSeatPosition_FrontLeft,
+    [AutoSeat.FRONT_RIGHT]: AutoSeatClimateAction_AutoSeatPositionE.AutoSeatPosition_FrontRight,
 };
 
 const StwHeatLevels = [StwHeatLevel.StwHeatLevel_Off, StwHeatLevel.StwHeatLevel_Low, StwHeatLevel.StwHeatLevel_High];
@@ -696,11 +700,11 @@ export default abstract class Commands extends VehicleSpecific {
 
     /**
      * Sets automatic seat heating and cooling. Only the front seats support this action.
-     * @param auto_seat_position Seat position
+     * @param auto_seat_position `AutoSeat` position (1-indexed: front left is 1, front right is 2)
      * @param auto_climate_on `true` or `false`
      */
-    async remote_auto_seat_climate_request(auto_seat_position: Seat | number, auto_climate_on: boolean): Promise<CommandResponse> {
-        const position = AutoSeatPositions[this.resolveSeat(auto_seat_position)];
+    async remote_auto_seat_climate_request(auto_seat_position: keyof typeof AutoSeat | number, auto_climate_on: boolean): Promise<CommandResponse> {
+        const position = AutoSeatPositions[typeof auto_seat_position === "string" ? AutoSeat[auto_seat_position] : auto_seat_position];
         if (position === undefined) {
             throw new Error(`Invalid seat position for auto seat climate: ${auto_seat_position}`);
         }
