@@ -4,6 +4,12 @@ import Partner from "./partner.js";
 import User from "./user.js";
 import Vehicle from "./vehicle.js";
 import {
+  ResponseError,
+  TeslaFleetConnectionError,
+  TeslaFleetError,
+  raise_for_status,
+} from "./exceptions.js";
+import {
   EnergyProduct,
   ProductsResponse,
   VehicleProduct,
@@ -32,6 +38,8 @@ export default class TeslaFleetApi {
   user?: User;
   vehicle?: Vehicle;
   debug: boolean = false;
+  /** Abort a request (including reading its body) after this many milliseconds; `null` waits indefinitely. */
+  timeout: number | null;
 
   constructor(options: {
     accessToken?: string;
@@ -43,8 +51,10 @@ export default class TeslaFleetApi {
     userScope?: boolean;
     vehicleScope?: boolean;
     debug?: boolean;
+    timeout?: number;
   }) {
     this.debug = !!options.debug;
+    this.timeout = options.timeout ?? null;
     this.accessToken = options.accessToken ?? null;
 
     if (options.server) {
@@ -75,8 +85,19 @@ export default class TeslaFleetApi {
     }
   }
 
-  async _response(resp: Response) {
-    return {status: resp.status, data: await resp.json()};
+  /**
+   * Turn a response into its decoded JSON body, throwing the matching
+   * `TeslaFleetError` for an error status and `ResponseError` for a
+   * successful response whose body is not JSON.
+   */
+  async _response(resp: Response): Promise<any> {
+    await raise_for_status(resp);
+    const text = await resp.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new ResponseError(text, resp.status);
+    }
   }
 
   /**
@@ -85,7 +106,10 @@ export default class TeslaFleetApi {
    * @param path
    * @param params
    * @param json
-   * @returns
+   * @returns The decoded JSON body.
+   * @throws A `TeslaFleetError` subclass for an error status, or
+   * `TeslaFleetConnectionError` (with the original error as `cause`) when the
+   * request could not complete or timed out.
    */
   async _request(
     method: Method,
@@ -125,19 +149,20 @@ export default class TeslaFleetApi {
 
     const query = params ? "?" + new URLSearchParams(params).toString() : "";
 
-    return fetch(`${this.server}/${path}${query}`, {
-      method,
-      headers,
-      body: json ? JSON.stringify(json) : null,
-    })
-    .then((resp) => this._response(resp))
-    .then(
-        ({status,data}) => {
-          if (status <= 299) return data;
-          return Promise.reject({ status, data });
-        },
-        (e) => Promise.reject({error: e})
-    );
+    try {
+      const resp = await fetch(`${this.server}/${path}${query}`, {
+        method,
+        headers,
+        body: json ? JSON.stringify(json) : null,
+        signal: this.timeout != null ? AbortSignal.timeout(this.timeout) : null,
+      });
+      return await this._response(resp);
+    } catch (error) {
+      if (error instanceof TeslaFleetError) {
+        throw error;
+      }
+      throw new TeslaFleetConnectionError(null, null, { cause: error });
+    }
   }
 
   /**

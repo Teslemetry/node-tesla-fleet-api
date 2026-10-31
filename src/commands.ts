@@ -87,11 +87,15 @@ import VehicleSpecific from "./vehiclespecific.js";
 import { Session } from "./signing/session.js";
 import { deriveSharedKey, publicKeyFor, uint32BE } from "./signing/crypto.js";
 import {
-    NotOnVehicleWhitelistError,
-    RetryableSignedCommandFaultError,
-    SignedCommandError,
-    createFaultError,
-} from "./signing/errors.js";
+    MESSAGE_FAULTS,
+    NotOnWhitelistFault,
+    SIGNED_MESSAGE_INFORMATION_FAULTS,
+    SessionInfoAuthenticationFault,
+    SignedMessageInformationFault,
+    TeslaFleetMessageFault,
+    TeslaFleetMessageFaultIncorrectEpoch,
+    TeslaFleetMessageFaultInvalidTokenOrCounter,
+} from "./exceptions.js";
 
 const VOID: Void = {};
 
@@ -259,7 +263,7 @@ export default abstract class Commands extends VehicleSpecific {
             const domain = resp.fromDestination?.domain;
             const session = domain !== undefined ? this.sessions[domain] : undefined;
             if (!session) {
-                throw new SignedCommandError("Session info reply is missing a recognized source domain.");
+                throw new SessionInfoAuthenticationFault("Session info reply is missing a recognized source domain.");
             }
 
             // VCSEC typically leaves request_uuid empty on real vehicles
@@ -268,7 +272,7 @@ export default abstract class Commands extends VehicleSpecific {
             // as TAG_CHALLENGE, is the actual authentication. Only cross-check
             // the echo when the vehicle chose to populate it.
             if (resp.requestUuid && resp.requestUuid.length > 0 && !requestUuid.equals(Buffer.from(resp.requestUuid))) {
-                throw new SignedCommandError("Session info reply does not match an outstanding request; discarded.");
+                throw new SessionInfoAuthenticationFault("Session info reply does not match an outstanding request; discarded.");
             }
 
             const info = SessionInfo.decode(resp.sessionInfo);
@@ -276,7 +280,7 @@ export default abstract class Commands extends VehicleSpecific {
 
             const tag = resp.signatureData?.sessionInfoTag?.tag;
             if (!tag || tag.length === 0) {
-                throw new SignedCommandError("Session info reply is missing its authentication tag; discarded.");
+                throw new SessionInfoAuthenticationFault("Session info reply is missing its authentication tag; discarded.");
             }
             const metadata = Buffer.concat([
                 Buffer.from([Tag.TAG_SIGNATURE_TYPE, 1, SignatureType.SIGNATURE_TYPE_HMAC]),
@@ -292,21 +296,22 @@ export default abstract class Commands extends VehicleSpecific {
                 .digest();
             const receivedTag = Buffer.from(tag);
             if (expectedTag.length !== receivedTag.length || !crypto.timingSafeEqual(expectedTag, receivedTag)) {
-                throw new SignedCommandError("Session info reply failed authentication (invalid tag); discarded.");
+                throw new SessionInfoAuthenticationFault("Session info reply failed authentication (invalid tag); discarded.");
             }
 
             // Only now that the reply is authenticated do we act on its contents.
             if (info.status === SessionInfoStatus.SESSION_INFO_STATUS_KEY_NOT_ON_WHITELIST) {
-                throw new NotOnVehicleWhitelistError();
+                throw new NotOnWhitelistFault();
             }
             if (!session.commit(info, keys)) {
-                throw new SignedCommandError("Session info reply is stale (clock regressed within the same epoch); discarded.");
+                throw new SessionInfoAuthenticationFault("Session info reply is stale (clock regressed within the same epoch); discarded.");
             }
         }
 
         const fault = resp.signedMessageStatus?.signedMessageFault;
         if (fault !== undefined && fault !== MessageFaultE.MESSAGEFAULT_ERROR_NONE) {
-            throw createFaultError(fault);
+            const cls = MESSAGE_FAULTS[fault] ?? TeslaFleetMessageFault;
+            throw new cls({ fault });
         }
     }
 
@@ -384,7 +389,11 @@ export default abstract class Commands extends VehicleSpecific {
                 try {
                     resp = await this._send(msg, "protobuf_message_as_bytes", expectsData);
                 } catch (error) {
-                    if (error instanceof RetryableSignedCommandFaultError && attempt < MAX_ATTEMPTS - 1) {
+                    // Epoch/counter drift: the reply carried fresh session info, so re-sign and resend.
+                    const retryable =
+                        error instanceof TeslaFleetMessageFaultIncorrectEpoch ||
+                        error instanceof TeslaFleetMessageFaultInvalidTokenOrCounter;
+                    if (retryable && attempt < MAX_ATTEMPTS - 1) {
                         continue;
                     }
                     throw error;
@@ -451,9 +460,8 @@ export default abstract class Commands extends VehicleSpecific {
             if (vcsec.commandStatus.operationStatus === VcsecOperationStatusE.OPERATIONSTATUS_ERROR) {
                 const information = vcsec.commandStatus.signedMessageStatus?.signedMessageInformation;
                 if (information) {
-                    throw new SignedCommandError(
-                        `Vehicle security rejected signed command: ${signedMessageInformationEToJSON(information)}`,
-                    );
+                    const cls = SIGNED_MESSAGE_INFORMATION_FAULTS[information] ?? SignedMessageInformationFault;
+                    throw new cls({ information: signedMessageInformationEToJSON(information) });
                 }
             }
         }
