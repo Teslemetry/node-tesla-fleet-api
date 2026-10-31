@@ -3,8 +3,6 @@ import { Scope } from "./types/commands.js";
 
 type Region = "na" | "eu" | "api";
 
-type Test = { response: boolean };
-
 type Metadata = {
   uid: string;
   region: "NA" | "EU";
@@ -35,7 +33,7 @@ export default class Teslemetry extends TeslaFleetApi {
   /**
    * Test the connection to Teslemetry
    */
-  async test(): Promise<Test> {
+  async test(): Promise<boolean> {
     return this._request("GET", "api/test").then(({ response }) => response);
   }
 
