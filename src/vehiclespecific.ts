@@ -6,6 +6,7 @@ import {
   Trunk,
   VehicleDataEndpoint,
 } from "./types/commands.js";
+import { AutoSeat } from "./const.js";
 import { OptionsResponse } from "./types/responses.js";
 import { VehicleResponse } from "./types/vehicle.js";
 import { VehicleDataResponse } from "./types/vehicle_data.js";
@@ -241,11 +242,11 @@ export default class VehicleSpecific {
 
   /**
    * Sets automatic seat heating and cooling.
-   * @param auto_seat_position Seat position
+   * @param auto_seat_position `AutoSeat` position (1-indexed: front left is 1, front right is 2)
    * @param auto_climate_on `true` or `false`
    */
   async remote_auto_seat_climate_request(
-    auto_seat_position: Seat | number,
+    auto_seat_position: keyof typeof AutoSeat | number,
     auto_climate_on: boolean,
   ): Promise<CommandResponse> {
     return this.parent.remote_auto_seat_climate_request(

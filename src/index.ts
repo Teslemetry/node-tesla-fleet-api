@@ -12,5 +12,5 @@ export { Commands, Energy, EnergySpecific, TeslaFleetApi, Teslemetry, Tessie, Ve
 export { Session } from "./signing/session.js";
 export * from "./exceptions.js";
 export { getTariffPeriods } from "./tariff.js";
-export { Models } from "./types/vehicle.js";
+export * from "./const.js";
 export type { TariffRate, TariffPeriod, TariffResolution } from "./tariff.js";

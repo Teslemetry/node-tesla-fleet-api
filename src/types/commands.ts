@@ -6,42 +6,8 @@ export interface CommandResponse {
     error?: string;
 }
 
-export type Scope =
-    | "user_data"
-    | "vehicle_device_data"
-    | "vehicle_cmds"
-    | "vehicle_charging_cmds"
-    | "energy_device_data"
-    | "energy_cmds"
-    | "offline_access"
-    | "openid";
-
-// Vehicles
-
-export type Trunk = "front" | "rear";
-export const Seats = {
-    FRONT_LEFT: 0,
-    FRONT_RIGHT: 1,
-    REAR_LEFT: 2,
-    REAR_CENTER: 4,
-    REAR_RIGHT: 5,
-    THIRD_ROW_LEFT: 6,
-    THIRD_ROW_RIGHT: 7,
-};
-export type Seat = keyof typeof Seats;
-export type Level = 0 | 1 | 2 | 3;
-export const ClimateModes = { Off: 0, Keep: 1, Dog: 2, Camp: 3 };
-export type ClimateMode = keyof typeof ClimateModes;
-export type VehicleDataEndpoint =
-    | "charge_state"
-    | "climate_state"
-    | "closures_state"
-    | "drive_state"
-    | "gui_settings"
-    | "location_data"
-    | "vehicle_config"
-    | "vehicle_state"
-    | "vehicle_data_combo";
+export type { Scope, Trunk, Seat, Level, ClimateMode, VehicleDataEndpoint } from "../const.js";
+export { Seats, ClimateModes } from "../const.js";
 
 export type AlertTypes = "customer" | "service";
 

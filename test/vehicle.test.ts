@@ -13,6 +13,7 @@ describe("Vehicle.model", () => {
         ["5YJXCAE43LF123456", "Model X"],
         ["5YJYGDEE1MF000001", "Model Y"],
         ["7G2CEKED0RA000001", "Cybertruck"],
+        ["5YJRE11B081000001", "Roadster"],
         ["7G2TARED8RA000001", "Semi"],
         ["7G2AARED8RA000001", "Cybercab"],
         ["5YJZZZ0000ZZZZZZZ", "Unknown"],
@@ -28,6 +29,7 @@ describe("Models public export", () => {
         ["X", "Model X"],
         ["Y", "Model Y"],
         ["C", "Cybertruck"],
+        ["R", "Roadster"],
         ["T", "Semi"],
         ["A", "Cybercab"],
     ])("maps code %s to %s", (code, expected) => {

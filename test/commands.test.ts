@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { Domain, RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
 import { VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
-import { Action, VehicleAction } from "@teslemetry/tesla-protocol/command/car_server";
+import { Action, AutoSeatClimateAction_AutoSeatPositionE, VehicleAction } from "@teslemetry/tesla-protocol/command/car_server";
 import Commands from "../src/commands.js";
 import Vehicle from "../src/vehicle.js";
 import { NotOnWhitelistFault, SessionInfoAuthenticationFault, TeslaFleetMessageFaultInvalidSignature } from "../src/exceptions.js";
 import { publicKeyFor } from "../src/signing/crypto.js";
+import { AutoSeat, Seats } from "../src/const.js";
 import { FakeVehicle } from "./helpers/fakevehicle.js";
 
 const VIN = "5YJXCAE43LF123456";
@@ -348,13 +349,7 @@ describe("Commands: protobuf construction for representative commands", () => {
     });
 
     it("remote_seat_heater_request rejects an unmapped seat position", async () => {
-        await expect(commands.remote_seat_heater_request(3 as any, 1)).rejects.toThrow(/Invalid seat position/);
-    });
-
-    it("remote_seat_heater_request accepts every seat Node's Seats enum defines", async () => {
-        for (const seat of [0, 1, 2, 4, 5, 6, 7]) {
-            await expect(commands.remote_seat_heater_request(seat, 2)).resolves.toMatchObject({ response: { result: true } });
-        }
+        await expect(commands.remote_seat_heater_request(9 as any, 1)).rejects.toThrow(/Invalid seat position/);
     });
 
     it("set_climate_keeper_mode accepts both string and numeric modes", async () => {
@@ -375,5 +370,60 @@ describe("Commands: protobuf construction for representative commands", () => {
 
     it("navigation_sc_request without an order builds successfully", async () => {
         await expect(commands.navigation_sc_request(12345)).resolves.toMatchObject({ response: { result: true } });
+    });
+});
+
+describe("Commands: Seats and AutoSeat drive the signed seat maps", () => {
+    class CapturingCommands extends TestCommands {
+        capturedActions: VehicleAction[] = [];
+
+        protected async _send(msg: RoutableMessage, requires: string, expectsData?: boolean, confirmBroadcast?: (status: VehicleStatus) => boolean): Promise<RoutableMessage> {
+            if (msg.protobufMessageAsBytes && msg.protobufMessageAsBytes.length > 0 && msg.toDestination?.domain === Domain.DOMAIN_INFOTAINMENT) {
+                const action = Action.decode(msg.protobufMessageAsBytes);
+                if (action.vehicleAction) {
+                    this.capturedActions.push(action.vehicleAction);
+                }
+            }
+            return super._send(msg, requires, expectsData, confirmBroadcast);
+        }
+    }
+
+    it.each([
+        ["FRONT_LEFT", 0, "carSeatFrontLeft"],
+        ["FRONT_RIGHT", 1, "carSeatFrontRight"],
+        ["REAR_LEFT", 2, "carSeatRearLeft"],
+        ["REAR_LEFT_BACK", 3, "carSeatRearLeftBack"],
+        ["REAR_CENTER", 4, "carSeatRearCenter"],
+        ["REAR_RIGHT", 5, "carSeatRearRight"],
+        ["REAR_RIGHT_BACK", 6, "carSeatRearRightBack"],
+        ["THIRD_LEFT", 7, "carSeatThirdRowLeft"],
+        ["THIRD_RIGHT", 8, "carSeatThirdRowRight"],
+        ["THIRD_ROW_LEFT", 7, "carSeatThirdRowLeft"],
+        ["THIRD_ROW_RIGHT", 8, "carSeatThirdRowRight"],
+    ] as const)("remote_seat_heater_request maps Seats.%s (%i) to %s", async (name, value, field) => {
+        expect(Seats[name]).toBe(value);
+        for (const seat of [name, value]) {
+            const commands = new CapturingCommands();
+            await expect(commands.remote_seat_heater_request(seat, 2)).resolves.toMatchObject({ response: { result: true } });
+            const heater = commands.capturedActions[0]?.hvacSeatHeaterActions?.hvacSeatHeaterAction[0];
+            expect(heater?.[field]).toBeDefined();
+            expect(heater?.seatHeaterMed).toBeDefined();
+        }
+    });
+
+    it.each([
+        ["FRONT_LEFT", 1, AutoSeatClimateAction_AutoSeatPositionE.AutoSeatPosition_FrontLeft],
+        ["FRONT_RIGHT", 2, AutoSeatClimateAction_AutoSeatPositionE.AutoSeatPosition_FrontRight],
+    ] as const)("remote_auto_seat_climate_request maps AutoSeat.%s (%i) to the proto position", async (name, value, position) => {
+        expect(AutoSeat[name]).toBe(value);
+        for (const seat of [name, value]) {
+            const commands = new CapturingCommands();
+            await expect(commands.remote_auto_seat_climate_request(seat, true)).resolves.toMatchObject({ response: { result: true } });
+            expect(commands.capturedActions[0]?.autoSeatClimateAction?.carseat[0]).toMatchObject({ on: true, seatPosition: position });
+        }
+    });
+
+    it("remote_auto_seat_climate_request rejects the 0-based Seats value", async () => {
+        await expect(new TestCommands().remote_auto_seat_climate_request(0, true)).rejects.toThrow(/Invalid seat position/);
     });
 });
