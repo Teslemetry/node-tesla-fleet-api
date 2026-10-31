@@ -59,7 +59,6 @@ export default class Energy {
     return this.parent._request(
       "GET",
       `api/1/energy_sites/${energy_site_id}/calendar_history`,
-      null,
       { kind, start_date, end_date, period, time_zone },
     );
   }
@@ -83,7 +82,6 @@ export default class Energy {
     return this.parent._request(
       "GET",
       `api/1/energy_sites/${energy_site_id}/telemetry_history`,
-      null,
       { kind, start_date, end_date, time_zone },
     );
   }
@@ -109,7 +107,6 @@ export default class Energy {
     return this.parent._request(
       "GET",
       `api/1/energy_sites/${energy_site_id}/calendar_history`,
-      null,
       { kind, start_date, end_date, period, time_zone },
     );
   }
