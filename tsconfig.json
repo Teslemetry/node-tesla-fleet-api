@@ -1,16 +1,17 @@
 {
   "compilerOptions": {
-    "target": "es2020",
+    "target": "es2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "strict": true,
+    "types": ["node"],
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    "noImplicitAny": true,
     "removeComments": false,
     "preserveConstEnums": true,
     "sourceMap": true,
     "outDir": "./dist",
     "declaration": true
   },
-  "include": ["src/**.ts"]
+  "include": ["src/**/*.ts"]
 }

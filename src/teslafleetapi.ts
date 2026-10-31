@@ -45,7 +45,7 @@ export default class TeslaFleetApi {
     debug?: boolean;
   }) {
     this.debug = !!options.debug;
-    this.accessToken = options.accessToken;
+    this.accessToken = options.accessToken ?? null;
 
     if (options.server) {
       this.server = options.server;
