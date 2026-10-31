@@ -3,8 +3,6 @@ import { Scope } from "./types/commands.js";
 
 type Region = "na" | "eu" | "api";
 
-type Test = { response: boolean };
-
 type Metadata = {
   uid: string;
   region: "NA" | "EU";
@@ -12,7 +10,7 @@ type Metadata = {
   vins: string[];
 };
 
-export default class Telemetry extends TeslaFleetApi {
+export default class Teslemetry extends TeslaFleetApi {
   constructor(accessToken: string, region: Region = "api") {
     super({
       accessToken,
@@ -35,8 +33,8 @@ export default class Telemetry extends TeslaFleetApi {
   /**
    * Test the connection to Teslemetry
    */
-  async test(): Promise<Test> {
-    return this._request("GET", "/api/test").then(({ response }) => response);
+  async test(): Promise<boolean> {
+    return this._request("GET", "api/test").then(({ response }) => response);
   }
 
   /**
@@ -44,7 +42,7 @@ export default class Telemetry extends TeslaFleetApi {
    * @param update_region Update the server URL based on the region in the metadata
    */
   async metadata(update_region = true): Promise<Metadata> {
-    return this._request("GET", "/api/metadata").then((metadata) => {
+    return this._request("GET", "api/metadata").then((metadata) => {
       if (update_region) {
         this.server = `https://${metadata.region.toLowerCase()}.teslemetry.com`;
       }

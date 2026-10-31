@@ -698,7 +698,7 @@ export default class Vehicle {
      * @param vin Vehicle Identification Number
      */
     async eligible_subscriptions(vin: string): Promise<Record<string, any>> {
-        return this.parent._request("GET", "/api/1/dx/vehicles/subscriptions/eligibility", { vin });
+        return this.parent._request("GET", "api/1/dx/vehicles/subscriptions/eligibility", { vin });
     }
 
     /**
@@ -706,7 +706,7 @@ export default class Vehicle {
      * @param vin Vehicle Identification Number
      */
     async eligible_upgrades(vin: string): Promise<Record<string, any>> {
-        return this.parent._request("GET", "/api/1/dx/vehicles/upgrades/eligibility", { vin });
+        return this.parent._request("GET", "api/1/dx/vehicles/upgrades/eligibility", { vin });
     }
 
     /**

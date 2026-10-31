@@ -130,7 +130,7 @@ export default class TeslaFleetApi {
       headers,
       body: json ? JSON.stringify(json) : null,
     })
-    .then(this._response)
+    .then((resp) => this._response(resp))
     .then(
         ({status,data}) => {
           if (status <= 299) return data;
