@@ -10,12 +10,7 @@ import VehicleSpecific from "./vehiclespecific.js";
 
 export { Commands, Energy, EnergySpecific, TeslaFleetApi, Teslemetry, Tessie, Vehicle, VehicleSigned, VehicleSpecific };
 export { Session } from "./signing/session.js";
-export {
-    SignedCommandError,
-    NotOnVehicleWhitelistError,
-    SignedCommandFaultError,
-    RetryableSignedCommandFaultError,
-} from "./signing/errors.js";
+export * from "./exceptions.js";
 export { getTariffPeriods } from "./tariff.js";
 export * from "./const.js";
 export type { TariffRate, TariffPeriod, TariffResolution } from "./tariff.js";

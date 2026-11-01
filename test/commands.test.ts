@@ -4,7 +4,7 @@ import { VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
 import { Action, AutoSeatClimateAction_AutoSeatPositionE, VehicleAction } from "@teslemetry/tesla-protocol/command/car_server";
 import Commands from "../src/commands.js";
 import Vehicle from "../src/vehicle.js";
-import { NotOnVehicleWhitelistError, SignedCommandFaultError } from "../src/signing/errors.js";
+import { NotOnWhitelistFault, SessionInfoAuthenticationFault, TeslaFleetMessageFaultInvalidSignature } from "../src/exceptions.js";
 import { publicKeyFor } from "../src/signing/crypto.js";
 import { AutoSeat, Seats } from "../src/const.js";
 import { FakeVehicle } from "./helpers/fakevehicle.js";
@@ -116,7 +116,7 @@ describe("Commands: session handshake", () => {
     it("throws when the vehicle reports this key is not on its whitelist", async () => {
         const commands = new TestCommands();
         commands.fakeVehicle.rejectNextAsNotWhitelisted();
-        await expect(commands.door_lock()).rejects.toThrow(NotOnVehicleWhitelistError);
+        await expect(commands.door_lock()).rejects.toThrow(NotOnWhitelistFault);
     });
 
     // Regression test for a round-2 fix: real VCSEC hardware leaves
@@ -196,7 +196,9 @@ describe("Commands: session-info authentication (rejects tampered/spoofed handsh
     it("rejects a session-info reply replayed against a request it wasn't tagged for", async () => {
         const commands = new TestCommands();
         commands.fakeVehicle.spoofNextSessionInfoChallenge();
-        await expect(commands.door_lock()).rejects.toThrow(/outstanding request/i);
+        const error = await commands.door_lock().catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(SessionInfoAuthenticationFault);
+        expect((error as SessionInfoAuthenticationFault).data).toMatch(/outstanding request/i);
     });
 
     it("rejects a validly-signed but stale (rolled-back clock, same epoch) session-info resync", async () => {
@@ -214,7 +216,9 @@ describe("Commands: session-info authentication (rejects tampered/spoofed handsh
         commands.fakeVehicle.attachSessionInfoToNextReply();
         commands.fakeVehicle.replayStaleSessionInfo(1, Math.floor(Date.now() / 1000) - 100000);
 
-        await expect(commands.door_unlock()).rejects.toThrow(/stale/i);
+        const error = await commands.door_unlock().catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(SessionInfoAuthenticationFault);
+        expect((error as SessionInfoAuthenticationFault).data).toMatch(/stale/i);
         // The rejected resync's stale counter (1) and clock must not have been
         // adopted - the counter only ever moves forward (from signing the
         // outgoing door_unlock itself), and delta is untouched entirely.
@@ -260,7 +264,7 @@ describe("Commands: HMAC round trip against an independent vehicle simulator", (
     it("rejects a tampered command instead of silently succeeding", async () => {
         const commands = new TestCommands();
         commands.fakeVehicle.rejectNextAsBadSignature();
-        await expect(commands.door_lock()).rejects.toThrow(SignedCommandFaultError);
+        await expect(commands.door_lock()).rejects.toThrow(TeslaFleetMessageFaultInvalidSignature);
     });
 
     it("retries on a WAIT reply and eventually succeeds", async () => {
