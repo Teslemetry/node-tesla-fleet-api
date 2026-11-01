@@ -29,4 +29,16 @@ jobs:
 
       - run: npx publint
 
+      - run: npx attw --pack . --profile node16
+
+      # `pnpm install` built dist via `prepare`; consume it as a user would.
+      - name: ESM and CJS consumers
+        run: |
+          node test/consumers/esm.mjs
+          node test/consumers/cjs.cjs
+
+      # `@teslemetry/api` inlines ./tariff, so it must stay free of protobuf.
+      - name: ./tariff has no tesla-protocol import
+        run: "! grep -l tesla-protocol dist/tariff.*"
+
       - run: npm pack --dry-run
