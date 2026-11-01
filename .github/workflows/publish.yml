@@ -40,7 +40,7 @@ jobs:
         run: npm install -g npm@latest # trusted publishing needs npm >= 11.5.1
 
       - name: Build
-        run: npx tsc
+        run: pnpm build
 
       - name: Create Release Pull Request or Publish to npm
         uses: changesets/action@v1
