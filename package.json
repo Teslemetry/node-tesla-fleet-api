@@ -12,32 +12,34 @@
         "url": "https://teslemetry.com"
     },
     "devDependencies": {
+        "@arethetypeswrong/cli": "^0.18.5",
         "@changesets/cli": "^2.31.1",
         "@eslint/js": "^10.0.1",
         "@types/node": "^24.13.3",
         "eslint": "^10.8.0",
         "publint": "^0.3.23",
+        "tsdown": "^0.23.4",
         "typescript": "^5.9.2",
         "typescript-eslint": "^8.66.0",
         "vitest": "^4.1.10"
     },
     "scripts": {
-        "prepare": "tsc",
-        "watch": "tsc -w",
+        "prepare": "tsdown",
+        "watch": "tsdown --watch",
         "test": "vitest run",
         "test:watch": "vitest",
         "lint": "eslint .",
-        "pack:check": "publint",
+        "pack:check": "publint && attw --pack . --profile node16",
         "changeset": "changeset",
-        "ci:publish": "changeset publish"
+        "ci:publish": "changeset publish",
+        "build": "tsdown"
     },
     "publishConfig": {
         "access": "public",
         "provenance": true
     },
     "files": [
-        "dist",
-        "src"
+        "dist"
     ],
     "keywords": [
         "tesla",
@@ -45,7 +47,63 @@
         "teslemetry",
         "tessie"
     ],
-    "main": "dist/index.js",
+    "main": "./dist/index.cjs",
+    "module": "./dist/index.mjs",
+    "types": "./dist/index.d.cts",
+    "exports": {
+        ".": {
+            "import": {
+                "types": "./dist/index.d.mts",
+                "default": "./dist/index.mjs"
+            },
+            "require": {
+                "types": "./dist/index.d.cts",
+                "default": "./dist/index.cjs"
+            }
+        },
+        "./tariff": {
+            "import": {
+                "types": "./dist/tariff.d.mts",
+                "default": "./dist/tariff.mjs"
+            },
+            "require": {
+                "types": "./dist/tariff.d.cts",
+                "default": "./dist/tariff.cjs"
+            }
+        },
+        "./const": {
+            "import": {
+                "types": "./dist/const.d.mts",
+                "default": "./dist/const.mjs"
+            },
+            "require": {
+                "types": "./dist/const.d.cts",
+                "default": "./dist/const.cjs"
+            }
+        },
+        "./router": {
+            "import": {
+                "types": "./dist/router.d.mts",
+                "default": "./dist/router.mjs"
+            },
+            "require": {
+                "types": "./dist/router.d.cts",
+                "default": "./dist/router.cjs"
+            }
+        },
+        "./types": {
+            "import": {
+                "types": "./dist/types.d.mts",
+                "default": "./dist/types.mjs"
+            },
+            "require": {
+                "types": "./dist/types.d.cts",
+                "default": "./dist/types.cjs"
+            }
+        },
+        "./package.json": "./package.json"
+    },
+    "sideEffects": false,
     "engines": {
         "node": ">=22"
     },

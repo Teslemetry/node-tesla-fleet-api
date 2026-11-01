@@ -23,4 +23,10 @@ export default tseslint.config(
             ],
         },
     },
+    {
+        // Plain-JS consumer smoke tests run directly by Node in CI.
+        files: ["test/consumers/**"],
+        languageOptions: {globals: {console: "readonly", require: "readonly"}},
+        rules: {"@typescript-eslint/no-require-imports": "off"},
+    },
 );
