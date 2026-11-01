@@ -51,6 +51,6 @@
     },
     "license": "Apache-2.0",
     "dependencies": {
-        "@teslemetry/tesla-protocol": "^0.5.0"
+        "@teslemetry/tesla-protocol": "~6.0.0"
     }
 }

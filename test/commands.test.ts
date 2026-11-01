@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { Domain, RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
 import { VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
-import { Action, AutoSeatClimateAction_AutoSeatPositionE, VehicleAction } from "@teslemetry/tesla-protocol/command/car_server";
+import { Action, AutoSeatClimateAction_AutoSeatPositionE, RemoteNavTripOrderE, VehicleAction } from "@teslemetry/tesla-protocol/command/car_server";
 import Commands from "../src/commands.js";
 import Vehicle from "../src/vehicle.js";
 import { NotOnWhitelistFault, SessionInfoAuthenticationFault, TeslaFleetMessageFaultInvalidSignature } from "../src/exceptions.js";
@@ -365,11 +365,28 @@ describe("Commands: protobuf construction for representative commands", () => {
 
     it("rejects cross-transport gaps rather than silently dropping data", async () => {
         await expect(commands.sun_roof_control("stop")).rejects.toThrow(/not representable/);
-        await expect(commands.navigation_sc_request(12345, 2)).rejects.toThrow(/not representable/);
     });
 
-    it("navigation_sc_request without an order builds successfully", async () => {
-        await expect(commands.navigation_sc_request(12345)).resolves.toMatchObject({ response: { result: true } });
+    it("navigation_sc_request carries both the supercharger id and the trip order on the wire", async () => {
+        const sent: VehicleAction[] = [];
+        class CapturingCommands extends TestCommands {
+            protected async _send(msg: RoutableMessage, requires: string, expectsData?: boolean, confirmBroadcast?: (status: VehicleStatus) => boolean): Promise<RoutableMessage> {
+                if (msg.protobufMessageAsBytes && msg.protobufMessageAsBytes.length > 0 && msg.toDestination?.domain === Domain.DOMAIN_INFOTAINMENT) {
+                    const action = Action.decode(msg.protobufMessageAsBytes);
+                    if (action.vehicleAction) sent.push(action.vehicleAction);
+                }
+                return super._send(msg, requires, expectsData, confirmBroadcast);
+            }
+        }
+        const capturing = new CapturingCommands();
+
+        await expect(capturing.navigation_sc_request(12345, RemoteNavTripOrderE.RemoteNavTripOrderAppend)).resolves.toMatchObject({ response: { result: true } });
+        await expect(capturing.navigation_sc_request(67890)).resolves.toMatchObject({ response: { result: true } });
+
+        expect(sent.map((a) => a.navigationSuperchargerRequest)).toEqual([
+            { id: 12345, remoteNavTripOrder: RemoteNavTripOrderE.RemoteNavTripOrderAppend },
+            { id: 67890, remoteNavTripOrder: RemoteNavTripOrderE.RemoteNavTripOrderReplace },
+        ]);
     });
 });
 

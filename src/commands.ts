@@ -666,10 +666,10 @@ export default abstract class Commands extends VehicleSpecific {
     }
 
     /**
-     * Start navigation to given coordinates. Order can be used to specify order of multiple stops.
+     * Start navigation to given coordinates.
      * @param lat Latitude
      * @param lon Longitude
-     * @param order Order of multiple stops
+     * @param order Trip order: `0` replaces the current trip (default), `1` prepends it as the next stop, `2` appends it as the last stop
      */
     async navigation_gps_request(lat: number, lon: number, order: number = 0): Promise<CommandResponse> {
         return this.vehicleAction(
@@ -692,18 +692,15 @@ export default abstract class Commands extends VehicleSpecific {
 
     /**
      * Start navigation to a supercharger.
-     *
-     * The signed-command protobuf has a single `order` field carrying the
-     * supercharger identifier; a caller-supplied multi-stop `order` has no
-     * representable slot and is rejected rather than silently dropped.
      * @param id Supercharger ID
-     * @param order Order of multiple stops - not representable in a signed command
+     * @param order Trip order: `0` replaces the current trip (default), `1` prepends it as the next stop, `2` appends it as the last stop
      */
     async navigation_sc_request(id: number, order?: number): Promise<CommandResponse> {
-        if (order !== undefined) {
-            throw new Error("navigation_sc_request: multi-stop order is not representable in a signed command.");
-        }
-        return this.vehicleAction(VehicleAction.create({ navigationSuperchargerRequest: NavigationSuperchargerRequest.create({ order: id }) }));
+        return this.vehicleAction(
+            VehicleAction.create({
+                navigationSuperchargerRequest: NavigationSuperchargerRequest.create({ id, remoteNavTripOrder: order ?? 0 }),
+            }),
+        );
     }
 
     /**

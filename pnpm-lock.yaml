@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@teslemetry/tesla-protocol':
-        specifier: ^0.5.0
-        version: 0.5.0
+        specifier: ~6.0.0
+        version: 6.0.0
     devDependencies:
       '@changesets/cli':
         specifier: ^2.31.1
@@ -313,8 +313,8 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
-  '@teslemetry/tesla-protocol@0.5.0':
-    resolution: {integrity: sha512-YAsDboZcBXjB6yI4kKa9K2T5OC1Z6HTMDTwoxtAhOjhhZ/hEgYx69KAO/+6y1riMb/5tnMVH7fpNKt+/NhmWpA==}
+  '@teslemetry/tesla-protocol@6.0.0':
+    resolution: {integrity: sha512-WZWiyveXWjSYnOn3w6G/Ts6zKmNes7xekSz9LCyPRapWl764YY5Mb7MmEWCS8S3Pw2XgiHHekReqeYixkGCXDA==}
     engines: {node: '>=20'}
 
   '@tybys/wasm-util@0.10.3':
@@ -1503,7 +1503,7 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
-  '@teslemetry/tesla-protocol@0.5.0':
+  '@teslemetry/tesla-protocol@6.0.0':
     dependencies:
       '@bufbuild/protobuf': 2.13.0
 
