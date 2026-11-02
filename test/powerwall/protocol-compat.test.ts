@@ -66,8 +66,8 @@ describe("tesla-protocol wire values", () => {
     });
 
     it("names an unknown enum UNRECOGNIZED rather than throwing", () => {
-        expect(messageFaultEToJSON(999)).toBe("UNRECOGNIZED");
-        expect(tEGSetIslandModeResultToJSON(999)).toBe("UNRECOGNIZED");
+        expect(messageFaultEToJSON(999 as MessageFaultE)).toBe("UNRECOGNIZED");
+        expect(tEGSetIslandModeResultToJSON(999 as TEGSetIslandModeResult)).toBe("UNRECOGNIZED");
     });
 
     it("types priority as a string that carries 2^64 - 1", () => {

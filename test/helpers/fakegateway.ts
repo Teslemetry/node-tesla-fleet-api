@@ -297,7 +297,7 @@ export class FakeGateway {
     ): void {
         let inner: Uint8Array | undefined;
         if ("envelope" in reply) {
-            inner = MessageEnvelope.encode(MessageEnvelope.create(reply.envelope)).finish();
+            inner = MessageEnvelope.encode(MessageEnvelope.create(reply.envelope as Partial<MessageEnvelope>)).finish();
         } else if ("inner" in reply) {
             inner = reply.inner;
         }
