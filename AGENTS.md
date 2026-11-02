@@ -68,6 +68,17 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 A funnel, not a selector: do not add source health, availability, grace windows, priority or per-field selection. Unavailability is a value a source reports, never inferred from a dropped link. The module stays synchronous and never originates a request (`test/funnel.test.ts` checks its syntax tree); polling belongs to the consumer. Translations are positive allowlists: an unmapped value emits nothing.
 
+## Local Powerwall (`src/powerwall/`)
+
+- **Publish gate:** `./powerwall` stays out of `tsdown.config.ts` and `package.json` `exports` until PW-17, after the read-only run on a real gateway. Tests import from `src/`. Write methods have only ever run against `test/helpers/fakegateway.ts`, an independent HTTPS gateway that verifies RSA signatures itself; no autonomous session sends a write to a real one.
+- TLS goes through `node:https` with certificate checks off on `V1rTransport`'s own `https.Agent` only: global `fetch` cannot take a self-signed certificate, and `NODE_TLS_REJECT_UNAUTHORIZED` would also disable the cloud's checks. `node:https` decompresses nothing, so every body is gunzipped by magic bytes.
+- A v1r POST is sent once, carries no bearer token, and is never retried at any level: the same bytes execute again before `expires_at`. Only REST GETs retry, once, after a 401/403 re-login.
+- LAN envelopes are separate from the cloud's: commands set `DELIVERY_CHANNEL_HERMES_COMMAND`, and GraphQL and system-info reads use `LOCAL_HTTPS` with the `INSTALLER` sender. `EnergyDeviceSigner.envelope` is cloud-only and leaves the channel unset.
+- `Powerwall*` errors extend `Error`, not `TeslaFleetError`. Only `failover_safe = true` on connection, authentication and rate-limit errors lets a router fail over. A tolerated reply (`cancel_max_backup`, `remove_authorized_client`) swallows only fault and protocol errors, unlike Python, so a dead link never reads as success.
+- `PowerwallEnergySite` omits what has no local mapping instead of stubbing it, so a router skips it. `priority` is a decimal string, because `2^64 - 1` does not fit a number.
+- Golden envelopes (`test/fixtures/powerwall-envelopes.json`, from the real Python client; never regenerate them here) differ from Node in two expected ways, both asserted in `test/powerwall/golden.test.ts`: `reconnect_grid` omits `force = false`, and a `config.json` write has `JSON.stringify` spacing. `src/powerwall/queries.ts` is pinned by SHA-256: a client cannot sign a new query.
+- An empty `MessageEnvelope` encodes to zero bytes, which `post_v1r` rejects, so a fake reply meaning "no response field" must still carry a category, as `{ envelope: { teg: {} } }` does.
+
 ## Errors (`src/exceptions.ts`)
 
 - A class-for-class port of `python-tesla-fleet-api`'s `exceptions.py`: same names, parents, and `message`/`status`/`key`/`code` (as statics, copied onto instances). Add new errors there under their Python name, with no aliases; don't reintroduce per-module error files. `message` is always the class message; per-instance detail goes in `data`.
