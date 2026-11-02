@@ -15,16 +15,25 @@ export default class Vehicle {
     /** Class `createFleet` instantiates; a subclass overrides it to supply its own vehicle type. */
     static Fleet: new (parent: Vehicle, vin: string) => VehicleSpecific = VehicleSpecific;
     /** Class `createSigned` instantiates; a subclass overrides it to supply its own signed vehicle type. */
-    static Signed: new (parent: Vehicle, vin: string, private_key?: Buffer, public_key?: Buffer) => VehicleSigned = VehicleSigned;
+    static Signed: new (parent: Vehicle, vin: string, private_key?: Buffer | false, public_key?: Buffer) => VehicleSigned = VehicleSigned;
 
     parent: TeslaFleetApi;
-    /** Fallback private key for `createSigned()` when a call site doesn't pass one explicitly. */
-    private_key?: Buffer;
+    // A native private field, so a structured log of this object cannot reach it.
+    #privateKey?: Buffer;
     /** Every vehicle created by this factory, keyed by VIN; the latest `create*` call for a VIN wins. */
     byVin: Map<string, VehicleSpecific> = new Map();
 
     constructor(parent: TeslaFleetApi) {
         this.parent = parent;
+    }
+
+    /** Fallback private key for `createSigned()` when a call site doesn't pass one explicitly. */
+    get private_key(): Buffer | undefined {
+        return this.#privateKey;
+    }
+
+    set private_key(key: Buffer | undefined) {
+        this.#privateKey = key;
     }
 
     /**
@@ -43,10 +52,10 @@ export default class Vehicle {
      * Command Protocol and dispatches them through the `/signed_command`
      * endpoint, instead of the plaintext REST commands.
      * @param vin
-     * @param private_key Raw 32-byte P-256 private key scalar. Falls back to `this.private_key`, then the client's `private_key`.
+     * @param private_key Raw 32-byte P-256 private key scalar. Falls back to `this.private_key`, then the client's `private_key`. `false` disables signing.
      * @param public_key Uncompressed P-256 public key point. Derived from `private_key` if omitted.
      */
-    createSigned(vin: string, private_key?: Buffer, public_key?: Buffer): VehicleSigned {
+    createSigned(vin: string, private_key?: Buffer | false, public_key?: Buffer): VehicleSigned {
         const vehicle = new (this.constructor as typeof Vehicle).Signed(this, vin, private_key, public_key);
         this.byVin.set(vin, vehicle);
         return vehicle;
@@ -58,7 +67,7 @@ export default class Vehicle {
     }
 
     /** Legacy name for `createSigned`. */
-    specificSigned(vin: string, private_key?: Buffer, public_key?: Buffer): VehicleSigned {
+    specificSigned(vin: string, private_key?: Buffer | false, public_key?: Buffer): VehicleSigned {
         return this.createSigned(vin, private_key, public_key);
     }
 

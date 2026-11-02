@@ -5,8 +5,12 @@ on:
 
 jobs:
   build:
-    name: Build, Lint & Test
+    name: Node ${{ matrix.node-version }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
     steps:
       - uses: actions/checkout@v4
 
@@ -16,7 +20,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
@@ -42,3 +46,13 @@ jobs:
         run: "! grep -l tesla-protocol dist/tariff.*"
 
       - run: npm pack --dry-run
+
+  # A matrix job reports one check per Node version, so this job keeps the
+  # single "Build, Lint & Test" check that the default branch's ruleset requires.
+  gate:
+    name: Build, Lint & Test
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.build.result }}" = success

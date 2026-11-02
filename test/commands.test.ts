@@ -1,14 +1,47 @@
+import { inspect } from "node:util";
 import { beforeEach, describe, expect, it } from "vitest";
 import { Domain, RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
-import { VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
-import { Action, AutoSeatClimateAction_AutoSeatPositionE, RemoteNavTripOrderE, VehicleAction } from "@teslemetry/tesla-protocol/command/car_server";
-import Commands from "../src/commands.js";
+import { SessionInfoStatus } from "@teslemetry/tesla-protocol/command/signatures";
+import {
+    CommandStatus,
+    FromVCSECMessage,
+    InformationRequest,
+    InformationRequestType,
+    OperationStatusE,
+    SignedMessageInformationE,
+    UnsignedMessage,
+    VehicleLockStateE,
+    VehicleStatus,
+    WhitelistOperationInformationE,
+} from "@teslemetry/tesla-protocol/command/vcsec";
+import { GenericErrorE } from "@teslemetry/tesla-protocol/command/errors";
+import {
+    Action,
+    ActionStatus,
+    AutoSeatClimateAction_AutoSeatPositionE,
+    GetVehicleData,
+    OperationStatusE as ActionOperationStatusE,
+    RemoteNavTripOrderE,
+    Response,
+    VehicleAction,
+} from "@teslemetry/tesla-protocol/command/car_server";
+import { VehicleData } from "@teslemetry/tesla-protocol/command/vehicle";
+import Commands, { SendOptions, SendRequires } from "../src/commands.js";
 import TeslaFleetApi from "../src/teslafleetapi.js";
 import Vehicle from "../src/vehicle.js";
-import { NotOnWhitelistFault, SessionInfoAuthenticationFault, TeslaFleetMessageFaultInvalidSignature } from "../src/exceptions.js";
+import {
+    InvalidResponse,
+    NotOnWhitelistFault,
+    SessionInfoAuthenticationFault,
+    SignedMessageInformationFaultNotOnWhitelist,
+    SigningDisabled,
+    TeslaFleetMessageFaultInvalidSignature,
+    WhitelistOperationNoPermissionToAdd,
+    WhitelistOperationStatus,
+} from "../src/exceptions.js";
 import { publicKeyFor } from "../src/signing/crypto.js";
 import { AutoSeat, Seats } from "../src/const.js";
-import { FakeVehicle } from "./helpers/fakevehicle.js";
+import { FAKE_PING_TIMESTAMP, FakeVehicle } from "./helpers/fakevehicle.js";
 
 const VIN = "5YJXCAE43LF123456";
 const OUR_PRIVATE_KEY = Buffer.from("10181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3ea", "hex");
@@ -29,9 +62,10 @@ class TestCommands extends Commands {
     constructor(vin: string = VIN) {
         super(makeParent(), vin, OUR_PRIVATE_KEY);
         this.retryDelayMs = 0; // don't actually wait during WAIT-retry tests
+        this.handshakeRetryDelayMs = 0;
     }
 
-    protected async _send(msg: RoutableMessage, _requires: string, _expectsData?: boolean, _confirmBroadcast?: (status: VehicleStatus) => boolean): Promise<RoutableMessage> {
+    protected async _send(msg: RoutableMessage, _requires: SendRequires, _options?: SendOptions): Promise<RoutableMessage> {
         this.sendCount++;
         const delay = this.sendDelaysMs.shift();
         if (delay) {
@@ -39,7 +73,7 @@ class TestCommands extends Commands {
         }
         const replyBytes = this.fakeVehicle.handle(Buffer.from(RoutableMessage.encode(msg).finish()));
         const resp = RoutableMessage.decode(replyBytes);
-        this.validateAndUpdateSession(resp, Buffer.from(msg.uuid));
+        this.validate_msg(resp, Buffer.from(msg.uuid), msg.toDestination?.domain);
         return resp;
     }
 }
@@ -142,9 +176,448 @@ describe("Commands: session handshake", () => {
     it("still rejects a tampered tag even when request_uuid is omitted (the tag remains the real authentication)", async () => {
         const commands = new TestCommands();
         commands.fakeVehicle.omitRequestUuidLikeRealVcsec();
-        commands.fakeVehicle.corruptNextSessionInfoTag();
+        commands.fakeVehicle.corruptNextSessionInfoTag(3);
 
         await expect(commands.door_lock()).rejects.toThrow(/authentication/i);
+    });
+});
+
+describe("Commands: a session info reply with no public key", () => {
+    it("raises NotOnWhitelistFault, not a crypto error, for an unpaired key", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextHandshakeWithoutPublicKey(SessionInfoStatus.SESSION_INFO_STATUS_KEY_NOT_ON_WHITELIST);
+        await expect(commands.door_lock()).rejects.toThrow(NotOnWhitelistFault);
+        expect((commands as any).sessions[2].ready).toBe(false);
+    });
+
+    it("raises SessionInfoAuthenticationFault for any other status", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextHandshakeWithoutPublicKey(SessionInfoStatus.SESSION_INFO_STATUS_OK, 3);
+        await expect(commands.door_lock()).rejects.toThrow(SessionInfoAuthenticationFault);
+        expect((commands as any).sessions[2].ready).toBe(false);
+    });
+});
+
+describe("Commands: VCSEC commandStatus", () => {
+    const commandStatus = (status: Partial<CommandStatus>) => FromVCSECMessage.create({ commandStatus: CommandStatus.create(status) });
+    const error = (status: Partial<CommandStatus>) => commandStatus({ ...status, operationStatus: OperationStatusE.OPERATIONSTATUS_ERROR });
+    const whitelist = (whitelistOperationInformation: WhitelistOperationInformationE) => ({
+        whitelistOperationInformation,
+        signerOfOperation: undefined,
+        operationStatus: OperationStatusE.OPERATIONSTATUS_OK,
+    });
+
+    it("raises the signed-message fault on ERROR", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextVcsecCommandWith(
+            error({
+                signedMessageStatus: {
+                    counter: 0,
+                    signedMessageInformation: SignedMessageInformationE.SIGNEDMESSAGE_INFORMATION_FAULT_NOT_ON_WHITELIST,
+                },
+            }),
+        );
+        await expect(commands.door_unlock()).rejects.toThrow(SignedMessageInformationFaultNotOnWhitelist);
+    });
+
+    it("raises the whitelist fault on ERROR", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextVcsecCommandWith(
+            error({ whitelistOperationStatus: whitelist(WhitelistOperationInformationE.WHITELISTOPERATION_INFORMATION_NO_PERMISSION_TO_ADD) }),
+        );
+        await expect(commands.door_unlock()).rejects.toThrow(WhitelistOperationNoPermissionToAdd);
+    });
+
+    it.each([
+        ["no sub-message", {}],
+        ["an empty signed-message status", { signedMessageStatus: { counter: 0, signedMessageInformation: SignedMessageInformationE.SIGNEDMESSAGE_INFORMATION_NONE } }],
+        ["an unmapped signed-message status", { signedMessageStatus: { counter: 0, signedMessageInformation: 9999 as SignedMessageInformationE } }],
+        ["an empty whitelist status", { whitelistOperationStatus: whitelist(WhitelistOperationInformationE.WHITELISTOPERATION_INFORMATION_NONE) }],
+    ])("fails, never succeeds, on ERROR with %s", async (_name, status) => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextVcsecCommandWith(error(status));
+        await expect(commands.door_unlock()).resolves.toEqual({ response: { result: false, reason: "OPERATIONSTATUS_ERROR" } });
+    });
+
+    it("raises for a whitelist operation rejected under an outer OK", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextVcsecCommandWith(
+            commandStatus({
+                operationStatus: OperationStatusE.OPERATIONSTATUS_OK,
+                whitelistOperationStatus: whitelist(WhitelistOperationInformationE.WHITELISTOPERATION_INFORMATION_NO_PERMISSION_TO_ADD),
+            }),
+        );
+        await expect(commands.door_unlock()).rejects.toThrow(WhitelistOperationNoPermissionToAdd);
+    });
+
+    it("raises the base class for an unknown whitelist status", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextVcsecCommandWith(
+            commandStatus({
+                operationStatus: OperationStatusE.OPERATIONSTATUS_OK,
+                whitelistOperationStatus: whitelist(9999 as WhitelistOperationInformationE),
+            }),
+        );
+        await expect(commands.door_unlock()).rejects.toThrow(WhitelistOperationStatus);
+    });
+
+    it("succeeds for an accepted whitelist operation", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextVcsecCommandWith(
+            commandStatus({
+                operationStatus: OperationStatusE.OPERATIONSTATUS_OK,
+                whitelistOperationStatus: whitelist(WhitelistOperationInformationE.WHITELISTOPERATION_INFORMATION_NONE),
+            }),
+        );
+        await expect(commands.door_unlock()).resolves.toEqual({ response: { result: true, reason: "" } });
+    });
+
+    it("fails with the generic error name on nominalError", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextVcsecCommandWith(
+            FromVCSECMessage.create({ nominalError: { genericError: GenericErrorE.GENERICERROR_CLOSURES_OPEN } }),
+        );
+        await expect(commands.door_lock()).resolves.toEqual({ response: { result: false, reason: "GENERICERROR_CLOSURES_OPEN" } });
+    });
+});
+
+describe("Commands: handshake authentication retry", () => {
+    it("discards one bad session tag and succeeds on the next reply", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.corruptNextSessionInfoTag();
+        await expect(commands.door_lock()).resolves.toEqual({ response: { result: true, reason: "" } });
+        // Two handshakes, one command.
+        expect(commands.sendCount).toBe(3);
+    });
+
+    it("retries past a present but empty tag", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.emptyNextSessionInfoTag();
+        await expect(commands.handshakeVehicleSecurity()).resolves.toBeUndefined();
+        expect(commands.sendCount).toBe(2);
+        expect((commands as any).sessions[2].ready).toBe(true);
+    });
+
+    it("raises after three bad tags, having sent three requests", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.corruptNextSessionInfoTag(3);
+        await expect(commands.door_lock()).rejects.toThrow(SessionInfoAuthenticationFault);
+        expect(commands.sendCount).toBe(3);
+        expect((commands as any).sessions[2].ready).toBe(false);
+    });
+
+    it("retries each request with a fresh uuid", async () => {
+        const uuids: string[] = [];
+        class Uuids extends TestCommands {
+            protected async _send(msg: RoutableMessage, requires: SendRequires, options?: SendOptions): Promise<RoutableMessage> {
+                uuids.push(Buffer.from(msg.uuid).toString("hex"));
+                return super._send(msg, requires, options);
+            }
+        }
+        const commands = new Uuids();
+        commands.fakeVehicle.corruptNextSessionInfoTag(2);
+        await commands.handshakeInfotainment();
+        expect(new Set(uuids).size).toBe(3);
+    });
+
+    it("does not retry a whitelist rejection", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextHandshakeWithoutPublicKey(SessionInfoStatus.SESSION_INFO_STATUS_KEY_NOT_ON_WHITELIST);
+        await expect(commands.door_lock()).rejects.toThrow(NotOnWhitelistFault);
+        expect(commands.sendCount).toBe(1);
+    });
+
+    it("waits one second between attempts by default", () => {
+        class Defaults extends Commands {
+            readonly _transport_name = "test";
+            protected _send(): Promise<RoutableMessage> {
+                throw new Error("unused");
+            }
+            get retry() {
+                return [this.handshakeAttempts, this.handshakeRetryDelayMs];
+            }
+        }
+        expect(new Defaults(makeParent(), VIN, OUR_PRIVATE_KEY).retry).toEqual([3, 1000]);
+    });
+});
+
+describe("Commands: the _send seam", () => {
+    class Seam extends TestCommands {
+        calls: Array<{ requires: SendRequires; options?: SendOptions }> = [];
+        infotainmentOptions: Array<{ mutating?: boolean } | undefined> = [];
+
+        protected async _send(msg: RoutableMessage, requires: SendRequires, options?: SendOptions): Promise<RoutableMessage> {
+            this.calls.push({ requires, options });
+            return super._send(msg, requires, options);
+        }
+
+        protected sendInfotainment(action: Action, options?: { mutating?: boolean }) {
+            this.infotainmentOptions.push(options);
+            return super.sendInfotainment(action, options);
+        }
+
+        lockWithBroadcast(confirmBroadcast: (status: VehicleStatus) => boolean) {
+            return this.sendVehicleSecurity(UnsignedMessage.create({ RKEAction: 1 }), { confirmBroadcast });
+        }
+
+        probe(timeoutMs: number) {
+            return this.handshake(Domain.DOMAIN_INFOTAINMENT, { timeoutMs });
+        }
+
+        routing() {
+            return { fromDestination: this.fromDestination, publicKey: this.publicKey, session: this.sessionFor(Domain.DOMAIN_INFOTAINMENT) };
+        }
+
+        request(domain: Domain) {
+            return this.sessionInfoRequest(domain);
+        }
+
+        ensure(domain: Domain) {
+            return this.ensureHandshake(domain);
+        }
+    }
+
+    it("asks for session_info on a handshake and the payload on a command", async () => {
+        const commands = new Seam();
+        await commands.door_lock();
+        expect(commands.calls.map((call) => call.requires)).toEqual(["session_info", "protobuf_message_as_bytes"]);
+    });
+
+    it("marks a VCSEC actuation as expecting no data, and an Infotainment command as expecting data", async () => {
+        const commands = new Seam();
+        await commands.door_lock();
+        await commands.charge_start();
+        expect(commands.calls[1].options?.expectsData).toBe(false);
+        expect(commands.calls[3].options?.expectsData ?? true).toBe(true);
+    });
+
+    it("threads confirmBroadcast to _send on every attempt", async () => {
+        const commands = new Seam();
+        const confirmBroadcast = () => true;
+        commands.fakeVehicle.queueWaits(1);
+        await commands.lockWithBroadcast(confirmBroadcast);
+        const sends = commands.calls.filter((call) => call.requires === "protobuf_message_as_bytes");
+        expect(sends).toHaveLength(2);
+        expect(sends.every((call) => call.options?.confirmBroadcast === confirmBroadcast)).toBe(true);
+    });
+
+    it("threads a handshake's timeout to _send", async () => {
+        const commands = new Seam();
+        await expect(commands.probe(1000)).resolves.toBe(true);
+        expect(commands.calls[0].options?.timeoutMs).toBe(1000);
+    });
+
+    it("gives a subclass the routing address, public key, session and request", async () => {
+        const commands = new Seam();
+        const { fromDestination, publicKey, session } = commands.routing();
+        const request = commands.request(Domain.DOMAIN_VEHICLE_SECURITY);
+        expect(fromDestination).toHaveLength(16);
+        expect(publicKey.toString("hex")).toBe(publicKeyFor(OUR_PRIVATE_KEY).toString("hex"));
+        expect(session.domain).toBe(Domain.DOMAIN_INFOTAINMENT);
+        expect(request.toDestination?.domain).toBe(Domain.DOMAIN_VEHICLE_SECURITY);
+        expect(Buffer.from(request.fromDestination!.routingAddress!).equals(fromDestination)).toBe(true);
+        expect(Buffer.from(request.sessionInfoRequest!.publicKey).equals(publicKey)).toBe(true);
+    });
+
+    it("ensureHandshake opens a session once, and survives concurrent callers on VCSEC", async () => {
+        const commands = new Seam();
+        await Promise.all([commands.ensure(Domain.DOMAIN_VEHICLE_SECURITY), commands.ensure(Domain.DOMAIN_VEHICLE_SECURITY)]);
+        await commands.ensure(Domain.DOMAIN_VEHICLE_SECURITY);
+        expect(commands.calls).toHaveLength(1);
+        await commands.ensure(Domain.DOMAIN_INFOTAINMENT);
+        expect(commands.calls).toHaveLength(2);
+    });
+
+    it("marks only ping as non-mutating", async () => {
+        const commands = new Seam();
+        await commands.ping();
+        await commands.honk_horn();
+        expect(commands.infotainmentOptions[0]).toEqual({ mutating: false });
+        expect(commands.infotainmentOptions[1]?.mutating ?? true).toBe(true);
+    });
+});
+
+describe("Commands: privateKey", () => {
+    class NoSend extends Commands {
+        readonly _transport_name = "test";
+        sends = 0;
+
+        protected async _send(): Promise<RoutableMessage> {
+            this.sends++;
+            throw new Error("nothing may be sent");
+        }
+
+        get publicKeyForTest(): Buffer {
+            return this.publicKey;
+        }
+    }
+
+    it("false disables signing, and any handshake raises before anything is sent", async () => {
+        const commands = new NoSend(makeParent(), VIN, false);
+        await expect(commands.door_lock()).rejects.toThrow(SigningDisabled);
+        await expect(commands.charge_start()).rejects.toThrow(SigningDisabled);
+        await expect(commands.handshakeVehicleSecurity()).rejects.toThrow(SigningDisabled);
+        await expect(commands.handshakeInfotainment()).rejects.toThrow(SigningDisabled);
+        expect(() => commands.shared_key(publicKeyFor(OUR_PRIVATE_KEY))).toThrow(SigningDisabled);
+        expect(commands.sends).toBe(0);
+        expect(commands.publicKeyForTest).toHaveLength(0);
+    });
+
+    it("false wins over a parent key", async () => {
+        const parent = makeParent();
+        parent.private_key = OUR_PRIVATE_KEY;
+        await expect(new NoSend(parent, VIN, false).door_lock()).rejects.toThrow(SigningDisabled);
+    });
+
+    it("undefined with no parent key still throws, rather than disabling signing", () => {
+        expect(() => new NoSend(makeParent(), VIN, undefined)).toThrow(/No private key/);
+    });
+
+    function dump(value: unknown): string {
+        const seen = new WeakSet<object>();
+        return JSON.stringify(value, (_key, item) => {
+            if (typeof item === "object" && item !== null) {
+                if (seen.has(item)) return undefined;
+                seen.add(item);
+            }
+            return item;
+        });
+    }
+
+    it.each([
+        ["passed directly", (parent: Vehicle) => [parent, VIN, OUR_PRIVATE_KEY] as const],
+        ["from the Vehicle parent", (parent: Vehicle) => ((parent.private_key = OUR_PRIVATE_KEY), [parent, VIN] as const)],
+        ["from the client", (parent: Vehicle) => ((parent.parent.private_key = OUR_PRIVATE_KEY), [parent, VIN] as const)],
+    ])("keeps a key %s, and the session keys, out of JSON and inspection", async (_name, args) => {
+        const commands = new TestCommands();
+        await commands.door_lock();
+        const session = (commands as any).sessions[2];
+        const secrets = [OUR_PRIVATE_KEY, session.sharedKey, session.hmacKey, session.sessionInfoKey];
+        const other = new NoSend(...args(makeParent()));
+
+        for (const target of [commands, other]) {
+            const json = dump(target);
+            const text = inspect(target, { depth: 12 });
+            for (const secret of secrets) {
+                expect(json).not.toContain(JSON.stringify(secret.toJSON().data).slice(1, -1));
+                expect(text).not.toContain(secret.toString("hex"));
+            }
+        }
+    });
+});
+
+describe("Commands: reply payloads and reads", () => {
+    class ReadingCommands extends TestCommands {
+        readVehicleSecurity(): Promise<VehicleStatus> {
+            return this._getVehicleSecurity(
+                UnsignedMessage.create({
+                    InformationRequest: InformationRequest.create({ informationRequestType: InformationRequestType.INFORMATION_REQUEST_TYPE_GET_STATUS }),
+                }),
+            );
+        }
+
+        readInfotainment(): Promise<VehicleData> {
+            return this._getInfotainment(
+                Action.create({ vehicleAction: VehicleAction.create({ getVehicleData: GetVehicleData.create({ getChargeState: {} }) }) }),
+            );
+        }
+
+        callManagedChargingSites(): Promise<Awaited<ReturnType<Commands["ping"]>> & Record<string, any>> {
+            return this.vehicleAction(VehicleAction.create({ getManagedChargingSitesRequest: {} })) as any;
+        }
+    }
+
+    const lockedStatus = VehicleStatus.create({ vehicleLockState: VehicleLockStateE.VEHICLELOCKSTATE_LOCKED });
+
+    it("returns a payload under its field name, with result and reason", async () => {
+        const commands = new ReadingCommands();
+        const sites = { sites: [{ siteId: "one" }] };
+        commands.fakeVehicle.replyToNextInfotainmentCommandWith(Response.create({ getManagedChargingSitesResponse: sites as any }));
+        const reply = await commands.callManagedChargingSites();
+        expect(reply.response).toMatchObject({ result: true, reason: "" });
+        expect(reply.response.getManagedChargingSitesResponse.sites).toHaveLength(1);
+    });
+
+    it("keeps an action status alongside a payload", async () => {
+        const commands = new ReadingCommands();
+        commands.fakeVehicle.replyToNextInfotainmentCommandWith(
+            Response.create({
+                actionStatus: ActionStatus.create({
+                    result: ActionOperationStatusE.OPERATIONSTATUS_ERROR,
+                    resultReason: { plainText: "busy" },
+                }),
+                getManagedChargingSitesResponse: { sites: [] } as any,
+            }),
+        );
+        const reply = await commands.callManagedChargingSites();
+        expect(reply.response).toMatchObject({ result: false, reason: "busy" });
+        expect(reply.response.getManagedChargingSitesResponse).toBeDefined();
+    });
+
+    it("tells an empty payload from a reply with no payload", async () => {
+        const commands = new ReadingCommands();
+        commands.fakeVehicle.replyToNextInfotainmentCommandWith(Response.create({ getManagedChargingSitesResponse: { sites: [] } as any }));
+        const empty = await commands.callManagedChargingSites();
+        expect("getManagedChargingSitesResponse" in empty.response).toBe(true);
+
+        const none = await commands.callManagedChargingSites();
+        expect("getManagedChargingSitesResponse" in none.response).toBe(false);
+    });
+
+    it("ping returns the timestamp as reason", async () => {
+        const commands = new ReadingCommands();
+        await expect(commands.ping()).resolves.toEqual({ response: { result: true, reason: FAKE_PING_TIMESTAMP.toISOString() } });
+    });
+
+    it("vehicleStatus is success for an actuation", async () => {
+        const commands = new ReadingCommands();
+        commands.fakeVehicle.replyToNextVcsecCommandWith(FromVCSECMessage.create({ vehicleStatus: lockedStatus }));
+        await expect(commands.door_lock()).resolves.toEqual({ response: { result: true, reason: "" } });
+    });
+
+    it("vehicleStatus is the data for a read", async () => {
+        const commands = new ReadingCommands();
+        commands.fakeVehicle.replyToNextVcsecCommandWith(FromVCSECMessage.create({ vehicleStatus: lockedStatus }));
+        const status = await commands.readVehicleSecurity();
+        expect(status.vehicleLockState).toBe(VehicleLockStateE.VEHICLELOCKSTATE_LOCKED);
+    });
+
+    it("returns vehicleData for an Infotainment read", async () => {
+        const commands = new ReadingCommands();
+        commands.fakeVehicle.replyToNextInfotainmentCommandWith(Response.create({ vehicleData: VehicleData.create({ chargeState: { chargeLimitSoc: 80 } as any }) }));
+        const data = await commands.readInfotainment();
+        expect(data.chargeState?.chargeLimitSoc).toBe(80);
+    });
+
+    it("raises InvalidResponse for a read answered with only an outcome", async () => {
+        const commands = new ReadingCommands();
+        await expect(commands.readVehicleSecurity()).rejects.toThrow(InvalidResponse);
+        await expect(commands.readInfotainment()).rejects.toThrow(InvalidResponse);
+    });
+
+    it("exposes handshakes that always reach the vehicle", async () => {
+        const commands = new ReadingCommands();
+        await commands.handshakeVehicleSecurity();
+        await commands.handshakeVehicleSecurity();
+        await commands.handshakeInfotainment();
+        expect(commands.sendCount).toBe(3);
+        expect((commands as any).sessions[Domain.DOMAIN_VEHICLE_SECURITY].ready).toBe(true);
+        expect((commands as any).sessions[Domain.DOMAIN_INFOTAINMENT].ready).toBe(true);
+    });
+
+    it("shared_key derives the protocol's key", () => {
+        const client = Buffer.from("2538CDC29A97C19C1E99A637D6CF4F8C970C118B56EDE1E6323E6D162C4B30DB", "hex");
+        const vehicle = Buffer.from(
+            "04c7a1f47138486aa4729971494878d33b1a24e39571f748a6e16c5955b3d877d3a6aaa0e955166474af5d32c410f439a2234137ad1bb085fd4e8813c958f11d97",
+            "hex",
+        );
+        class Keyed extends Commands {
+            readonly _transport_name = "test";
+            protected _send(): Promise<RoutableMessage> {
+                throw new Error("unused");
+            }
+        }
+        expect(new Keyed(makeParent(), VIN, client).shared_key(vehicle).toString("hex")).toBe("1b2fce19967b79db696f909cff89ea9a");
     });
 });
 
@@ -179,13 +652,13 @@ describe("Commands: VCSEC dispatch serialization", () => {
 describe("Commands: session-info authentication (rejects tampered/spoofed handshake state)", () => {
     it("rejects a handshake reply whose session_info_tag was tampered with", async () => {
         const commands = new TestCommands();
-        commands.fakeVehicle.corruptNextSessionInfoTag();
+        commands.fakeVehicle.corruptNextSessionInfoTag(3);
         await expect(commands.door_lock()).rejects.toThrow(/authentication/i);
     });
 
     it("does not adopt the tampered session's epoch/counter after rejecting it", async () => {
         const commands = new TestCommands();
-        commands.fakeVehicle.corruptNextSessionInfoTag();
+        commands.fakeVehicle.corruptNextSessionInfoTag(3);
         await expect(commands.door_lock()).rejects.toThrow();
 
         const vcsecSession = (commands as any).sessions[2];
@@ -198,7 +671,7 @@ describe("Commands: session-info authentication (rejects tampered/spoofed handsh
 
     it("rejects a session-info reply replayed against a request it wasn't tagged for", async () => {
         const commands = new TestCommands();
-        commands.fakeVehicle.spoofNextSessionInfoChallenge();
+        commands.fakeVehicle.spoofNextSessionInfoChallenge(3);
         const error = await commands.door_lock().catch((e: unknown) => e);
         expect(error).toBeInstanceOf(SessionInfoAuthenticationFault);
         expect((error as SessionInfoAuthenticationFault).data).toMatch(/outstanding request/i);
@@ -296,14 +769,14 @@ describe("Commands: drivenote and calendar entries are signed, not sent unsigned
     class CapturingCommands extends TestCommands {
         capturedActions: VehicleAction[] = [];
 
-        protected async _send(msg: RoutableMessage, requires: string, expectsData?: boolean, confirmBroadcast?: (status: VehicleStatus) => boolean): Promise<RoutableMessage> {
+        protected async _send(msg: RoutableMessage, requires: SendRequires, options?: SendOptions): Promise<RoutableMessage> {
             if (msg.protobufMessageAsBytes && msg.protobufMessageAsBytes.length > 0 && msg.toDestination?.domain === Domain.DOMAIN_INFOTAINMENT) {
                 const action = Action.decode(msg.protobufMessageAsBytes);
                 if (action.vehicleAction) {
                     this.capturedActions.push(action.vehicleAction);
                 }
             }
-            return super._send(msg, requires, expectsData, confirmBroadcast);
+            return super._send(msg, requires, options);
         }
     }
 
@@ -373,12 +846,12 @@ describe("Commands: protobuf construction for representative commands", () => {
     it("navigation_sc_request carries both the supercharger id and the trip order on the wire", async () => {
         const sent: VehicleAction[] = [];
         class CapturingCommands extends TestCommands {
-            protected async _send(msg: RoutableMessage, requires: string, expectsData?: boolean, confirmBroadcast?: (status: VehicleStatus) => boolean): Promise<RoutableMessage> {
+            protected async _send(msg: RoutableMessage, requires: SendRequires, options?: SendOptions): Promise<RoutableMessage> {
                 if (msg.protobufMessageAsBytes && msg.protobufMessageAsBytes.length > 0 && msg.toDestination?.domain === Domain.DOMAIN_INFOTAINMENT) {
                     const action = Action.decode(msg.protobufMessageAsBytes);
                     if (action.vehicleAction) sent.push(action.vehicleAction);
                 }
-                return super._send(msg, requires, expectsData, confirmBroadcast);
+                return super._send(msg, requires, options);
             }
         }
         const capturing = new CapturingCommands();
@@ -397,14 +870,14 @@ describe("Commands: Seats and AutoSeat drive the signed seat maps", () => {
     class CapturingCommands extends TestCommands {
         capturedActions: VehicleAction[] = [];
 
-        protected async _send(msg: RoutableMessage, requires: string, expectsData?: boolean, confirmBroadcast?: (status: VehicleStatus) => boolean): Promise<RoutableMessage> {
+        protected async _send(msg: RoutableMessage, requires: SendRequires, options?: SendOptions): Promise<RoutableMessage> {
             if (msg.protobufMessageAsBytes && msg.protobufMessageAsBytes.length > 0 && msg.toDestination?.domain === Domain.DOMAIN_INFOTAINMENT) {
                 const action = Action.decode(msg.protobufMessageAsBytes);
                 if (action.vehicleAction) {
                     this.capturedActions.push(action.vehicleAction);
                 }
             }
-            return super._send(msg, requires, expectsData, confirmBroadcast);
+            return super._send(msg, requires, options);
         }
     }
 
