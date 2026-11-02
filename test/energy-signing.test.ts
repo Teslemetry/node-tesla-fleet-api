@@ -183,6 +183,12 @@ describe("EnergyDeviceSigner", () => {
         ["teg", "set_island_mode_request", { mode: 6, typo: true }],
         ["teg", "dispatch_battery_power_request", { real_power: { watts: 1 } }],
         ["teg", "set_island_mode_request", { mode: 99 }],
+        ["teg", "set_island_mode_request", { mode: -1 }],
+        ["teg", "set_island_mode_request", { mode: 0 }],
+        ["teg", "set_island_mode_request", { mode: 5 }],
+        ["teg", "set_island_mode_request", { mode: "6" }],
+        ["teg", "set_island_mode_request", {}],
+        ["teg", "set_island_mode_request", undefined],
         ["teg", "schedule_manual_backup_event_request", { scheduling_info: { start_time: "not a time" } }],
     ])("refuses to sign what the message cannot hold: %s.%s %j", (category, command, params) => {
         expect(() => EnergyDeviceSigner.envelope(DIN, category, command, params)).toThrow(TypeError);

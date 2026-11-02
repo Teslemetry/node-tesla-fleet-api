@@ -1,3 +1,4 @@
+import { redactedJson } from "../src/log.js";
 import { describe, expect, it, vi } from "vitest";
 import TeslaFleetApi from "../src/teslafleetapi.js";
 import Teslemetry from "../src/teslemetry.js";
@@ -66,6 +67,13 @@ describe("request bodies", () => {
         expectClean(lines, "4821");
         expect(lines.some((line) => line.startsWith("Body:") && line.includes('"on":true') && line.includes("[redacted]"))).toBe(true);
         expect(bodySent(fetch)).toEqual({ on: true, [key]: "4821" });
+    });
+
+    it.each(["routable_message", "routableMessage"])("redacts %s, which is replayable until it expires", (key) => {
+        const line = redactedJson({ data: { [key]: "c2lnbmVk", target_id: "din" } });
+        expect(line).not.toContain("c2lnbmVk");
+        expect(line).toContain("[redacted]");
+        expect(line).toContain("target_id");
     });
 
     it("redacts a nested key", async () => {

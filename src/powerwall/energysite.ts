@@ -1,4 +1,5 @@
 import { EnergyIslandMode } from "../const.js";
+import { validate_island_mode } from "../energyisland.js";
 import { parse_authorized_clients, type AuthorizedClients } from "../energyparsers.js";
 import type { LiveStatusResponse } from "../types/live_status.js";
 import { battery_level, raw_to_scaled_reserve, type PowerwallClient } from "./client.js";
@@ -88,10 +89,11 @@ export class PowerwallEnergySite {
     /**
      * Open or close the grid contactor. See `PowerwallClient.set_island_mode`:
      * read `islanding.contactorClosed` afterwards.
-     * @param mode 6 islands and 1 reconnects.
+     * @param mode 6 islands and 1 reconnects. Anything else raises `TypeError`.
      * @param force Defaults to true off grid and false otherwise, like the cloud.
      */
     async set_island_mode(mode: EnergyIslandMode | number, force?: boolean | null): Promise<CommandResult> {
+        validate_island_mode(mode, force);
         const off_grid = mode === EnergyIslandMode.OFF_GRID;
         await this.#client.set_island_mode({ off_grid, force: force ?? off_grid, mode_override: mode });
         return ok();

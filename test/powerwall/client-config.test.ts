@@ -26,6 +26,43 @@ function setConfig(config: unknown): Buffer {
 }
 
 describe("write_config", () => {
+    it("runs concurrent writes one at a time, so neither loses the other's change", async () => {
+        await Promise.all([
+            client.write_config({ a: 1 }),
+            client.write_config({ b: 2 }),
+            client.set_operation_mode("autonomous"),
+        ]);
+
+        expect(gateway.configWrites).toHaveLength(3);
+        expect(gateway.configJson).toMatchObject({ a: 1, b: 2, default_real_mode: "autonomous" });
+    });
+
+    it("keeps each write's read and update together", async () => {
+        await Promise.all([client.write_config({ a: 1 }), client.write_config({ b: 2 })]);
+
+        const kinds = gateway.posts.map((post) => (post.envelope.filestore?.readFileRequest ? "read" : "update"));
+        expect(kinds).toEqual(["read", "update", "read", "update"]);
+    });
+
+    it("carries on after a failed write, and still reports that failure", async () => {
+        gateway.forceStatus("/tedapi/v1r", 500);
+        const results = await Promise.allSettled([client.write_config({ a: 1 }), client.write_config({ b: 2 })]);
+
+        expect(results.map((result) => result.status)).toEqual(["rejected", "fulfilled"]);
+        expect(gateway.configJson.b).toBe(2);
+    });
+
+    it("queues per client", async () => {
+        const other = new PowerwallClient({ host: gateway.host, gatewayPassword: GATEWAY_PASSWORD, rsaPrivateKeyPem: TEST_KEY_PEM });
+        await Promise.all([client.connect(), other.connect()]);
+        const reads = gateway.posts.length;
+        const first = client.write_config({ a: 1 });
+        const second = other.write_config({ b: 2 });
+        await Promise.allSettled([first, second]);
+        other.close();
+        expect(gateway.posts.slice(reads, reads + 2).every((post) => post.envelope.filestore?.readFileRequest)).toBe(true);
+    });
+
     it("sends the original hash", async () => {
         const hash = setConfig({ site_info: { backup_reserve_percent: 24 } });
 
@@ -173,6 +210,19 @@ describe("validation happens before any request", () => {
         ["set_export_limit", () => client.set_export_limit(-1), RangeError],
         ["set_export_limit NaN", () => client.set_export_limit(Number.NaN), RangeError],
         ["curtail", () => client.curtail({ reserve_percent: 101 }), RangeError],
+        ["set_import_limit Infinity", () => client.set_import_limit(Number.POSITIVE_INFINITY), RangeError],
+        ["set_export_limit Infinity", () => client.set_export_limit(Number.POSITIVE_INFINITY), RangeError],
+        ["set_import_limit NaN", () => client.set_import_limit(Number.NaN), RangeError],
+        ["set_import_limit string", () => client.set_import_limit("5" as unknown as number), TypeError],
+        ["set_backup_reserve Infinity", () => client.set_backup_reserve(Number.POSITIVE_INFINITY), RangeError],
+        ["set_backup_reserve_raw Infinity", () => client.set_backup_reserve_raw(Number.POSITIVE_INFINITY), RangeError],
+        ["curtail Infinity", () => client.curtail({ reserve_percent: Number.POSITIVE_INFINITY }), RangeError],
+        ["curtail NaN", () => client.curtail({ reserve_percent: Number.NaN }), RangeError],
+        ["schedule_max_backup Infinity", () => client.schedule_max_backup(Number.POSITIVE_INFINITY), RangeError],
+        ["delay_battery_calibration Infinity", () => client.delay_battery_calibration(Number.POSITIVE_INFINITY), RangeError],
+        ["write_config Infinity", () => client.write_config({ "site_info.limit": Number.POSITIVE_INFINITY }), RangeError],
+        ["write_config NaN", () => client.write_config({ limit: Number.NaN }), RangeError],
+        ["write_config nested", () => client.write_config({ a: { b: [1, Number.NEGATIVE_INFINITY] } }), RangeError],
     ])("%s", async (_name, call, error) => {
         await expect(call()).rejects.toBeInstanceOf(error);
         expect(gateway.logins).toHaveLength(0);
@@ -225,6 +275,35 @@ describe("curtail", () => {
         expect(gateway.configJson).toMatchObject({
             default_real_mode: "self_consumption",
             site_info: { backup_reserve_percent: 5 },
+        });
+    });
+
+    it("restores the original values after a second curtail", async () => {
+        setConfig({ default_real_mode: "autonomous", site_info: { backup_reserve_percent: 24 } });
+
+        await client.curtail();
+        await client.curtail({ reserve_percent: 80 });
+        expect(gateway.configJson.site_info.backup_reserve_percent).toBe(80);
+        await client.restore_from_curtailment();
+
+        expect(gateway.configJson).toMatchObject({
+            default_real_mode: "autonomous",
+            site_info: { backup_reserve_percent: 24 },
+        });
+    });
+
+    it("saves afresh once restored", async () => {
+        setConfig({ default_real_mode: "autonomous", site_info: { backup_reserve_percent: 24 } });
+        await client.curtail();
+        await client.restore_from_curtailment();
+        setConfig({ default_real_mode: "self_consumption", site_info: { backup_reserve_percent: 50 } });
+
+        await client.curtail();
+        await client.restore_from_curtailment();
+
+        expect(gateway.configJson).toMatchObject({
+            default_real_mode: "self_consumption",
+            site_info: { backup_reserve_percent: 50 },
         });
     });
 

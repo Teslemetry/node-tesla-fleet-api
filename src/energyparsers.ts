@@ -119,6 +119,24 @@ function decodeIpv4(value: unknown): string | null {
     return null;
 }
 
+/**
+ * Whether `address` is a dotted-quad IPv4 address in a private range (RFC 1918) or
+ * the link-local range: the only places a gateway's LAN address can be. Anything
+ * else, including a hostname or a `host:port`, is not.
+ */
+export function is_lan_address(address: string): boolean {
+    if (!DOTTED_QUAD.test(address)) {
+        return false;
+    }
+    const [first, second] = address.split(".").map(Number);
+    return (
+        first === 10 ||
+        (first === 172 && second >= 16 && second <= 31) ||
+        (first === 192 && second === 168) ||
+        (first === 169 && second === 254)
+    );
+}
+
 function interfaceAddress(networkInterface: unknown): string | null {
     if (!isRecord(networkInterface)) {
         return null;

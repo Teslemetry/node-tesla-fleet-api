@@ -23,16 +23,15 @@ import {
     type ControllableDeviceProgram as ProtoProgram,
     type ControllableDeviceProgramScheduleBoundary,
     TEGIslandMode,
-    TEGSetIslandModeResult,
-    tEGSetIslandModeResultToJSON,
 } from "@teslemetry/tesla-protocol/energy_device/teg_api";
 import { DeliveryChannel, MessageEnvelope } from "@teslemetry/tesla-protocol/energy_device/transport";
 import {
+    PowerwallAuthenticationError,
     PowerwallCommandError,
-    PowerwallFaultError,
     PowerwallNotSupportedError,
     PowerwallProtocolError,
 } from "./exceptions.js";
+import { island_mode_rejection, validate_island_mode } from "../energyisland.js";
 import { validate_dispatch_battery_power } from "../energyspecific.js";
 import type { Logger } from "../log.js";
 import type {
@@ -60,7 +59,7 @@ import {
     STATUS_CODE,
     STATUS_QUERY,
 } from "./queries.js";
-import { V1rTransport } from "./transport.js";
+import { PowerwallEmptyReplyError, V1rTransport } from "./transport.js";
 
 /** The gateway's own Wi-Fi access point. */
 export const DEFAULT_GATEWAY_HOST = "192.168.91.1";
@@ -77,16 +76,10 @@ const MIN_BACKUP_DURATION_SECONDS = 60;
 const MAX_PRIORITY = "18446744073709551615";
 const MAX_UINT32 = 2 ** 32 - 1;
 
-/** The `TEGSetIslandModeResult` values that mean the gateway refused. */
-const ISLAND_MODE_REJECTIONS: ReadonlySet<number> = new Set([
-    TEGSetIslandModeResult.TEG_SET_ISLAND_MODE_RESULT_REJECTED_NOT_READY_FOR_ISLANDING,
-    TEGSetIslandModeResult.TEG_SET_ISLAND_MODE_RESULT_REJECTED_LOAD_DROP_EXPECTED,
-    TEGSetIslandModeResult.TEG_SET_ISLAND_MODE_RESULT_REJECTED_LOW_ENERGY,
-    TEGSetIslandModeResult.TEG_SET_ISLAND_MODE_RESULT_REJECTED_EXCESSIVE_SOLAR,
-]);
-
 /** `google.rpc.Code.UNIMPLEMENTED`, for a command the firmware does not implement. */
 const STATUS_UNIMPLEMENTED = 12;
+/** `google.rpc.Code.NOT_FOUND`: a cancel with no active event to cancel. */
+const STATUS_NOT_FOUND = 5;
 
 /** The bottom 5% of both scales is an inaccessible buffer: `raw = scaled * 0.95 + 5`. */
 const SCALE = 0.95;
@@ -100,9 +93,9 @@ type Header = Pick<MessageEnvelope, "deliveryChannel" | "sender" | "recipient">;
 type MissingReply =
     /** Raise. */
     | "raise"
-    /** Accept any reply, and a fault or protocol failure from the POST: the reply is empty and some firmware omits it. */
-    | "tolerate"
-    /** Accept a reply that lacks the response or does not decode, but still raise on `common.error_response`. */
+    /** Accept an empty reply, because some firmware omits the response. Anything else raises. */
+    | "empty"
+    /** Accept a reply that lacks the response, but still raise on `common.error_response`. */
     | "unverified";
 
 function isRecord(value: unknown): value is Record<string, any> {
@@ -184,8 +177,20 @@ function requireNonNegative(value: number, name: string): void {
     if (typeof value !== "number") {
         throw new TypeError(`${name} must be a number`);
     }
-    if (!(value >= 0)) {
-        throw new RangeError(`${name} must be non-negative`);
+    if (!Number.isFinite(value) || value < 0) {
+        throw new RangeError(`${name} must be a finite, non-negative number`);
+    }
+}
+
+/** `JSON.stringify` writes a non-finite number as `null`, so reject one at any depth rather than store it. */
+function requireFiniteNumbers(value: unknown, name: string): void {
+    if (typeof value === "number" && !Number.isFinite(value)) {
+        throw new RangeError(`${name} must be finite`);
+    }
+    if (typeof value === "object" && value !== null) {
+        for (const [key, item] of Object.entries(value)) {
+            requireFiniteNumbers(item, `${name}.${key}`);
+        }
     }
 }
 
@@ -204,6 +209,14 @@ function decodeEnvelope(inner: Uint8Array, what: string): MessageEnvelope {
     } catch (error) {
         throw new PowerwallProtocolError(`Malformed ${what} response`, { cause: error });
     }
+}
+
+/** True when a reply's categories, such as `teg`, hold no message. The header says nothing about the command. */
+function isEmptyReply(reply: MessageEnvelope): boolean {
+    const { deliveryChannel: _channel, sender: _sender, recipient: _recipient, ...categories } = reply;
+    return Object.values(categories).every(
+        (category) => category === undefined || (isRecord(category) && Object.values(category).every((item) => item === undefined)),
+    );
 }
 
 /** Header for the `filestore`, `teg` and `authorization` messages. */
@@ -295,6 +308,8 @@ export interface PowerwallClientOptions {
     rsaPrivateKeyPem: string | Buffer;
     /** Total time allowed per request. */
     timeoutMs?: number;
+    /** The gateway's DIN, when known. Any other DIN fails `connect`, so nothing is sent to the wrong gateway. */
+    expectedDin?: string;
     /** Receives debug lines. */
     logger?: Logger;
 }
@@ -311,8 +326,10 @@ export class PowerwallClient {
     // Native private field: the transport holds the password, token and signing key.
     readonly #transport: V1rTransport;
     readonly #logger?: Logger;
+    readonly #expectedDin?: string;
     #din: string | null = null;
     #connecting: Promise<string> | null = null;
+    #configWrites: Promise<unknown> = Promise.resolve();
     // What `curtail` replaced. Held only here, so it does not survive a restart.
     #savedRealMode: string | null = null;
     #savedReservePercent: number | null = null;
@@ -328,6 +345,7 @@ export class PowerwallClient {
             legacyGateway: _legacyGateway,
         });
         this.#logger = options.logger;
+        this.#expectedDin = options.expectedDin;
     }
 
     /**
@@ -359,8 +377,12 @@ export class PowerwallClient {
         }
         this.#connecting ??= (async () => {
             await this.#transport.login();
-            this.#din = await this.#transport.fetch_din();
-            return this.#din;
+            const din = await this.#transport.fetch_din();
+            if (this.#expectedDin && din !== this.#expectedDin) {
+                throw new PowerwallAuthenticationError("The gateway at this address is not the expected one");
+            }
+            this.#din = din;
+            return din;
         })().finally(() => {
             this.#connecting = null;
         });
@@ -561,9 +583,20 @@ export class PowerwallClient {
      * the read unchanged: it is an optimistic lock held by the gateway, and the
      * client never computes one.
      * @param updates Dotted paths to values, such as `{"site_info.backup_reserve_percent": 24}`.
+     * Writes on one client run one at a time, so two cannot interleave. Another
+     * client's write is caught by that lock instead, and refused.
+     * @throws RangeError on a number that is not finite, before any request.
      * @throws PowerwallProtocolError on bad JSON, or a reply with no `filestore`.
      */
     async write_config(updates: Record<string, unknown>): Promise<void> {
+        requireFiniteNumbers(updates, "updates");
+        const write = this.#configWrites.then(() => this._write_config(updates));
+        // A failed write stops only its own caller, not the writes queued behind it.
+        this.#configWrites = write.catch(() => undefined);
+        return write;
+    }
+
+    private async _write_config(updates: Record<string, unknown>): Promise<void> {
         const din = await this.connect();
         const { blob, hash } = await this._read_config(din);
         const config = decodeConfig(blob);
@@ -717,12 +750,15 @@ export class PowerwallClient {
         const { reserve_percent = 100 } = options;
         assertPercent(reserve_percent, "reserve_percent");
 
-        const config = await this.get_config();
-        const reserve = lookup(config, "site_info", "backup_reserve_percent");
-        const saved = typeof reserve === "string" ? Number(reserve || NaN) : reserve;
-        this.#savedRealMode = String(config.default_real_mode || "self_consumption");
-        // Keeps a fractional value: Python's `int()` restores a raw 24.75 as 24.
-        this.#savedReservePercent = typeof saved === "number" && Number.isFinite(saved) ? saved : OFFSET;
+        // A second curtail would read back its own `backup` and reserve, and restore those.
+        if (!this.#curtailmentActive) {
+            const config = await this.get_config();
+            const reserve = lookup(config, "site_info", "backup_reserve_percent");
+            const saved = typeof reserve === "string" ? Number(reserve || NaN) : reserve;
+            this.#savedRealMode = String(config.default_real_mode || "self_consumption");
+            // Keeps a fractional value: Python's `int()` restores a raw 24.75 as 24.
+            this.#savedReservePercent = typeof saved === "number" && Number.isFinite(saved) ? saved : OFFSET;
+        }
 
         await this.write_config({
             default_real_mode: "backup",
@@ -870,7 +906,7 @@ export class PowerwallClient {
             { authorization: { removeAuthorizedClientRequest: { publicKey } } },
             (reply) => reply.authorization?.removeAuthorizedClientResponse,
             "remove_authorized_client_request",
-            "tolerate",
+            "empty",
         );
     }
 
@@ -882,17 +918,22 @@ export class PowerwallClient {
      * from `get_status` afterwards before relying on it.
      * @param options.off_grid Mode 6 (off grid) when true, mode 1 (on grid) when false.
      * @param options.force Required by some Powerwalls.
-     * @param options.mode_override Send this mode instead.
+     * @param options.mode_override Send this mode instead: 1 or 6.
+     * @throws TypeError on any other mode, or an `off_grid` that is not a boolean.
      * @throws PowerwallCommandError on a `REJECTED_*` result, with `code` the enum value and `status_message` its name, or on `common.error_response`.
      */
     async set_island_mode(options: { off_grid: boolean; force?: boolean; mode_override?: number | null }): Promise<void> {
         const { off_grid, force = false, mode_override } = options;
-        const din = await this.connect();
+        if (typeof off_grid !== "boolean") {
+            throw new TypeError("off_grid must be a boolean");
+        }
         const mode: TEGIslandMode =
             mode_override ??
             (off_grid
                 ? TEGIslandMode.TEG_ISLAND_MODE_INTENTIONAL_WITH_RECONNECT_FAILSAFE
                 : TEGIslandMode.TEG_ISLAND_MODE_AUTO_ACTIVE);
+        validate_island_mode(mode, force);
+        const din = await this.connect();
         const response = await this._send_command_request(
             din,
             { teg: { setIslandModeRequest: { mode, force } } },
@@ -903,8 +944,9 @@ export class PowerwallClient {
 
         const result = response.teg?.setIslandModeResponse?.result;
         this.#logger?.debug(`set_island_mode: mode=${mode} force=${force} result=${result ?? "absent"}`);
-        if (result !== undefined && ISLAND_MODE_REJECTIONS.has(result)) {
-            throw new PowerwallCommandError("set_island_mode_request", result, tEGSetIslandModeResultToJSON(result));
+        const rejection = island_mode_rejection(result);
+        if (rejection) {
+            throw new PowerwallCommandError("set_island_mode_request", rejection.code, rejection.name);
         }
     }
 
@@ -947,7 +989,8 @@ export class PowerwallClient {
             { teg: { cancelManualBackupEventRequest: {} } },
             (reply) => reply.teg?.cancelManualBackupEventResponse,
             "cancel_manual_backup_event_request",
-            "tolerate",
+            "empty",
+            STATUS_NOT_FOUND,
         );
     }
 
@@ -1005,14 +1048,16 @@ export class PowerwallClient {
     /**
      * The one path for Command-header messages.
      *
-     * Python's tolerated calls swallow every error from the POST, so a dead link
-     * reports success and a router never fails over. Here the failover-safe errors
-     * always propagate.
+     * Python's tolerated calls swallow every error, so a BUSY fault while revoking
+     * a compromised key reports success with the key still paired. Here `empty`
+     * accepts only an empty reply, and `ignored_status` the one refusal that means
+     * there was nothing to do.
      * @param din The gateway DIN.
      * @param payload The message's category and request.
      * @param answered Reads the expected response field from a reply.
      * @param request The request's proto field name, for errors.
      * @param missing What to do when the reply lacks the response.
+     * @param ignored_status A `common.error_response` code that is not a failure.
      */
     private async _send_command_request(
         din: string,
@@ -1020,6 +1065,7 @@ export class PowerwallClient {
         answered: (reply: MessageEnvelope) => unknown,
         request: string,
         missing: MissingReply = "raise",
+        ignored_status?: number,
     ): Promise<MessageEnvelope> {
         let inner: Uint8Array;
         try {
@@ -1028,31 +1074,25 @@ export class PowerwallClient {
                 din,
             );
         } catch (error) {
-            if (missing === "tolerate" && (error instanceof PowerwallFaultError || error instanceof PowerwallProtocolError)) {
+            if (missing === "empty" && error instanceof PowerwallEmptyReplyError) {
                 return MessageEnvelope.create();
             }
             throw error;
         }
 
-        let response: MessageEnvelope;
-        try {
-            response = decodeEnvelope(inner, request);
-        } catch (error) {
-            if (missing === "unverified") {
-                this.#logger?.debug(`${request}: reply does not decode (${inner.length} bytes)`);
-                return MessageEnvelope.create();
-            }
-            throw error;
-        }
-        if (answered(response) !== undefined || missing === "tolerate") {
+        const response = decodeEnvelope(inner, request);
+        if (answered(response) !== undefined) {
             return response;
         }
         const status = response.common?.errorResponse?.status;
+        if (status && status.code === ignored_status) {
+            return response;
+        }
         if (status) {
             const ErrorClass = status.code === STATUS_UNIMPLEMENTED ? PowerwallNotSupportedError : PowerwallCommandError;
             throw new ErrorClass(request, status.code, status.message);
         }
-        if (missing === "unverified") {
+        if (missing === "unverified" || (missing === "empty" && isEmptyReply(response))) {
             this.#logger?.debug(`${request}: reply has no response (${inner.length} bytes)`);
             return response;
         }

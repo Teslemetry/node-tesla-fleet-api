@@ -9,10 +9,12 @@ import {
     PowerwallKeyRejectedError,
     PowerwallRateLimitError,
 } from "../../src/powerwall/exceptions.js";
-import { connect_gateway, verify_local_gateway } from "../../src/powerwall/gateway.js";
+import { connect_gateway, verify_local_gateway, type ConnectGatewayOptions } from "../../src/powerwall/gateway.js";
 import { EnergySiteRouter } from "../../src/router/index.js";
 import { GATEWAY_DIN, GATEWAY_PASSWORD, TEST_KEY_PEM } from "../fixtures/powerwall.js";
 import { FakeGateway } from "../helpers/fakegateway.js";
+
+const OTHER_DIN = "1232100-00-E--TG000000000000";
 
 /** A port nothing listens on, so a connect fails at once. */
 const DEAD_HOST = "127.0.0.1:1";
@@ -40,7 +42,13 @@ function track<T extends { client: PowerwallClient }>(result: T): T {
     return result;
 }
 
+/** `connect_gateway`, trusting loopback, because a fake gateway can be nowhere else. */
+function heal(healing: ConnectGatewayOptions) {
+    return connect_gateway({ allow_address: (address) => address.startsWith("127.0.0.1:"), ...healing });
+}
+
 afterEach(async () => {
+    vi.restoreAllMocks();
     clients.splice(0).forEach((client) => client.close());
     await Promise.all(gateways.splice(0).map((gateway) => gateway.stop()));
 });
@@ -49,7 +57,7 @@ describe("connect_gateway", () => {
     it("connects at the stored host without asking the cloud", async () => {
         const gateway = await startGateway();
         const cloud = cloudAt("192.0.2.1");
-        const result = track(await connect_gateway({ client: options(gateway.host), cloud }));
+        const result = track(await heal({ client: options(gateway.host), cloud }));
         expect(result).toMatchObject({ host: gateway.host, outcome: "connected" });
         expect(result).not.toHaveProperty("error");
         expect(result.client.din).toBe(GATEWAY_DIN);
@@ -60,7 +68,7 @@ describe("connect_gateway", () => {
         const gateway = await startGateway();
         gateway.forceStatus("/api/login/Basic", status);
         const cloud = cloudAt("192.0.2.1");
-        const result = track(await connect_gateway({ client: options(gateway.host), cloud }));
+        const result = track(await heal({ client: options(gateway.host), cloud }));
         expect(result).toMatchObject({ host: gateway.host, outcome: "rate_limited" });
         expect(result.error).toBeInstanceOf(PowerwallRateLimitError);
         expect(result.client.host).toBe(gateway.host);
@@ -70,7 +78,7 @@ describe("connect_gateway", () => {
     it("reports refused for a wrong password at the address the cloud confirms", async () => {
         const gateway = await startGateway();
         const cloud = cloudAt(gateway.host);
-        const result = track(await connect_gateway({ client: options(gateway.host, { gatewayPassword: "wrong" }), cloud }));
+        const result = track(await heal({ client: options(gateway.host, { gatewayPassword: "wrong" }), cloud }));
         expect(result).toMatchObject({ host: gateway.host, outcome: "refused" });
         expect(result.error).toBeInstanceOf(PowerwallAuthenticationError);
         expect(result.client.host).toBe(gateway.host);
@@ -79,7 +87,7 @@ describe("connect_gateway", () => {
     it("reports moved with a connected client at the new host", async () => {
         const gateway = await startGateway();
         const cloud = cloudAt(gateway.host);
-        const result = track(await connect_gateway({ client: options(DEAD_HOST), cloud }));
+        const result = track(await heal({ client: options(DEAD_HOST), cloud }));
         expect(result).toMatchObject({ host: gateway.host, outcome: "moved" });
         expect(result).not.toHaveProperty("error");
         expect(result.client.host).toBe(gateway.host);
@@ -90,14 +98,14 @@ describe("connect_gateway", () => {
         const stranger = await startGateway({ password: "other" });
         const gateway = await startGateway();
         const cloud = cloudAt(gateway.host);
-        const result = track(await connect_gateway({ client: options(stranger.host), cloud }));
+        const result = track(await heal({ client: options(stranger.host), cloud }));
         expect(result).toMatchObject({ host: gateway.host, outcome: "moved" });
     });
 
     it("persists nothing for moved: it only reports the host", async () => {
         const gateway = await startGateway();
         const client = Object.freeze(options(DEAD_HOST));
-        const result = track(await connect_gateway({ client, cloud: cloudAt(gateway.host) }));
+        const result = track(await heal({ client, cloud: cloudAt(gateway.host) }));
         expect(result.outcome).toBe("moved");
         expect(client.host).toBe(DEAD_HOST);
         expect(gateway.configWrites).toEqual([]);
@@ -107,13 +115,13 @@ describe("connect_gateway", () => {
     it("carries the options to the new client", async () => {
         const gateway = await startGateway({ password: GATEWAY_PASSWORD });
         const legacy = { legacy_gateway: true, client: options(DEAD_HOST), cloud: cloudAt(gateway.host) };
-        const result = track(await connect_gateway(legacy));
+        const result = track(await heal(legacy));
         expect(result.outcome).toBe("moved");
         expect(gateway.logins[0].password).toBe(GATEWAY_PASSWORD);
     });
 
     it("reports not_found when the cloud has no address", async () => {
-        const result = track(await connect_gateway({ client: options(DEAD_HOST), cloud: cloudAt(null) }));
+        const result = track(await heal({ client: options(DEAD_HOST), cloud: cloudAt(null) }));
         expect(result).toMatchObject({ host: DEAD_HOST, outcome: "not_found" });
         expect(result.error).toBeInstanceOf(PowerwallConnectionError);
         expect(result.client.host).toBe(DEAD_HOST);
@@ -124,7 +132,7 @@ describe("connect_gateway", () => {
         ["a raw SDK body", { error: "nope" }],
     ])("counts a cloud lookup failure as null: %s", async (_name, failure) => {
         const cloud = { find_gateway_address: vi.fn(() => Promise.reject(failure)) };
-        const result = track(await connect_gateway({ client: options(DEAD_HOST), cloud }));
+        const result = track(await heal({ client: options(DEAD_HOST), cloud }));
         expect(result.outcome).toBe("not_found");
         expect(result.error).toBeInstanceOf(PowerwallConnectionError);
     });
@@ -135,18 +143,18 @@ describe("connect_gateway", () => {
                 throw new TypeError("a plain JS caller's bug");
             },
         };
-        const result = track(await connect_gateway({ client: options(DEAD_HOST), cloud }));
+        const result = track(await heal({ client: options(DEAD_HOST), cloud }));
         expect(result.outcome).toBe("not_found");
     });
 
     it("reports not_found when the confirmed address is simply unreachable", async () => {
         const cloud = cloudAt(DEAD_HOST);
-        const result = track(await connect_gateway({ client: options(DEAD_HOST), cloud }));
+        const result = track(await heal({ client: options(DEAD_HOST), cloud }));
         expect(result).toMatchObject({ host: DEAD_HOST, outcome: "not_found" });
     });
 
     it("reports not_found, keeping the stale client, when the new host fails too", async () => {
-        const result = track(await connect_gateway({ client: options(DEAD_HOST), cloud: cloudAt("127.0.0.1:2") }));
+        const result = track(await heal({ client: options(DEAD_HOST), cloud: cloudAt("127.0.0.1:2") }));
         expect(result).toMatchObject({ host: DEAD_HOST, outcome: "not_found" });
         expect(result.client.host).toBe(DEAD_HOST);
         expect(result.error).toBeInstanceOf(PowerwallConnectionError);
@@ -154,13 +162,110 @@ describe("connect_gateway", () => {
 
     it("reports not_found when the new host refuses the password", async () => {
         const gateway = await startGateway({ password: "other" });
-        const result = track(await connect_gateway({ client: options(DEAD_HOST), cloud: cloudAt(gateway.host) }));
+        const result = track(await heal({ client: options(DEAD_HOST), cloud: cloudAt(gateway.host) }));
         expect(result).toMatchObject({ host: DEAD_HOST, outcome: "not_found" });
     });
 
     it("rejects a bad PEM, which no address can repair", async () => {
         const client = options(DEAD_HOST, { rsaPrivateKeyPem: "not a key" });
-        await expect(connect_gateway({ client, cloud: cloudAt(null) })).rejects.toBeInstanceOf(PowerwallAuthenticationError);
+        await expect(heal({ client, cloud: cloudAt(null) })).rejects.toBeInstanceOf(PowerwallAuthenticationError);
+    });
+});
+
+describe("connect_gateway trust", () => {
+    it.each([
+        "8.8.8.8",
+        "1.1.1.1",
+        "100.64.0.1",
+        "172.15.255.255",
+        "172.32.0.1",
+        "192.167.1.1",
+        "192.0.2.1",
+        "169.253.0.1",
+        "127.0.0.1",
+        "0.0.0.0",
+        "255.255.255.255",
+        "10.0.0.1:8443",
+        "gateway.example",
+        "::1",
+        "",
+    ])("sends no credentials to %j", async (address) => {
+        // Mocked, so that if this guard breaks, the test fails without contacting that address.
+        const connect = vi.spyOn(PowerwallClient.prototype, "connect").mockRejectedValue(new PowerwallConnectionError("down"));
+        const result = track(await connect_gateway({ client: options(DEAD_HOST), cloud: cloudAt(address) }));
+        expect(result).toMatchObject({ host: DEAD_HOST, outcome: "not_found" });
+        expect(connect).toHaveBeenCalledOnce();
+    });
+
+    it.each(["10.0.0.5", "172.16.0.1", "172.31.255.255", "192.168.1.20", "169.254.10.1"])(
+        "tries the private or link-local %s",
+        async (address) => {
+            const connect = vi
+                .spyOn(PowerwallClient.prototype, "connect")
+                .mockRejectedValueOnce(new PowerwallConnectionError("down"))
+                .mockResolvedValueOnce(GATEWAY_DIN);
+            const result = track(await connect_gateway({ client: options(DEAD_HOST), cloud: cloudAt(address) }));
+            expect(result).toMatchObject({ host: address, outcome: "moved" });
+            expect(connect).toHaveBeenCalledTimes(2);
+        },
+    );
+
+    it("does not send the password on after a rejected login", async () => {
+        const stored = await startGateway({ password: "other" });
+        const reported = await startGateway();
+        const cloud = cloudAt(reported.host);
+        const result = track(await connect_gateway({ client: options(stored.host), cloud }));
+        expect(result.outcome).toBe("not_found");
+        expect(reported.logins).toEqual([]);
+    });
+
+    describe("the expected DIN", () => {
+        it("accepts a new host with the cloud site's DIN", async () => {
+            const gateway = await startGateway();
+            const cloud = { ...cloudAt(gateway.host), din: GATEWAY_DIN };
+            const result = track(await heal({ client: options(DEAD_HOST), cloud }));
+            expect(result.outcome).toBe("moved");
+        });
+
+        it("refuses a new host with another DIN, keeping the stale client", async () => {
+            const gateway = await startGateway();
+            const cloud = { ...cloudAt(gateway.host), din: OTHER_DIN };
+            const result = track(await heal({ client: options(DEAD_HOST), cloud }));
+            expect(result).toMatchObject({ host: DEAD_HOST, outcome: "not_found" });
+            expect(result.client.din).toBeNull();
+        });
+
+        it("reports refused for another gateway at the stored host, and never trusts it", async () => {
+            const gateway = await startGateway();
+            const cloud = { ...cloudAt(gateway.host), din: OTHER_DIN };
+            const result = track(await heal({ client: options(gateway.host), cloud }));
+            expect(result).toMatchObject({ host: gateway.host, outcome: "refused" });
+            expect(result.error).toBeInstanceOf(PowerwallAuthenticationError);
+            await expect(result.client.get_status()).rejects.toBeInstanceOf(PowerwallAuthenticationError);
+            expect(gateway.posts).toEqual([]);
+        });
+
+        it("takes expectedDin from the client options first", async () => {
+            const gateway = await startGateway();
+            const cloud = { ...cloudAt(null), din: GATEWAY_DIN };
+            const client = options(gateway.host, { expectedDin: OTHER_DIN });
+            const result = track(await heal({ client, cloud }));
+            expect(result.outcome).toBe("not_found");
+        });
+
+        it("checks nothing when no DIN is known", async () => {
+            const gateway = await startGateway();
+            const result = track(await heal({ client: options(gateway.host), cloud: cloudAt(null) }));
+            expect(result.outcome).toBe("connected");
+        });
+
+        it("fails a mismatch over, so a router reaches the cloud", async () => {
+            const gateway = await startGateway();
+            const client = new PowerwallClient(options(gateway.host, { expectedDin: OTHER_DIN }));
+            clients.push(client);
+            await expect(client.connect()).rejects.toMatchObject({ failover_safe: true });
+            expect(client.din).toBeNull();
+        });
     });
 });
 
@@ -324,7 +429,7 @@ describe("failover through EnergySiteRouter", () => {
     });
 
     it("routes around a stale client from connect_gateway, so the site degrades to cloud control", async () => {
-        const result = track(await connect_gateway({ client: options(DEAD_HOST), cloud: cloudAt(null) }));
+        const result = track(await heal({ client: options(DEAD_HOST), cloud: cloudAt(null) }));
         expect(result.outcome).toBe("not_found");
         const degraded = new EnergySiteRouter([new PowerwallEnergySite(result.client), cloud]);
         await expect(degraded.operation("backup")).resolves.toEqual({ response: "cloud" });

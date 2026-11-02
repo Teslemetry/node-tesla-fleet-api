@@ -78,6 +78,9 @@ export interface V1rTransportOptions {
     legacyGateway?: boolean;
 }
 
+/** A v1r reply with no inner message. Only `remove_authorized_client` and a cancel accept one. */
+export class PowerwallEmptyReplyError extends PowerwallProtocolError {}
+
 /** The gateway's wire protocol, with no knowledge of what each message means. */
 export class V1rTransport {
     readonly #host: string;
@@ -167,7 +170,8 @@ export class V1rTransport {
      * @throws PowerwallAuthenticationError on 401 or 403, an unknown key fault, or the "authorization not verified" placeholder.
      * @throws PowerwallRateLimitError on 429 or 503.
      * @throws PowerwallFaultError on any other fault.
-     * @throws PowerwallProtocolError on any other status, or a malformed or empty reply.
+     * @throws PowerwallEmptyReplyError on a reply with no inner message.
+     * @throws PowerwallProtocolError on any other status, or a malformed reply.
      * @throws PowerwallConnectionError on a transport failure or timeout.
      */
     async post_v1r(
@@ -216,7 +220,7 @@ export class V1rTransport {
             throw new PowerwallAuthenticationError("v1r: client authorization not verified: the RSA key is not paired");
         }
         if (!inner?.length) {
-            throw new PowerwallProtocolError("RoutableMessage response is empty");
+            throw new PowerwallEmptyReplyError("RoutableMessage response is empty");
         }
         return inner;
     }
