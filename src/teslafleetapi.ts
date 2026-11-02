@@ -3,8 +3,11 @@ import Energy from "./energy.js";
 import Partner from "./partner.js";
 import User from "./user.js";
 import Vehicle from "./vehicle.js";
-import { Method, Region, SERVERS, is_valid_region } from "./const.js";
+import { Method, Region, SERVERS, Scope, TOKEN_URLS, is_valid_region } from "./const.js";
 import {
+  InvalidRegion,
+  LibraryError,
+  MissingToken,
   ResponseError,
   TeslaFleetConnectionError,
   TeslaFleetError,
@@ -15,11 +18,20 @@ import {
   ProductsResponse,
   VehicleProduct,
 } from "./types/products.js";
+import { Logger, logRequestError, logRequestResult } from "./log.js";
+
+export type { Logger } from "./log.js";
+
+/** Replaced at build time (tsdown.config.ts) and test time (vitest.config.ts) with package.json's version. */
+declare const __VERSION__: string;
 
 export type ProductsByType = {
   vehicles: VehicleProduct[];
   energy_sites: EnergyProduct[];
 };
+
+/** An access token, or a function returning the current one (e.g. after an OAuth refresh). */
+export type AccessToken = string | (() => Promise<string | null>);
 
 export default class TeslaFleetApi {
   /** Class backing `vehicles`; a subclass (e.g. `Teslemetry`) overrides it instead of its constructor. */
@@ -28,18 +40,24 @@ export default class TeslaFleetApi {
   static EnergySites: new (parent: TeslaFleetApi) => Energy = Energy;
 
   server: string | null = null;
-  accessToken: string | null;
+  region: Region | null = null;
+  accessToken: AccessToken | null;
   charging?: Charging;
   energySites?: Energy;
   partner?: Partner;
   user?: User;
   vehicles?: Vehicle;
+  /** Log to `console.debug` when no `logger` is set. */
   debug: boolean = false;
+  logger: Logger | null;
   /** Abort a request (including reading its body) after this many milliseconds; `null` waits indefinitely. */
   timeout: number | null;
+  /** Transport identity for debug logging; Teslemetry and Tessie override this. */
+  readonly _transport_name: string = "fleet";
+  #fetch: typeof fetch | null;
 
   constructor(options: {
-    accessToken?: string;
+    accessToken?: AccessToken;
     region?: Region;
     server?: string;
     chargingScope?: boolean;
@@ -48,21 +66,27 @@ export default class TeslaFleetApi {
     userScope?: boolean;
     vehicleScope?: boolean;
     debug?: boolean;
+    logger?: Logger;
+    /** Used for every request in place of the global `fetch`. */
+    fetch?: typeof fetch;
     timeout?: number;
   }) {
     this.debug = !!options.debug;
+    this.logger = options.logger ?? null;
+    this.#fetch = options.fetch ?? null;
     this.timeout = options.timeout ?? null;
     this.accessToken = options.accessToken ?? null;
 
     if (options.server) {
       this.server = options.server;
     } else if (options.region && is_valid_region(options.region)) {
+      this.region = options.region;
       this.server = SERVERS[options.region];
     } else {
       throw new Error("Either server or region must be provided.");
     }
 
-    this.debug && console.debug(`Using server ${this.server}`);
+    this._log(`Using server ${this.server}`);
 
     const factories = this.constructor as typeof TeslaFleetApi;
 
@@ -84,6 +108,60 @@ export default class TeslaFleetApi {
     }
   }
 
+  /** Write a debug line to `logger`, or to `console.debug` when `debug` is set. */
+  _log(message: string): void {
+    if (this.logger) {
+      this.logger.debug(message);
+    } else if (this.debug) {
+      console.debug(message);
+    }
+  }
+
+  /** The injected `fetch`, resolved per call so the global is read late. */
+  protected _fetch(input: string, init?: RequestInit): Promise<Response> {
+    return (this.#fetch ?? fetch)(input, init);
+  }
+
+  /**
+   * Find the server for this user's region by asking each Tesla server in
+   * turn, skipping any that answers `InvalidRegion`.
+   * @returns The region, e.g. `"na"`.
+   */
+  async find_server(): Promise<string> {
+    for (const server of Object.values(SERVERS)) {
+      this.server = server;
+      try {
+        const { response } = await this._request("GET", "api/1/users/region");
+        if (response) {
+          this.server = response.fleet_api_base_url;
+          if (is_valid_region(response.region)) {
+            this.region = response.region;
+          }
+          this._log(`Using server ${this.server}`);
+          return response.region;
+        }
+      } catch (error) {
+        if (error instanceof InvalidRegion) {
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new LibraryError("Could not find a valid Tesla API server.");
+  }
+
+  /**
+   * The current access token, calling it first if it is a function.
+   * @throws MissingToken when there is no token.
+   */
+  async access_token(): Promise<string> {
+    const token = typeof this.accessToken === "function" ? await this.accessToken() : this.accessToken;
+    if (token == null) {
+      throw new MissingToken();
+    }
+    return token;
+  }
+
   /**
    * Turn a response into its decoded JSON body, throwing the matching
    * `TeslaFleetError` for an error status and `ResponseError` for a
@@ -95,6 +173,7 @@ export default class TeslaFleetApi {
     try {
       return JSON.parse(text);
     } catch {
+      this._log(`Response type is: ${resp.headers.get("content-type")}`);
       throw new ResponseError(text, resp.status);
     }
   }
@@ -103,12 +182,12 @@ export default class TeslaFleetApi {
    * Make a request to the Tesla Fleet API.
    * @param method
    * @param path
-   * @param params
-   * @param json
+   * @param params Query parameters; null and undefined values are dropped.
+   * @param json Body; null and undefined values are dropped, and a GET sends none.
    * @returns The decoded JSON body.
-   * @throws A `TeslaFleetError` subclass for an error status, or
-   * `TeslaFleetConnectionError` (with the original error as `cause`) when the
-   * request could not complete or timed out.
+   * @throws `MissingToken` when there is no access token, a `TeslaFleetError`
+   * subclass for an error status, or `TeslaFleetConnectionError` (with the
+   * original error as `cause`) when the request could not complete or timed out.
    */
   async _request(
     method: Method,
@@ -116,52 +195,123 @@ export default class TeslaFleetApi {
     params: Record<string, any> | null = null,
     json: Record<string, any> | null = null,
   ): Promise<any> {
-    if (!this.server) {
-      throw new Error("Server was not set at init. Call findServer() first.");
-    }
+    // Trailing path segment (e.g. "door_lock", "vehicle_data") as the log's command name.
+    const command = path.slice(path.lastIndexOf("/") + 1);
 
-    if (method === "GET" && json !== null) {
-      throw new Error("GET requests cannot have a body.");
-    }
-
-    this.debug && console.debug(`Sending request to ${path}`);
-
-    // Remove null and undefined values from params and json
-    if (params) {
-      params = Object.fromEntries(
-        Object.entries(params).filter(([_, v]) => v != null),
-      );
-      this.debug && console.debug(`Parameters: ${JSON.stringify(params)}`);
-    }
-    if (json) {
-      json = Object.fromEntries(
-        Object.entries(json).filter(([_, v]) => v != null),
-      );
-      this.debug && console.debug(`Body: ${JSON.stringify(json)}`);
-    }
-
-    const headers = {
-      Authorization: `Bearer ${this.accessToken}`,
-      "Content-Type": "application/json",
-      "X-Library": `node tesla_fleet_api`,
-    };
-
-    const query = params ? "?" + new URLSearchParams(params).toString() : "";
-
+    let data: any;
     try {
-      const resp = await fetch(`${this.server}/${path}${query}`, {
-        method,
-        headers,
-        body: json ? JSON.stringify(json) : null,
-        signal: this.timeout != null ? AbortSignal.timeout(this.timeout) : null,
-      });
-      return await this._response(resp);
-    } catch (error) {
-      if (error instanceof TeslaFleetError) {
-        throw error;
+      if (!this.server) {
+        throw new Error("Server was not set at init. Call find_server() first.");
       }
-      throw new TeslaFleetConnectionError(null, null, { cause: error });
+
+      if (method === "GET") {
+        json = null;
+      }
+
+      const accessToken = await this.access_token();
+
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${accessToken}`,
+        "X-Library": `node tesla_fleet_api ${__VERSION__}`,
+      };
+
+      // Remove null and undefined values from params and json
+      const query = new URLSearchParams();
+      if (params) {
+        for (const [key, value] of Object.entries(params)) {
+          if (value != null) {
+            query.append(key, typeof value === "boolean" ? (value ? "true" : "false") : String(value));
+          }
+        }
+        this._log(`Parameters: ${query.toString()}`);
+      }
+      let body: string | null = null;
+      if (json) {
+        json = Object.fromEntries(Object.entries(json).filter(([_, v]) => v != null));
+        body = JSON.stringify(json);
+        this._log(`Body: ${body}`);
+        headers["Content-Type"] = "application/json";
+      }
+
+      const search = query.size ? `?${query.toString()}` : "";
+      const url = `${this.server}/${path}${search}`;
+
+      try {
+        const resp = await this._fetch(url, {
+          method,
+          headers,
+          body,
+          signal: this.timeout != null ? AbortSignal.timeout(this.timeout) : null,
+        });
+        this._log(`Status ${resp.status} from ${url}`);
+        for (const [header, label] of [
+          ["x-txid", "Response TXID"],
+          ["RateLimit-Reset", "Rate limit reset"],
+          ["Retry-After", "Retry after"],
+        ]) {
+          if (resp.headers.has(header)) {
+            this._log(`${label}: ${resp.headers.get(header)}`);
+          }
+        }
+        data = await this._response(resp);
+      } catch (error) {
+        if (error instanceof TeslaFleetError) {
+          throw error;
+        }
+        throw new TeslaFleetConnectionError(null, null, { cause: error });
+      }
+      this._log(`Response JSON: ${JSON.stringify(data)}`);
+    } catch (error) {
+      logRequestError((m) => this._log(m), command, this._transport_name, error);
+      throw error;
     }
+    logRequestResult((m) => this._log(m), command, this._transport_name, data);
+    return data;
+  }
+
+  /**
+   * Returns `"ok"` if the API is operating normally. Sends no headers.
+   */
+  async status(): Promise<string> {
+    if (!this.server) {
+      throw new Error("Server was not set at init. Call find_server() first.");
+    }
+    const resp = await this._fetch(`${this.server}/status`);
+    return resp.text();
+  }
+
+  /**
+   * Generate a partner token using client credentials authentication, and use
+   * it as the access token for later requests.
+   * @param client_id Partner application client ID.
+   * @param client_secret Partner application client secret.
+   * @param scopes Scopes to request.
+   * @returns The token response, including `access_token`.
+   */
+  async partner_login(
+    client_id: string,
+    client_secret: string,
+    scopes: Scope[] = [Scope.OPENID],
+  ): Promise<Record<string, any>> {
+    if (!this.server) {
+      throw new Error("Server was not set at init. Call find_server() first.");
+    }
+
+    const resp = await this._fetch(TOKEN_URLS[this.region ?? "na"], {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "client_credentials",
+        client_id,
+        client_secret,
+        audience: this.server,
+        scope: scopes.join(" "),
+      }),
+    });
+    await raise_for_status(resp);
+    const tokenData = await resp.json();
+    this.accessToken = tokenData.access_token;
+    return tokenData;
   }
 
   /**

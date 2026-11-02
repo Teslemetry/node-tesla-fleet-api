@@ -7,6 +7,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `pnpm install` (whose `prepare` script runs `tsdown`, same as `pnpm build`) is the build gate; `npx tsc --noEmit` typechecks without emitting. `pnpm test` runs the vitest suite under `test/`, which `tsconfig.json`'s `include` deliberately excludes so tests never ship in `dist`.
 - The package is a dual ESM/CJS unbundled build (`tsdown.config.ts`). Its public surface is exactly `package.json`'s `exports` map (`.`, `./tariff`, `./const`, `./router`, `./types`); deep `dist/...` imports are blocked by design. A new subpath needs an entry in both files. `./tariff` must never pull in `@teslemetry/tesla-protocol` (`@teslemetry/api` inlines it), and `./types` is type-only (`export type *`). CI checks `attw --pack . --profile node16`, runs `test/consumers/` from both module systems, and greps `dist/tariff.*`.
 - `tsconfig.json` must keep `"module": "NodeNext"` / `"moduleResolution": "NodeNext"`. `@teslemetry/tesla-protocol` gates its subpaths behind a package.json `exports` map with per-subpath types; under classic/ESNext resolution every scoped-package import (even `@types/node` internals) fails to resolve.
+- `__VERSION__` (sent in `X-Library`) is a compile-time `define` from `package.json`, set in **both** `tsdown.config.ts` and `vitest.config.ts`; a new build or test entry point needs it too.
 - Tesla protobuf types (`RoutableMessage`, `vcsec`, `car_server`, `signatures`, `keys`, ...) come only from `@teslemetry/tesla-protocol` (subpaths like `@teslemetry/tesla-protocol/command/signatures`); nothing is vendored or generated here. It is ts-proto output: plain-object messages with `Type.create(partial)` / `Type.encode(msg).finish()` / `Type.decode(bytes)`, not `google-protobuf`'s `.setX()`/`.serializeBinary()`.
 
 ## Signed commands
@@ -22,7 +23,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 ## Errors (`src/exceptions.ts`)
 
 - A class-for-class port of `python-tesla-fleet-api`'s `exceptions.py`: same names, parents, and `message`/`status`/`key`/`code` (as statics, copied onto instances). Add new errors there under their Python name, with no aliases; don't reintroduce per-module error files. `message` is always the class message; per-instance detail goes in `data`.
-- `_request` only ever rejects with a `TeslaFleetError` (via `raise_for_status`, `ResponseError` for a non-JSON success body, or `TeslaFleetConnectionError` with `cause` for fetch/timeout failures) — never a bare object.
+- `_request` only ever rejects with a `TeslaFleetError` (`MissingToken` for a null token, or via `raise_for_status`, `ResponseError` for a non-JSON success body, or `TeslaFleetConnectionError` with `cause` for fetch/timeout failures) — never a bare object.
 
 ## Tariff resolver (`src/tariff.ts`)
 

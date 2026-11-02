@@ -1,4 +1,5 @@
-import TeslaFleetApi from "./teslafleetapi.js";
+import { LibraryError } from "./exceptions.js";
+import TeslaFleetApi, { AccessToken, Logger } from "./teslafleetapi.js";
 import { Scope } from "./types/commands.js";
 import { VehicleDataResponse } from "./types/vehicle_data.js";
 
@@ -9,8 +10,15 @@ type TessieVehicleResponse = {
 }
 
 export default class Tessie extends TeslaFleetApi {
-    constructor(accessToken: string) {
-        super({ accessToken, server: `https://api.tessie.com`, partnerScope: false, userScope: false });
+    override readonly _transport_name: string = "tessie";
+
+    constructor(accessToken: AccessToken, options: { debug?: boolean; logger?: Logger; fetch?: typeof fetch; timeout?: number } = {}) {
+        super({ ...options, accessToken, server: `https://api.tessie.com`, partnerScope: false, userScope: false });
+    }
+
+    /** Tessie has one server; there is nothing to find. */
+    override async find_server(): Promise<string> {
+        throw new LibraryError("Do not use this function for Tessie.");
     }
 
     /**
@@ -24,7 +32,13 @@ export default class Tessie extends TeslaFleetApi {
         return this._request("GET", "auth/tesla_scopes")
     }
 
-    async status(vin: string): Promise<"asleep" | "waiting_for_sleep" | "awake"> {
+    /** With no VIN, the API status (`"ok"`); with a VIN, that vehicle's sleep status. */
+    override async status(): Promise<string>;
+    override async status(vin: string): Promise<"asleep" | "waiting_for_sleep" | "awake">;
+    override async status(vin?: string): Promise<string> {
+        if (vin === undefined) {
+            return super.status();
+        }
         return this._request("GET", `${vin}/status`).then(({ status }) => status);
     }
 
