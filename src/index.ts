@@ -15,6 +15,12 @@ export type { AccessToken } from "./teslafleetapi.js";
 export type { RefreshedToken, TeslaFleetOAuthOptions } from "./oauth.js";
 export type { Logger } from "./log.js";
 export { Session } from "./signing/session.js";
+export {
+    ec_private_key_from_pem,
+    generate_ec_private_key_pem,
+    generate_rsa_private_key_pem,
+    rsa_public_der_pkcs1,
+} from "./signing/keys.js";
 export { DAY_OF_WEEK_BITS, days_of_week_mask } from "./commands.js";
 export * from "./exceptions.js";
 export { getTariffPeriods, unwrapTariffV2 } from "./tariff.js";

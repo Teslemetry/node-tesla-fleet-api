@@ -276,7 +276,7 @@ export default abstract class Commands extends VehicleSpecific {
             throw new Error(`Signed commands require a 17-character VIN, got ${vin.length} characters.`);
         }
 
-        const resolvedPrivateKey = privateKey ?? (parent as unknown as { private_key?: Buffer }).private_key;
+        const resolvedPrivateKey = privateKey ?? parent.private_key ?? parent.parent.private_key;
         if (!resolvedPrivateKey) {
             throw new Error("No private key provided for signed commands.");
         }
