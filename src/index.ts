@@ -20,6 +20,8 @@ export { ENERGY_SIGNATURE_TTL_SECONDS, EnergyDeviceSigner } from "./signing/ener
 export type { AccessToken } from "./teslafleetapi.js";
 export type { RefreshedToken, TeslaFleetOAuthOptions } from "./oauth.js";
 export type { Logger } from "./log.js";
+export { TeslemetryEnergySite, TeslemetryEnergySites, parse_authorized_clients, parse_gateway_address } from "./teslemetryenergy.js";
+export type { AuthorizedClient, AuthorizedClients } from "./teslemetryenergy.js";
 export { Session } from "./signing/session.js";
 export {
     ec_private_key_from_pem,
