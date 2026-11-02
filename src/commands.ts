@@ -20,8 +20,11 @@ import {
     FromVCSECMessage,
     VehicleStatus,
     OperationStatusE as VcsecOperationStatusE,
+    WhitelistOperationInformationE,
+    operationStatusEToJSON,
     signedMessageInformationEToJSON,
     rKEActionEToJSON,
+    whitelistOperationInformationEToJSON,
 } from "@teslemetry/tesla-protocol/command/vcsec";
 import { genericErrorEToJSON } from "@teslemetry/tesla-protocol/command/errors";
 import {
@@ -86,7 +89,7 @@ import { ClimateMode, ClimateModes, CommandResponse, Level, Seat, Seats, Trunk }
 import { AutoSeat } from "./const.js";
 import Vehicle from "./vehicle.js";
 import VehicleSpecific from "./vehiclespecific.js";
-import { Session } from "./signing/session.js";
+import { Session, SessionKeys } from "./signing/session.js";
 import { logRequestError, logRequestResult } from "./log.js";
 import { deriveSharedKey, publicKeyFor, uint32BE } from "./signing/crypto.js";
 import {
@@ -94,10 +97,11 @@ import {
     NotOnWhitelistFault,
     SIGNED_MESSAGE_INFORMATION_FAULTS,
     SessionInfoAuthenticationFault,
-    SignedMessageInformationFault,
     TeslaFleetMessageFault,
     TeslaFleetMessageFaultIncorrectEpoch,
     TeslaFleetMessageFaultInvalidTokenOrCounter,
+    WHITELIST_OPERATION_STATUS,
+    WhitelistOperationStatus,
 } from "./exceptions.js";
 
 const VOID: Void = {};
@@ -326,6 +330,12 @@ export default abstract class Commands extends VehicleSpecific {
      * once that tag checks out do we act on anything the message claims -
      * including its own whitelist-status field - and even then `Session.commit`
      * still refuses a clock time that regresses within the same epoch.
+     *
+     * The one exception is an empty public key: no shared key can be derived
+     * from it to verify a tag. An unpaired key has no session, so
+     * key-not-on-whitelist is the only real reply that omits the key, and that
+     * one status is accepted unauthenticated. Any other status with no key is
+     * malformed.
      */
     protected validateAndUpdateSession(resp: RoutableMessage, requestUuid: Buffer): void {
         if (resp.sessionInfo && resp.sessionInfo.length > 0) {
@@ -344,8 +354,26 @@ export default abstract class Commands extends VehicleSpecific {
                 throw new SessionInfoAuthenticationFault("Session info reply does not match an outstanding request; discarded.");
             }
 
-            const info = SessionInfo.decode(resp.sessionInfo);
-            const keys = session.keysFor(Buffer.from(info.publicKey));
+            let info: SessionInfo;
+            try {
+                info = SessionInfo.decode(resp.sessionInfo);
+            } catch (cause) {
+                throw new SessionInfoAuthenticationFault("Session info reply could not be decoded.", null, { cause });
+            }
+
+            if (info.publicKey.length === 0) {
+                if (info.status === SessionInfoStatus.SESSION_INFO_STATUS_KEY_NOT_ON_WHITELIST) {
+                    throw new NotOnWhitelistFault();
+                }
+                throw new SessionInfoAuthenticationFault("Session info reply has no public key.");
+            }
+
+            let keys: SessionKeys;
+            try {
+                keys = session.keysFor(Buffer.from(info.publicKey));
+            } catch (cause) {
+                throw new SessionInfoAuthenticationFault("Session info reply has an invalid public key.", null, { cause });
+            }
 
             const tag = resp.signatureData?.sessionInfoTag?.tag;
             if (!tag || tag.length === 0) {
@@ -520,21 +548,45 @@ export default abstract class Commands extends VehicleSpecific {
             return ok();
         }
         if (vcsec.commandStatus) {
-            if (vcsec.commandStatus.operationStatus === VcsecOperationStatusE.OPERATIONSTATUS_OK) {
+            const status = vcsec.commandStatus;
+            if (status.operationStatus === VcsecOperationStatusE.OPERATIONSTATUS_OK) {
+                // A rejected whitelist operation still replies OK at this level.
+                this.raiseWhitelistFault(status.whitelistOperationStatus?.whitelistOperationInformation);
                 return ok();
             }
-            if (vcsec.commandStatus.operationStatus === VcsecOperationStatusE.OPERATIONSTATUS_WAIT) {
+            if (status.operationStatus === VcsecOperationStatusE.OPERATIONSTATUS_WAIT) {
                 return "wait";
             }
-            if (vcsec.commandStatus.operationStatus === VcsecOperationStatusE.OPERATIONSTATUS_ERROR) {
-                const information = vcsec.commandStatus.signedMessageStatus?.signedMessageInformation;
-                if (information) {
-                    const cls = SIGNED_MESSAGE_INFORMATION_FAULTS[information] ?? SignedMessageInformationFault;
-                    throw new cls({ information: signedMessageInformationEToJSON(information) });
+            if (status.operationStatus === VcsecOperationStatusE.OPERATIONSTATUS_ERROR) {
+                // ERROR is a car-side refusal whatever the sub-message carries,
+                // so it must never reach success; the sub-message only picks the
+                // exception.
+                if (status.signedMessageStatus) {
+                    const information = status.signedMessageStatus.signedMessageInformation;
+                    const cls = SIGNED_MESSAGE_INFORMATION_FAULTS[information];
+                    if (cls) {
+                        throw new cls({ information: signedMessageInformationEToJSON(information) });
+                    }
+                } else {
+                    this.raiseWhitelistFault(status.whitelistOperationStatus?.whitelistOperationInformation);
                 }
+                return fail(operationStatusEToJSON(status.operationStatus));
             }
         }
         return ok();
+    }
+
+    private raiseWhitelistFault(information: WhitelistOperationInformationE | undefined): void {
+        if (!information) {
+            return;
+        }
+        if (information >= WHITELIST_OPERATION_STATUS.length) {
+            throw new WhitelistOperationStatus(`Unknown whitelist operation failure: ${information}`);
+        }
+        const cls = WHITELIST_OPERATION_STATUS[information];
+        if (cls) {
+            throw new cls({ information: whitelistOperationInformationEToJSON(information) });
+        }
     }
 
     private interpretInfotainmentResponse(bytes: Uint8Array): CommandResponse {

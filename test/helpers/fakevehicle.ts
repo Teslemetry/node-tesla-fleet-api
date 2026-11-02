@@ -19,6 +19,7 @@ const VIN = "5YJXCAE43LF123456";
 
 type SessionInfoAttack =
     | { kind: "corrupt-tag" }
+    | { kind: "empty-tag" }
     | { kind: "wrong-challenge" }
     | { kind: "stale"; counter: number; clockTime: number };
 
@@ -48,6 +49,8 @@ export class FakeVehicle {
     private nextSessionInfoAttack: SessionInfoAttack | null = null;
     private attachSessionInfoOnNextReply = false;
     private omitRequestUuidEcho = false;
+    private nextHandshakeEmptyKeyStatus: SessionInfoStatus | null = null;
+    private nextVcsecReply: FromVCSECMessage | null = null;
     /** Counters of every VCSEC command in the order this FakeVehicle actually received them - for concurrency/ordering tests. */
     readonly vcsecCounterArrivals: number[] = [];
 
@@ -74,6 +77,27 @@ export class FakeVehicle {
     /** Simulate a MITM flipping a bit in `session_info_tag` (or the session info it covers). */
     corruptNextSessionInfoTag(): void {
         this.nextSessionInfoAttack = { kind: "corrupt-tag" };
+    }
+
+    /**
+     * Simulate the reply VCSEC was seen to send right after a key was added:
+     * a `session_info_tag` that is present but zero-length.
+     */
+    emptyNextSessionInfoTag(): void {
+        this.nextSessionInfoAttack = { kind: "empty-tag" };
+    }
+
+    /**
+     * Reply to the next session-info request with no public key, as a vehicle
+     * does for a key it has no session with. Such a reply carries no usable tag.
+     */
+    replyToNextHandshakeWithoutPublicKey(status: SessionInfoStatus): void {
+        this.nextHandshakeEmptyKeyStatus = status;
+    }
+
+    /** Answer the next accepted VCSEC command with this message instead of `commandStatus` OK. */
+    replyToNextVcsecCommandWith(message: FromVCSECMessage): void {
+        this.nextVcsecReply = message;
     }
 
     /** Simulate a captured old session-info reply replayed against a request it wasn't tagged for. */
@@ -170,6 +194,8 @@ export class FakeVehicle {
         if (attack?.kind === "corrupt-tag") {
             tag = Buffer.from(tag);
             tag[0] ^= 0xff;
+        } else if (attack?.kind === "empty-tag") {
+            tag = Buffer.alloc(0);
         }
 
         // The tag always binds the real challenge (`effectiveRequestUuid`);
@@ -202,6 +228,18 @@ export class FakeVehicle {
             state.clientPublicKey = Buffer.from(msg.sessionInfoRequest.publicKey);
             state.hmacKey = undefined;
             state.sessionInfoKey = undefined;
+            if (this.nextHandshakeEmptyKeyStatus !== null) {
+                const status = this.nextHandshakeEmptyKeyStatus;
+                this.nextHandshakeEmptyKeyStatus = null;
+                const reply = RoutableMessage.create({
+                    fromDestination: { domain },
+                    requestUuid: msg.uuid,
+                    sessionInfo: SessionInfo.encode(SessionInfo.create({ status, epoch: state.epoch, clockTime: state.clockTime })).finish(),
+                    signatureData: { sessionInfoTag: { tag: Buffer.alloc(32) } },
+                    uuid: crypto.randomBytes(16),
+                });
+                return Buffer.from(RoutableMessage.encode(reply).finish());
+            }
             return this.buildSessionInfoReply(domain, msg.uuid, SessionInfoStatus.SESSION_INFO_STATUS_OK, state);
         }
 
@@ -269,10 +307,13 @@ export class FakeVehicle {
         let payload: Uint8Array;
         if (domain === Domain.DOMAIN_VEHICLE_SECURITY) {
             UnsignedMessage.decode(command); // exercised for shape validation
+            const scripted = this.nextVcsecReply;
+            this.nextVcsecReply = null;
             payload = FromVCSECMessage.encode(
-                FromVCSECMessage.create({
-                    commandStatus: CommandStatus.create({ operationStatus: VcsecOperationStatusE.OPERATIONSTATUS_OK }),
-                }),
+                scripted ??
+                    FromVCSECMessage.create({
+                        commandStatus: CommandStatus.create({ operationStatus: VcsecOperationStatusE.OPERATIONSTATUS_OK }),
+                    }),
             ).finish();
         } else {
             Action.decode(command); // exercised for shape validation

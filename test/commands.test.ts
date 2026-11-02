@@ -1,11 +1,27 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { Domain, RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
-import { VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
+import { SessionInfoStatus } from "@teslemetry/tesla-protocol/command/signatures";
+import {
+    CommandStatus,
+    FromVCSECMessage,
+    OperationStatusE,
+    SignedMessageInformationE,
+    VehicleStatus,
+    WhitelistOperationInformationE,
+} from "@teslemetry/tesla-protocol/command/vcsec";
+import { GenericErrorE } from "@teslemetry/tesla-protocol/command/errors";
 import { Action, AutoSeatClimateAction_AutoSeatPositionE, RemoteNavTripOrderE, VehicleAction } from "@teslemetry/tesla-protocol/command/car_server";
 import Commands from "../src/commands.js";
 import TeslaFleetApi from "../src/teslafleetapi.js";
 import Vehicle from "../src/vehicle.js";
-import { NotOnWhitelistFault, SessionInfoAuthenticationFault, TeslaFleetMessageFaultInvalidSignature } from "../src/exceptions.js";
+import {
+    NotOnWhitelistFault,
+    SessionInfoAuthenticationFault,
+    SignedMessageInformationFaultNotOnWhitelist,
+    TeslaFleetMessageFaultInvalidSignature,
+    WhitelistOperationNoPermissionToAdd,
+    WhitelistOperationStatus,
+} from "../src/exceptions.js";
 import { publicKeyFor } from "../src/signing/crypto.js";
 import { AutoSeat, Seats } from "../src/const.js";
 import { FakeVehicle } from "./helpers/fakevehicle.js";
@@ -145,6 +161,105 @@ describe("Commands: session handshake", () => {
         commands.fakeVehicle.corruptNextSessionInfoTag();
 
         await expect(commands.door_lock()).rejects.toThrow(/authentication/i);
+    });
+});
+
+describe("Commands: a session info reply with no public key", () => {
+    it("raises NotOnWhitelistFault, not a crypto error, for an unpaired key", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextHandshakeWithoutPublicKey(SessionInfoStatus.SESSION_INFO_STATUS_KEY_NOT_ON_WHITELIST);
+        await expect(commands.door_lock()).rejects.toThrow(NotOnWhitelistFault);
+        expect((commands as any).sessions[2].ready).toBe(false);
+    });
+
+    it("raises SessionInfoAuthenticationFault for any other status", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextHandshakeWithoutPublicKey(SessionInfoStatus.SESSION_INFO_STATUS_OK);
+        await expect(commands.door_lock()).rejects.toThrow(SessionInfoAuthenticationFault);
+        expect((commands as any).sessions[2].ready).toBe(false);
+    });
+});
+
+describe("Commands: VCSEC commandStatus", () => {
+    const commandStatus = (status: Partial<CommandStatus>) => FromVCSECMessage.create({ commandStatus: CommandStatus.create(status) });
+    const error = (status: Partial<CommandStatus>) => commandStatus({ ...status, operationStatus: OperationStatusE.OPERATIONSTATUS_ERROR });
+    const whitelist = (whitelistOperationInformation: WhitelistOperationInformationE) => ({
+        whitelistOperationInformation,
+        signerOfOperation: undefined,
+        operationStatus: OperationStatusE.OPERATIONSTATUS_OK,
+    });
+
+    it("raises the signed-message fault on ERROR", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextVcsecCommandWith(
+            error({
+                signedMessageStatus: {
+                    counter: 0,
+                    signedMessageInformation: SignedMessageInformationE.SIGNEDMESSAGE_INFORMATION_FAULT_NOT_ON_WHITELIST,
+                },
+            }),
+        );
+        await expect(commands.door_unlock()).rejects.toThrow(SignedMessageInformationFaultNotOnWhitelist);
+    });
+
+    it("raises the whitelist fault on ERROR", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextVcsecCommandWith(
+            error({ whitelistOperationStatus: whitelist(WhitelistOperationInformationE.WHITELISTOPERATION_INFORMATION_NO_PERMISSION_TO_ADD) }),
+        );
+        await expect(commands.door_unlock()).rejects.toThrow(WhitelistOperationNoPermissionToAdd);
+    });
+
+    it.each([
+        ["no sub-message", {}],
+        ["an empty signed-message status", { signedMessageStatus: { counter: 0, signedMessageInformation: SignedMessageInformationE.SIGNEDMESSAGE_INFORMATION_NONE } }],
+        ["an unmapped signed-message status", { signedMessageStatus: { counter: 0, signedMessageInformation: 9999 as SignedMessageInformationE } }],
+        ["an empty whitelist status", { whitelistOperationStatus: whitelist(WhitelistOperationInformationE.WHITELISTOPERATION_INFORMATION_NONE) }],
+    ])("fails, never succeeds, on ERROR with %s", async (_name, status) => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextVcsecCommandWith(error(status));
+        await expect(commands.door_unlock()).resolves.toEqual({ response: { result: false, reason: "OPERATIONSTATUS_ERROR" } });
+    });
+
+    it("raises for a whitelist operation rejected under an outer OK", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextVcsecCommandWith(
+            commandStatus({
+                operationStatus: OperationStatusE.OPERATIONSTATUS_OK,
+                whitelistOperationStatus: whitelist(WhitelistOperationInformationE.WHITELISTOPERATION_INFORMATION_NO_PERMISSION_TO_ADD),
+            }),
+        );
+        await expect(commands.door_unlock()).rejects.toThrow(WhitelistOperationNoPermissionToAdd);
+    });
+
+    it("raises the base class for an unknown whitelist status", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextVcsecCommandWith(
+            commandStatus({
+                operationStatus: OperationStatusE.OPERATIONSTATUS_OK,
+                whitelistOperationStatus: whitelist(9999 as WhitelistOperationInformationE),
+            }),
+        );
+        await expect(commands.door_unlock()).rejects.toThrow(WhitelistOperationStatus);
+    });
+
+    it("succeeds for an accepted whitelist operation", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextVcsecCommandWith(
+            commandStatus({
+                operationStatus: OperationStatusE.OPERATIONSTATUS_OK,
+                whitelistOperationStatus: whitelist(WhitelistOperationInformationE.WHITELISTOPERATION_INFORMATION_NONE),
+            }),
+        );
+        await expect(commands.door_unlock()).resolves.toEqual({ response: { result: true, reason: "" } });
+    });
+
+    it("fails with the generic error name on nominalError", async () => {
+        const commands = new TestCommands();
+        commands.fakeVehicle.replyToNextVcsecCommandWith(
+            FromVCSECMessage.create({ nominalError: { genericError: GenericErrorE.GENERICERROR_CLOSURES_OPEN } }),
+        );
+        await expect(commands.door_lock()).resolves.toEqual({ response: { result: false, reason: "GENERICERROR_CLOSURES_OPEN" } });
     });
 });
 
