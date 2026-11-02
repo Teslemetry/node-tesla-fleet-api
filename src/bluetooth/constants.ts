@@ -67,7 +67,8 @@ export const LINK_TEARDOWN_TIMEOUT_MS = 5000;
 /**
  * One write call. Not in Python, whose backends bound their own writes. Homey's
  * have no timeout and its link state can be stale, so a hung write must end
- * here. A design choice; tune it against hardware.
+ * here. A design choice. BLE-00 step 10 measures how long a failing write takes
+ * on Homey, which sets it.
  */
 export const GATT_WRITE_TIMEOUT_MS = 5000;
 /** One read call, other than a keepalive's. */

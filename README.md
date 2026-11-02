@@ -36,6 +36,10 @@ class MyApi extends Teslemetry {
 }
 ```
 
+## Bluetooth
+
+Control a vehicle directly over Bluetooth, through `tesla-fleet-api/bluetooth` and a backend adapter: `./bluetooth/homey` for a Homey app, `./bluetooth/noble`, or `./bluetooth/esphome` for an ESPHome proxy. Backends are optional, so installing this package adds nothing native. None of this has run on a real car from Node yet. See [docs/bluetooth_vehicles.md](docs/bluetooth_vehicles.md).
+
 ## Local Powerwall
 
 A client for a Powerwall gateway on your LAN, with routing to the cloud and merge helpers, is built but not published: `tesla-fleet-api/powerwall` is not importable yet. It ships once a read-only check has passed on a real gateway. Its writes are not yet verified from Node on hardware. See [docs/powerwall.md](docs/powerwall.md).

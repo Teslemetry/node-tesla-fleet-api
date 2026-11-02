@@ -47,6 +47,32 @@ describe("the entry points", () => {
         expect([...packages].filter((name) => !allowed.test(name))).toEqual([]);
     });
 
+    it.each(["homey", "noble", "esphome"])("the %s adapter statically imports no package at all", (adapter) => {
+        expect([...walk(`src/bluetooth/adapters/${adapter}.ts`).packages]).toEqual([]);
+    });
+
+    it("keeps every adapter out of ./bluetooth, and so out of the root", () => {
+        expect([...walk("src/bluetooth/index.ts").modules].filter((file) => file.includes("/adapters/"))).toEqual([]);
+    });
+
+    it("exports each adapter in both package.json and tsdown.config.ts", () => {
+        const manifest = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
+        const build = readFileSync(resolve(ROOT, "tsdown.config.ts"), "utf8");
+        for (const adapter of ["homey", "noble", "esphome"]) {
+            expect(manifest.exports[`./bluetooth/${adapter}`].import.default).toBe(`./dist/bluetooth/${adapter}.mjs`);
+            expect(build).toContain(`"bluetooth/${adapter}": "src/bluetooth/adapters/${adapter}.ts"`);
+        }
+    });
+
+    it("installs no backend: each is an optional peer, and homey is no dependency", () => {
+        const manifest = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
+        expect(Object.keys(manifest.dependencies)).toEqual(["@teslemetry/tesla-protocol"]);
+        for (const name of Object.keys(manifest.peerDependencies)) {
+            expect(manifest.peerDependenciesMeta[name].optional).toBe(true);
+        }
+        expect(manifest.peerDependencies.homey).toBeUndefined();
+    });
+
     it("has no createBluetooth on the root Vehicle", () => {
         expect("createBluetooth" in Vehicle.prototype).toBe(false);
         expect("createBluetooth" in VehiclesBluetooth.prototype).toBe(true);
