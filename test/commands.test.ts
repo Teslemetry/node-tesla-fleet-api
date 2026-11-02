@@ -3,6 +3,7 @@ import { Domain, RoutableMessage } from "@teslemetry/tesla-protocol/command/univ
 import { VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
 import { Action, AutoSeatClimateAction_AutoSeatPositionE, RemoteNavTripOrderE, VehicleAction } from "@teslemetry/tesla-protocol/command/car_server";
 import Commands from "../src/commands.js";
+import TeslaFleetApi from "../src/teslafleetapi.js";
 import Vehicle from "../src/vehicle.js";
 import { NotOnWhitelistFault, SessionInfoAuthenticationFault, TeslaFleetMessageFaultInvalidSignature } from "../src/exceptions.js";
 import { publicKeyFor } from "../src/signing/crypto.js";
@@ -13,12 +14,13 @@ const VIN = "5YJXCAE43LF123456";
 const OUR_PRIVATE_KEY = Buffer.from("10181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3ea", "hex");
 
 function makeParent(): Vehicle {
-    // Only `model`/`pre2021`, which VehicleSpecific's constructor calls, are exercised here.
-    return new Vehicle({} as any);
+    // The API is only reached for its debug logger; `_send` never makes a request.
+    return new Vehicle(new TeslaFleetApi({ server: "https://fleet.test" }));
 }
 
 /** Concrete `Commands` whose `_send` seam is a direct in-process call into a `FakeVehicle`. */
 class TestCommands extends Commands {
+    readonly _transport_name = "test";
     fakeVehicle = new FakeVehicle();
     sendCount = 0;
     /** FIFO queue of artificial network delays (ms), one consumed per `_send` call - lets tests force reordering that would occur over a real, unlocked, concurrent network round trip. */
@@ -48,6 +50,7 @@ describe("Commands: constructor validation", () => {
     // derivation the same way any real caller would observe it: what
     // actually goes out on the wire.
     class RecordingCommands extends Commands {
+        readonly _transport_name = "test";
         sentMessages: RoutableMessage[] = [];
 
         protected async _send(msg: RoutableMessage): Promise<RoutableMessage> {
