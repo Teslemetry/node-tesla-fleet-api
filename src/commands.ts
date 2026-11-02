@@ -101,6 +101,11 @@ import {
     PseudonymSyncRequest,
     SetupCloudProfileWithLocalProfileUuidAction,
     TeslaAuthResponseAction,
+    GetVehicleData,
+    GetVehicleImageState,
+    VehicleImageDataChunkRequest,
+    VehicleImageRequest,
+    VehicleImageRequest_Type,
     AddManagedChargingSiteRequest,
     BatchRemoveChargeSchedulesAction,
     BatchRemovePreconditionSchedulesAction,
@@ -167,9 +172,9 @@ import {
     StwHeatLevel,
     Void,
 } from "@teslemetry/tesla-protocol/command/common";
-import { VehicleData, VehicleState_GuestMode, ClimateState_CopActivationTemp } from "@teslemetry/tesla-protocol/command/vehicle";
+import { VehicleData, VehicleImage, VehicleState_GuestMode, ClimateState_CopActivationTemp } from "@teslemetry/tesla-protocol/command/vehicle";
 import { ClimateMode, ClimateModes, CommandResponse, Level, Seat, Seats, Trunk } from "./types/commands.js";
-import { AutoSeat, DistanceUnit, EnergyDisplayFormat, PhoneFontSize, TemperatureUnit, TimeDisplayFormat, TirePressureUnit } from "./const.js";
+import { AutoSeat, DistanceUnit, EnergyDisplayFormat, PhoneFontSize, TemperatureUnit, TimeDisplayFormat, TirePressureUnit, VehicleImageType } from "./const.js";
 import Vehicle from "./vehicle.js";
 import VehicleSpecific from "./vehiclespecific.js";
 import { sign_fleet_telemetry_config } from "./signing/jws.js";
@@ -946,6 +951,68 @@ export default abstract class Commands extends VehicleSpecific {
             throw new InvalidResponse({ result: reply.response.result, reason: reply.response.reason });
         }
         return reply.response as T;
+    }
+
+    /** One `getVehicleImageState` read, with the single image its reply must carry. */
+    private async readVehicleImage(request: Partial<VehicleImageRequest>): Promise<VehicleImage> {
+        const data = await this._getInfotainment(
+            Action.create({
+                vehicleAction: VehicleAction.create({
+                    getVehicleData: GetVehicleData.create({
+                        getVehicleImageState: GetVehicleImageState.create({ imageRequests: [VehicleImageRequest.create(request)] }),
+                    }),
+                }),
+            }),
+        );
+        const image = data.vehicleImageState?.vehicleImages[0];
+        if (!image) {
+            throw new InvalidResponse({ vehicleImageState: data.vehicleImageState ?? null });
+        }
+        return image;
+    }
+
+    /**
+     * Fetches a rendered vehicle image and returns its assembled bytes. Unlike
+     * any other read it is paged: an `ID` request reports the total size, then
+     * `DATA` requests advance by `chunk_size` until the whole range has arrived.
+     * @param image_type `VehicleImageType`
+     * @param chunk_size Bytes per request. A transport with a small frame needs a smaller value than the default.
+     * @throws Error when `chunk_size` is invalid, before anything is sent, or when the chunks do not add up to the reported size.
+     * @throws InvalidResponse when a reply carries no image.
+     */
+    async vehicle_image_state(image_type: VehicleImageType | number, chunk_size: number = 16384): Promise<Buffer> {
+        if (!Number.isInteger(chunk_size) || chunk_size <= 0) {
+            throw new Error("chunk_size must be a positive integer");
+        }
+
+        const { totalImageSize: totalSize } = await this.readVehicleImage({ dataType: VehicleImageRequest_Type.ID, imageType: image_type });
+
+        const chunks: Uint8Array[] = [];
+        let offset = 0;
+        while (offset < totalSize) {
+            const { assetData } = await this.readVehicleImage({
+                dataType: VehicleImageRequest_Type.DATA,
+                imageType: image_type,
+                chunkRequest: VehicleImageDataChunkRequest.create({
+                    chunkOffset: offset,
+                    chunkSize: Math.min(chunk_size, totalSize - offset),
+                }),
+            });
+            const startOffset = assetData?.startOffset ?? 0;
+            if (startOffset !== offset) {
+                throw new Error(`Unexpected vehicle image chunk offset ${startOffset}; expected ${offset}`);
+            }
+            const chunk = assetData?.data;
+            if (!chunk || chunk.length === 0) {
+                throw new Error(`Vehicle image ended after ${offset} of ${totalSize} bytes`);
+            }
+            chunks.push(chunk);
+            offset += chunk.length;
+            if (offset > totalSize) {
+                throw new Error(`Vehicle image exceeded declared size of ${totalSize} bytes`);
+            }
+        }
+        return Buffer.concat(chunks);
     }
 
     /** Sign and send an actuation: its reply is a bare terminal ack, so `expectsData` is false. */
