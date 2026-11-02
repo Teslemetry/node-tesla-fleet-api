@@ -32,7 +32,7 @@ export default class Tessie extends TeslaFleetApi {
         return this._request("GET", `${vin}/state`, { use_cache });
     }
 
-    async vehicles(only_active: boolean = false): Promise<TessieVehicleResponse[]> {
+    async list_vehicles(only_active: boolean = false): Promise<TessieVehicleResponse[]> {
         return this._request("GET", "vehicles", { only_active }).then(({ results }) => results);
     }
 

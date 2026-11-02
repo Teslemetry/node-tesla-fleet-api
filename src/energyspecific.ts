@@ -1,3 +1,4 @@
+import { KeyObject } from "crypto";
 import Energy from "./energy.js";
 import { LiveStatusResponse } from "./types/live_status.js";
 import { SiteInfoResponse } from "./types/site_info.js";
@@ -6,10 +7,24 @@ import { SiteInfoResponse } from "./types/site_info.js";
 export default class EnergySpecific {
     parent: Energy;
     energy_site_id: number;
+    /** Gateway DIN (the energy site's `gateway_id` in `products`), the target of device commands. */
+    din?: string;
+    // Native private field, like `Commands`'s signing key: unreachable off the instance.
+    #privateKey?: KeyObject;
 
-    constructor(parent: Energy, energy_site_id: number) {
+    constructor(parent: Energy, energy_site_id: number, private_key?: KeyObject, din?: string) {
+        if (private_key && !din) {
+            throw new Error("A signing private_key requires the gateway din.");
+        }
         this.parent = parent;
         this.energy_site_id = energy_site_id;
+        this.din = din;
+        this.#privateKey = private_key;
+    }
+
+    /** Whether this site was created with a key for client-signed device commands. */
+    get signing(): boolean {
+        return this.#privateKey !== undefined;
     }
 
     /**
