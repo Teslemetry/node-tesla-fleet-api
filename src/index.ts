@@ -13,6 +13,7 @@ export { infotainment_command_name, vcsec_command_name };
 export type { AccessToken } from "./teslafleetapi.js";
 export type { Logger } from "./log.js";
 export { Session } from "./signing/session.js";
+export { DAY_OF_WEEK_BITS, days_of_week_mask } from "./commands.js";
 export * from "./exceptions.js";
 export { getTariffPeriods, unwrapTariffV2 } from "./tariff.js";
 export { firmwareAtLeast, firmwareCompare } from "./util.js";
