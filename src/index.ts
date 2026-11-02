@@ -3,14 +3,15 @@ import Energy from "./energy.js";
 import EnergySpecific from "./energyspecific.js";
 import TeslaFleetApi from "./teslafleetapi.js";
 import TeslaFleetOAuth from "./oauth.js";
-import Teslemetry from "./teslemetry.js";
+import Teslemetry, { REGISTER_URL, register_client } from "./teslemetry.js";
 import Tessie from "./tessie.js";
 import Vehicle from "./vehicle.js";
 import VehicleSigned from "./vehiclesigned.js";
 import VehicleSpecific from "./vehiclespecific.js";
 
 export { Commands, Energy, EnergySpecific, TeslaFleetApi, TeslaFleetOAuth, Teslemetry, Tessie, Vehicle, VehicleSigned, VehicleSpecific };
-export { infotainment_command_name, vcsec_command_name };
+export { REGISTER_URL, infotainment_command_name, register_client, vcsec_command_name };
+export type { TeslemetryClientRegistration } from "./teslemetry.js";
 export type { AccessToken } from "./teslafleetapi.js";
 export type { RefreshedToken, TeslaFleetOAuthOptions } from "./oauth.js";
 export type { Logger } from "./log.js";

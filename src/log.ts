@@ -1,8 +1,32 @@
 // Debug-log lines shared by REST requests (`TeslaFleetApi._request`) and
 // signed commands (`Commands`), in Python's `command= transport= result=` shape.
 
-/** Receives the library's debug lines. The access token is never logged. */
+/** Receives the library's debug lines. Tokens and PINs are never logged. */
 export type Logger = { debug(message: string): void };
+
+/**
+ * Parameter and body keys whose values never reach a log. `migrate_to_oauth`
+ * sends and receives tokens through `_request`, and PINs travel as body keys
+ * (Fleet, Teslemetry) or query parameters (Tessie).
+ */
+const SECRET_KEYS = new Set(["access_token", "refresh_token", "id_token", "client_secret", "pin"]);
+const REDACTED = "[redacted]";
+
+/** `JSON.stringify` for a log line, with secret values replaced at any depth. */
+export function redactedJson(value: unknown): string | undefined {
+  return JSON.stringify(value, (key, val) => (SECRET_KEYS.has(key) ? REDACTED : val));
+}
+
+/** A query string for a log line, with secret values replaced. */
+export function redactedQuery(query: URLSearchParams): string {
+  const redacted = new URLSearchParams(query);
+  for (const key of SECRET_KEYS) {
+    if (redacted.has(key)) {
+      redacted.set(key, REDACTED);
+    }
+  }
+  return redacted.toString();
+}
 
 function errorText(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
