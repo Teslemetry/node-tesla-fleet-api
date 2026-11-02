@@ -1,3 +1,5 @@
+# The GATT backends are optional peers. Nothing here may install their native builds.
+autoInstallPeers: false
 allowBuilds:
   esbuild: false
 minimumReleaseAgeExclude:

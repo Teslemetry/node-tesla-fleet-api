@@ -113,6 +113,16 @@
                 "default": "./dist/bluetooth.cjs"
             }
         },
+        "./bluetooth/noble": {
+            "import": {
+                "types": "./dist/bluetooth/noble.d.mts",
+                "default": "./dist/bluetooth/noble.mjs"
+            },
+            "require": {
+                "types": "./dist/bluetooth/noble.d.cts",
+                "default": "./dist/bluetooth/noble.cjs"
+            }
+        },
         "./package.json": "./package.json"
     },
     "sideEffects": false,
@@ -122,5 +132,13 @@
     "license": "Apache-2.0",
     "dependencies": {
         "@teslemetry/tesla-protocol": "~6.1.0"
+    },
+    "peerDependencies": {
+        "@stoprocent/noble": "^2.8.0"
+    },
+    "peerDependenciesMeta": {
+        "@stoprocent/noble": {
+            "optional": true
+        }
     }
 }

@@ -24,4 +24,13 @@ assert.equal(firmwareAtLeast("2025.10", "2025.9"), true);
 assert.equal(typeof SERVERS.na, "string");
 assert.equal(typeof router.VehicleRouter, "function");
 assert.equal(typeof router.is_failover_safe, "function");
-console.log("CJS consumer OK");
+
+// Each adapter must load with no backend installed, and only fail once it is used.
+const { NobleBleTransport } = require("tesla-fleet-api/bluetooth/noble");
+(async () => {
+    await assert.rejects(new NobleBleTransport().scan({ timeoutMs: 1000 }), /@stoprocent\/noble/);
+    console.log("CJS consumer OK");
+})().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+});
