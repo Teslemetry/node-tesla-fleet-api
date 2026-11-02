@@ -4,15 +4,20 @@ import {
   EnergyDisplayFormat,
   Method,
   SeatHeaterLevel,
+  SnapshotTopic,
   TemperatureUnit,
   TimeDisplayFormat,
   TirePressureUnit,
 } from "./const.js";
+import { InvalidResponse } from "./exceptions.js";
 import type Teslemetry from "./teslemetry.js";
 import Vehicle from "./vehicle.js";
 import VehicleSpecific from "./vehiclespecific.js";
 
 type Reply = Record<string, any>;
+
+/** Telemetry topics: a list, or an already `;`-joined string. Omit for every topic. */
+export type TelemetryTopics = SnapshotTopic[] | string[] | string | null;
 
 /** What each closure should do. A closure left out, or set to `none`, is not sent. */
 export type ClosureOptions = {
@@ -405,6 +410,74 @@ export class TeslemetryVehicle extends VehicleSpecific {
    */
   async trigger_rate_tariff_update(): Promise<Reply> {
     return this._custom_command("set_rate_tariff");
+  }
+
+  /**
+   * Gets a snapshot of cached vehicle telemetry.
+   * @param topics Topics to include.
+   * @param cursor Return only what changed since this cursor.
+   */
+  async telemetry(topics?: TelemetryTopics, cursor?: number | null): Promise<Reply> {
+    return this._request("GET", `api/1/vehicles/${this.vin}/telemetry`, { topics: joinTopics(topics), cursor });
+  }
+
+  /** Creates a cursor-aware reader of this vehicle's cached telemetry. */
+  create_telemetry_tracker(topics?: TelemetryTopics): TeslemetryVehicleTelemetry {
+    return new TeslemetryVehicleTelemetry(this, topics);
+  }
+}
+
+function joinTopics(topics: TelemetryTopics | undefined): string | null | undefined {
+  return Array.isArray(topics) ? topics.join(";") : topics;
+}
+
+/** Python truthiness, which an update's fields are tested by: an empty object or list counts as absent. */
+function hasContent(value: unknown): boolean {
+  return value !== null && typeof value === "object" ? Object.keys(value).length > 0 : !!value;
+}
+
+/** A cursor-aware vehicle telemetry reader, keeping a snapshot merged from each update. */
+export class TeslemetryVehicleTelemetry {
+  /** The cursor the next `update()` sends. */
+  cursor: number = 0;
+  /** Everything received so far. `data` merges field by field; other topics are replaced whole. */
+  snapshot: Record<string, any> = {};
+
+  private readonly _parent: TeslemetryVehicle;
+  private readonly _topics: string | null | undefined;
+
+  constructor(parent: TeslemetryVehicle, topics?: TelemetryTopics) {
+    this._parent = parent;
+    this._topics = joinTopics(topics);
+  }
+
+  /**
+   * Get the changes since the last update, and merge them into `snapshot`.
+   * @returns The update's `response`.
+   * @throws InvalidResponse when the update has an empty `response`, or no `cursor`.
+   */
+  async update(): Promise<Reply> {
+    const update = await this._parent.telemetry(this._topics, this.cursor);
+    const response = update?.response;
+    if (!hasContent(response)) {
+      throw new InvalidResponse("No response from telemetry");
+    }
+    if (typeof response !== "object" || !("cursor" in response)) {
+      throw new InvalidResponse("Telemetry response did not contain a cursor");
+    }
+    this.cursor = response.cursor;
+    if (hasContent(response.state)) {
+      this.snapshot.state = response.state;
+    }
+    if (hasContent(response.data)) {
+      this.snapshot.data = { ...this.snapshot.data, ...response.data };
+    }
+    for (const topic of ["connectivity", "alerts", "errors", "vehicle_data"]) {
+      if (hasContent(response[topic])) {
+        this.snapshot[topic] = response[topic];
+      }
+    }
+    return response;
   }
 }
 

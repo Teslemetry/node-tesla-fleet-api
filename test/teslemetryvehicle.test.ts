@@ -98,7 +98,7 @@ const ROUTES: [string, Call, string, string, unknown?][] = [
 ];
 
 /** Methods with their own tests below, or helpers that are not routes. */
-const NOT_IN_TABLE = new Set(["constructor", "_request", "_custom_command", "server_side_polling"]);
+const NOT_IN_TABLE = new Set(["constructor", "_request", "_custom_command", "server_side_polling", "telemetry", "create_telemetry_tracker"]);
 
 describe("TeslemetryVehicle routes", () => {
     it.each(ROUTES)("%s", async (_name, call, method, path, body) => {
