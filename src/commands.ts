@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import {
     Domain,
+    Flags,
     MessageFaultE,
     RoutableMessage,
     OperationStatusE as MessageOperationStatusE,
@@ -92,13 +93,14 @@ import Vehicle from "./vehicle.js";
 import VehicleSpecific from "./vehiclespecific.js";
 import { Session, SessionKeys } from "./signing/session.js";
 import { logRequestError, logRequestResult } from "./log.js";
-import { deriveSharedKey, publicKeyFor, uint32BE } from "./signing/crypto.js";
+import { aesGcmDecrypt, aesGcmEncrypt, deriveSharedKey, publicKeyFor, sha256, uint32BE } from "./signing/crypto.js";
 import {
     InvalidResponse,
     MESSAGE_FAULTS,
     NotOnWhitelistFault,
     SIGNED_MESSAGE_INFORMATION_FAULTS,
     SessionInfoAuthenticationFault,
+    SignedCommandResponseReplayed,
     SigningDisabled,
     TeslaFleetMessageFault,
     TeslaFleetMessageFaultIncorrectEpoch,
@@ -280,14 +282,14 @@ export function days_of_week_mask(days_of_week: string | number): number {
 /**
  * Transport-agnostic signed-command builder for the Tesla Vehicle Command
  * Protocol: mirrors `python-tesla-fleet-api`'s `Commands` ABC. Every method
- * here builds a `RoutableMessage`, signs it (HMAC-personalized), and
- * dispatches it through the single abstract seam `_send`. A concrete
- * subclass fills that seam for one transport: the cloud `/signed_command`
- * HTTP endpoint (`VehicleSigned`) today, a BLE GATT link next. The protected
- * members are what such a transport builds on.
+ * here builds a `RoutableMessage`, signs it by `authMethod`, and dispatches
+ * it through the single abstract seam `_send`. A concrete subclass fills that
+ * seam for one transport: the cloud `/signed_command` HTTP endpoint
+ * (`VehicleSigned`) today, a BLE GATT link next. The protected members are
+ * what such a transport builds on.
  *
- * AES-GCM personalized signing (the BLE-only auth mode) is intentionally out
- * of scope here; see AGENTS.md.
+ * `"hmac"` signs a plaintext command. `"aes"` encrypts it with AES-GCM and asks
+ * the vehicle to encrypt its reply, which firmware before 2024.38 ignores.
  */
 export default abstract class Commands extends VehicleSpecific {
     // Native private fields (not `protected`/TS-only `private`): the raw key
@@ -540,7 +542,7 @@ export default abstract class Commands extends VehicleSpecific {
 
     /** Sign `command` for `session` by `authMethod`. Assigns a counter, so run it under the session lock. */
     protected buildMessage(session: Session, command: Buffer): RoutableMessage {
-        return this.buildHmacMessage(session, command);
+        return this.authMethod === "aes" ? this.buildAesMessage(session, command) : this.buildHmacMessage(session, command);
     }
 
     private buildHmacMessage(session: Session, command: Buffer): RoutableMessage {
@@ -575,6 +577,101 @@ export default abstract class Commands extends VehicleSpecific {
                 HMACPersonalizedData: { ...personalized, tag },
             },
         });
+    }
+
+    private buildAesMessage(session: Session, command: Buffer): RoutableMessage {
+        const personalized = session.aesGcmPersonalized();
+        if (!session.sharedKey) {
+            throw new Error("Session shared key is missing.");
+        }
+
+        const flags = 1 << Flags.FLAG_ENCRYPT_RESPONSE;
+        const metadata = Buffer.concat([
+            Buffer.from([Tag.TAG_SIGNATURE_TYPE, 1, SignatureType.SIGNATURE_TYPE_AES_GCM_PERSONALIZED]),
+            Buffer.from([Tag.TAG_DOMAIN, 1, session.domain]),
+            Buffer.from([Tag.TAG_PERSONALIZATION, 17]),
+            Buffer.from(this.vin, "ascii"),
+            Buffer.from([Tag.TAG_EPOCH, personalized.epoch.length]),
+            Buffer.from(personalized.epoch),
+            Buffer.from([Tag.TAG_EXPIRES_AT, 4]),
+            uint32BE(personalized.expiresAt),
+            Buffer.from([Tag.TAG_COUNTER, 4]),
+            uint32BE(personalized.counter),
+            Buffer.from([Tag.TAG_FLAGS, 4]),
+            uint32BE(flags),
+            Buffer.from([Tag.TAG_END]),
+        ]);
+
+        const { ciphertext, tag } = aesGcmEncrypt(session.sharedKey, personalized.nonce, command, sha256(metadata));
+
+        return RoutableMessage.create({
+            toDestination: { domain: session.domain },
+            fromDestination: { routingAddress: this.fromDestination },
+            protobufMessageAsBytes: ciphertext,
+            uuid: crypto.randomBytes(16),
+            flags,
+            signatureData: {
+                signerIdentity: KeyIdentity.create({ publicKey: this.#publicKey }),
+                AESGCMPersonalizedData: { ...personalized, tag },
+            },
+        });
+    }
+
+    /** The authentication method of `request` followed by its tag, which a response's metadata binds to. */
+    private requestHash(session: Session, request: RoutableMessage): Buffer {
+        const aes = request.signatureData?.AESGCMPersonalizedData;
+        if (aes) {
+            return Buffer.concat([Buffer.from([SignatureType.SIGNATURE_TYPE_AES_GCM_PERSONALIZED]), aes.tag]);
+        }
+        const hmac = request.signatureData?.HMACPersonalizedData;
+        if (!hmac) {
+            throw new Error("Invalid request signature data.");
+        }
+        const hash = Buffer.concat([Buffer.from([SignatureType.SIGNATURE_TYPE_HMAC_PERSONALIZED]), hmac.tag]);
+        return session.domain === Domain.DOMAIN_VEHICLE_SECURITY ? hash.subarray(0, 17) : hash;
+    }
+
+    /**
+     * Open an encrypted reply to `request`. A reply with no `AESGCMResponseData`
+     * is plaintext and comes back as it is.
+     *
+     * A reply that fails to open cannot be trusted, and says nothing about
+     * whether the command ran.
+     * @returns The reply with its payload in the clear.
+     * @throws Error when the reply fails to open.
+     * @throws SignedCommandResponseReplayed when this request already saw this response counter.
+     */
+    protected decryptResponse(session: Session, request: RoutableMessage, resp: RoutableMessage): RoutableMessage {
+        const data = resp.signatureData?.AESGCMResponseData;
+        if (!data || resp.protobufMessageAsBytes === undefined) {
+            return resp;
+        }
+        if (!session.sharedKey) {
+            throw new Error("Session shared key is missing.");
+        }
+
+        const requestHash = this.requestHash(session, request);
+        const metadata = Buffer.concat([
+            Buffer.from([Tag.TAG_SIGNATURE_TYPE, 1, SignatureType.SIGNATURE_TYPE_AES_GCM_RESPONSE]),
+            Buffer.from([Tag.TAG_DOMAIN, 1, resp.fromDestination?.domain ?? Domain.DOMAIN_BROADCAST]),
+            Buffer.from([Tag.TAG_PERSONALIZATION, 17]),
+            Buffer.from(this.vin, "ascii"),
+            Buffer.from([Tag.TAG_COUNTER, 4]),
+            uint32BE(data.counter),
+            Buffer.from([Tag.TAG_FLAGS, 4]),
+            uint32BE(resp.flags),
+            Buffer.from([Tag.TAG_REQUEST_HASH, requestHash.length]),
+            requestHash,
+            Buffer.from([Tag.TAG_FAULT, 4]),
+            uint32BE(resp.signedMessageStatus?.signedMessageFault ?? 0),
+            Buffer.from([Tag.TAG_END]),
+        ]);
+
+        const plaintext = aesGcmDecrypt(session.sharedKey, data.nonce, resp.protobufMessageAsBytes, data.tag, sha256(metadata));
+        if (!session.record_response_counter(requestHash, data.counter)) {
+            throw new SignedCommandResponseReplayed();
+        }
+        return { ...resp, protobufMessageAsBytes: plaintext };
     }
 
     /**
@@ -625,7 +722,7 @@ export default abstract class Commands extends VehicleSpecific {
                     continue;
                 }
 
-                const result = this.interpretResponse(resp, options.expectsData ?? true);
+                const result = this.interpretResponse(this.decryptResponse(session, msg, resp), options.expectsData ?? true);
                 if (result === "wait") {
                     if (attempt >= MAX_ATTEMPTS - 1) {
                         return fail("Too many retries");

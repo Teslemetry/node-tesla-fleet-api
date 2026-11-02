@@ -1,9 +1,13 @@
 import crypto from "crypto";
 import { Domain } from "@teslemetry/tesla-protocol/command/universal_message";
 import {
+    AESGCMPersonalizedSignatureData,
     HMACPersonalizedSignatureData,
     SessionInfo,
 } from "@teslemetry/tesla-protocol/command/signatures";
+
+/** Response counters remembered per session, which bounds how far back a replay is caught. */
+const RESPONSE_COUNTER_CACHE_SIZE = 256;
 
 /** Key material derived (but not yet trusted/committed) for a candidate vehicle public key. */
 export interface SessionKeys {
@@ -42,6 +46,8 @@ export class Session {
 
     /** Clock time of the last *authenticated* SessionInfo committed for the current epoch, guarding against replay/rollback. */
     private lastAuthenticatedClockTime?: number;
+    /** `(requestHash, counter)` pairs seen in this epoch, oldest first. */
+    private responseCounters = new Set<string>();
     private queue: Promise<void> = Promise.resolve();
 
     constructor(
@@ -105,6 +111,25 @@ export class Session {
         this.#sharedKey = keys.sharedKey;
         this.#hmacKey = keys.hmacKey;
         this.#sessionInfoKey = keys.sessionInfoKey;
+        if (!sameEpoch) {
+            this.responseCounters.clear();
+        }
+        return true;
+    }
+
+    /**
+     * Record an authenticated response's counter for the request it answers.
+     * @returns `false` if that pair was already seen, marking the response a replay.
+     */
+    record_response_counter(requestHash: Uint8Array, counter: number): boolean {
+        const identity = `${Buffer.from(requestHash).toString("hex")}:${counter}`;
+        if (this.responseCounters.has(identity)) {
+            return false;
+        }
+        this.responseCounters.add(identity);
+        if (this.responseCounters.size > RESPONSE_COUNTER_CACHE_SIZE) {
+            this.responseCounters.delete(this.responseCounters.values().next().value as string);
+        }
         return true;
     }
 
@@ -122,6 +147,25 @@ export class Session {
             epoch: this.epoch,
             counter: this.counter,
             expiresAt: Math.floor(Date.now() / 1000) - this.delta + 10,
+        });
+    }
+
+    /**
+     * Advance the anti-replay counter and return fresh signature metadata for
+     * an AES-GCM-personalized command, with a random nonce. The command
+     * expires 30 seconds from now, since BLE can be slow, corrected for clock
+     * drift against the vehicle (`delta`).
+     */
+    aesGcmPersonalized(): AESGCMPersonalizedSignatureData {
+        if (!this.ready || !this.epoch || this.delta === undefined) {
+            throw new Error("Session is not ready: perform the handshake first.");
+        }
+        this.counter++;
+        return AESGCMPersonalizedSignatureData.create({
+            epoch: this.epoch,
+            nonce: crypto.randomBytes(12),
+            counter: this.counter,
+            expiresAt: Math.floor(Date.now() / 1000) - this.delta + 30,
         });
     }
 

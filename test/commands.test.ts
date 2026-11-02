@@ -489,12 +489,7 @@ describe("Commands: privateKey", () => {
         ["from the Vehicle parent", (parent: Vehicle) => ((parent.private_key = OUR_PRIVATE_KEY), [parent, VIN] as const)],
         ["from the client", (parent: Vehicle) => ((parent.parent.private_key = OUR_PRIVATE_KEY), [parent, VIN] as const)],
     ])("keeps a key %s, and the session keys, out of JSON and inspection", async (_name, args) => {
-        class Signing extends TestCommands {
-            constructor() {
-                super();
-            }
-        }
-        const commands = new Signing();
+        const commands = new TestCommands();
         await commands.door_lock();
         const session = (commands as any).sessions[2];
         const secrets = [OUR_PRIVATE_KEY, session.sharedKey, session.hmacKey, session.sessionInfoKey];
