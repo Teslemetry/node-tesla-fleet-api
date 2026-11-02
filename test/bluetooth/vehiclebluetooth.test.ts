@@ -309,7 +309,7 @@ describe("write failures", () => {
     });
 
     it("never reuses a frame's chunks across the abort of a lost link", async () => {
-        const { vehicle, link } = bleHarness({ mtu: 23 });
+        const { vehicle, link } = bleHarness({ mtu: 23, raise_unconfirmed: true });
         await finish(vehicle.handshakeVehicleSecurity());
         link.writeDelayMs = 100;
         const lock = vehicle.door_lock();

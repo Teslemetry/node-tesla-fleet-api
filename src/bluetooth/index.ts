@@ -7,6 +7,7 @@ export { ReassemblingBuffer, parseFrame, prependLength, splitFrame } from "./fra
 export { get_name, name_matches_vin, valid_name } from "./names.js";
 export { default as TeslaBluetooth, VehiclesBluetooth } from "./teslabluetooth.js";
 export { BleNotSubmittedError } from "./transport.js";
+export type { BluetoothConfirmation } from "./verify.js";
 export { default as VehicleBluetooth } from "./vehiclebluetooth.js";
 export type { FindVehicleOptions, VehicleBluetoothOptions } from "./vehiclebluetooth.js";
 export type {

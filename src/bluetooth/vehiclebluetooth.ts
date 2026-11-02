@@ -7,8 +7,16 @@ import {
     VehicleSleepStatusE,
     VehicleStatus,
 } from "@teslemetry/tesla-protocol/command/vcsec";
-import { Action } from "@teslemetry/tesla-protocol/command/car_server";
-import { SendOptions, SendRequires, SignedCommandResponse } from "../commands.js";
+import {
+    Action,
+    GetChargeState,
+    GetClimateState,
+    GetMediaState,
+    GetVehicleData,
+    VehicleAction,
+} from "@teslemetry/tesla-protocol/command/car_server";
+import { ChargeState, ClimateState, MediaState, VehicleData } from "@teslemetry/tesla-protocol/command/vehicle";
+import { SendOptions, SendRequires, SignedCommandResponse, infotainment_command_name, vcsec_command_name } from "../commands.js";
 import { CommandResponse } from "../types/commands.js";
 import { WakeUpOptions } from "../types/vehicle.js";
 import Vehicle from "../vehicle.js";
@@ -16,11 +24,13 @@ import {
     BluetoothCommandFailed,
     BluetoothTimeout,
     BluetoothTransportError,
+    BluetoothUnconfirmedCommand,
+    InvalidResponse,
     SigningDisabled,
     TeslaFleetError,
 } from "../exceptions.js";
 import { AsyncLock, BleCallTimeout, ReplyQueue, withTimeout } from "./async.js";
-import { BroadcastListeners, ListenerRegistry, Unsubscribe } from "./broadcast.js";
+import { BroadcastListeners, ListenerRegistry, Unsubscribe, decodeVcsecStatus } from "./broadcast.js";
 import {
     DEFAULT_CONNECT_ATTEMPTS,
     DEFAULT_CONNECT_TIMEOUT_MS,
@@ -35,6 +45,7 @@ import {
 import { ReassemblingBuffer, prependLength, splitFrame } from "./framing.js";
 import { get_name, name_matches_vin } from "./names.js";
 import { BleCharacteristic, BleConnection, BleDeviceRef, BleNotSubmittedError, BleTransport } from "./transport.js";
+import { BluetoothConfirmation, VerifyPlan, infotainmentVerifyPlan, vcsecVerifyPlan } from "./verify.js";
 
 export interface VehicleBluetoothOptions {
     transport: BleTransport;
@@ -42,6 +53,13 @@ export interface VehicleBluetoothOptions {
     privateKey?: Buffer | false;
     /** Skip the scan and connect to this device. */
     device?: BleDeviceRef;
+    /** How hard a mutating command confirms itself. Defaults to `"ack"`. */
+    confirmation?: BluetoothConfirmation;
+    /**
+     * What to do when nothing resolved a command's outcome. `false`, the default,
+     * reports best-effort success. `true` raises `BluetoothUnconfirmedCommand`.
+     */
+    raise_unconfirmed?: boolean;
     /**
      * After this long with no GATT traffic, read a characteristic to hold the
      * link open. Defaults to 20000. `null` or `0` disables it. The reads delay
@@ -68,6 +86,22 @@ export interface FindVehicleOptions {
 
 const VCSEC = Domain.DOMAIN_VEHICLE_SECURITY;
 const INFOTAINMENT = Domain.DOMAIN_INFOTAINMENT;
+
+function success(): CommandResponse {
+    return { response: { result: true, reason: "" } };
+}
+
+/** One command's watch on its domain's broadcasts while it waits for an ack. */
+interface BroadcastWatcher {
+    onBroadcast: (message: RoutableMessage) => void;
+    /** Resolves with the first broadcast showing the requested state. */
+    confirmed: Promise<RoutableMessage>;
+    /** That broadcast, for a reply wait that ends in the same tick. */
+    confirmation?: RoutableMessage;
+    /** Whether a broadcast after the write showed something else. */
+    mismatched: boolean;
+    writeComplete: boolean;
+}
 
 /** One GATT connection, or an attempt at one, with everything that must not outlive it. */
 class Link {
@@ -108,6 +142,16 @@ class Link {
  * Sessions survive a reconnect, and the vehicle key they pinned at first contact
  * survives with them: a new link may re-handshake, but nothing here clears a
  * session or lets a new link trust a new key.
+ *
+ * A mutating command that times out is unresolved, not failed: in field data 2
+ * of 3 failed writes had executed anyway. So a timed-out command is never sent
+ * again. The outcomes a caller can see:
+ *
+ * - `BluetoothTransportError`: provably never reached the radio. Safe to replay.
+ * - `BluetoothCommandFailed`: state proved it did not apply. Safe to replay.
+ * - `BluetoothUnconfirmedCommand`: it may have run. Never replay it.
+ * - A plain `BluetoothTimeout`: a read, or a step before any write.
+ * - Best-effort success, when `raise_unconfirmed` is off and nothing resolved it.
  */
 export default class VehicleBluetooth extends BroadcastListeners {
     readonly _transport_name: string = "bluetooth";
@@ -126,6 +170,8 @@ export default class VehicleBluetooth extends BroadcastListeners {
 
     /** The vehicle's BLE name, with the usual `C` suffix. */
     readonly ble_name: string;
+    readonly confirmation: BluetoothConfirmation;
+    readonly raise_unconfirmed: boolean;
     wake_if_asleep: boolean;
     readonly keepalive_interval_ms: number | null;
     protected readonly transport: BleTransport;
@@ -141,6 +187,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
         [INFOTAINMENT]: new AsyncLock(),
     };
     private readonly connectLock = new AsyncLock();
+    private readonly broadcastWatchers: Partial<Record<Domain, BroadcastWatcher>> = {};
     private device: BleDeviceRef | undefined;
     private link: Link | null = null;
     /** Closing a lost link. A new connect waits for it: a late disconnect could end the new link. */
@@ -153,6 +200,12 @@ export default class VehicleBluetooth extends BroadcastListeners {
 
     constructor(parent: Vehicle, vin: string, options: VehicleBluetoothOptions) {
         super(parent, vin, options.privateKey);
+        const confirmation = options.confirmation ?? "ack";
+        if (!["optimistic", "ack", "verify"].includes(confirmation)) {
+            throw new Error('confirmation must be one of "optimistic", "ack" or "verify".');
+        }
+        this.confirmation = confirmation;
+        this.raise_unconfirmed = options.raise_unconfirmed ?? false;
         this.transport = options.transport;
         this.device = options.device;
         this.keepalive_interval_ms =
@@ -162,6 +215,16 @@ export default class VehicleBluetooth extends BroadcastListeners {
         this.connectTimeoutMs = options.connect_timeout_ms ?? DEFAULT_CONNECT_TIMEOUT_MS;
         this.scanTimeoutMs = options.scan_timeout_ms ?? DEFAULT_SCAN_TIMEOUT_MS;
         this.ble_name = get_name(vin);
+    }
+
+    /** Whether `confirmation` is `"optimistic"`. */
+    get optimistic(): boolean {
+        return this.confirmation === "optimistic";
+    }
+
+    /** Whether `confirmation` is `"verify"`. */
+    get verify_commands(): boolean {
+        return this.confirmation === "verify";
     }
 
     /**
@@ -422,6 +485,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
         const address = message.toDestination?.routingAddress;
         const domain = message.fromDestination?.domain ?? Domain.DOMAIN_BROADCAST;
         if (!address || !this.fromDestination.equals(address)) {
+            this.broadcastWatchers[domain]?.onBroadcast(message);
             this.dispatchBroadcast(domain, message);
             return;
         }
@@ -475,7 +539,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
     }
 
     protected async _send(msg: RoutableMessage, requires: SendRequires, options: SendOptions = {}): Promise<RoutableMessage> {
-        const { expectsData = true, optimistic = false } = options;
+        const { expectsData = true, optimistic = false, confirmBroadcast } = options;
         const timeoutMs = options.timeoutMs ?? (expectsData ? this.defaultTimeoutMs : this.actuationTimeoutMs);
         const domain = msg.toDestination?.domain;
         const lock = domain === undefined ? undefined : this.domainSendLock[domain];
@@ -500,39 +564,127 @@ export default class VehicleBluetooth extends BroadcastListeners {
                 throw new BluetoothTransportError();
             }
 
-            const awaitReply = () => this.awaitReply(queue, msg, requires, expectsData, timeoutMs, link.closed.signal);
+            const watcher = confirmBroadcast && !optimistic ? this.armBroadcastWatcher(domain, confirmBroadcast) : null;
+            const awaitReply = (signal: AbortSignal) => this.awaitReply(queue, msg, requires, expectsData, timeoutMs, signal);
+            const awaitOutcome = () =>
+                watcher ? this.awaitReplyOrBroadcast(link, watcher, awaitReply) : awaitReply(link.closed.signal);
+
             try {
-                await this.writeFrame(link, frame);
-            } catch (error) {
-                if (error instanceof BleNotSubmittedError) {
-                    this.loseLink(link, describe(error));
-                    throw new BluetoothTransportError(null, null, { cause: error });
+                try {
+                    await this.writeFrame(link, frame);
+                } catch (error) {
+                    if (error instanceof BleNotSubmittedError) {
+                        this.loseLink(link, describe(error));
+                        throw new BluetoothTransportError(null, null, { cause: error });
+                    }
+                    if (optimistic) {
+                        this.loseLink(link, `write failed: ${describe(error)}`);
+                        throw new BluetoothTimeout(null, null, { cause: error });
+                    }
+                    // A write that reached the backend may have reached the car. In
+                    // field data 2 of 3 such failures had executed. So this counts as
+                    // a lost ack, and a reply or broadcast in the rest of the window
+                    // still decides.
+                    try {
+                        return await awaitOutcome();
+                    } catch (timeout) {
+                        if (!(timeout instanceof BluetoothTimeout)) {
+                            throw timeout;
+                        }
+                        // Silence after a failed write is what a dead link looks like,
+                        // whatever `isConnected` says.
+                        this.loseLink(link, `write failed: ${describe(error)}`);
+                        throw new BluetoothTimeout(timeout.data, timeout.status, { cause: error });
+                    }
+                }
+
+                if (watcher) {
+                    watcher.writeComplete = true;
                 }
                 if (optimistic) {
-                    this.loseLink(link, `write failed: ${describe(error)}`);
-                    throw new BluetoothTimeout(null, null, { cause: error });
+                    return RoutableMessage.create({});
                 }
-                // A write that reached the backend may have reached the car. In
-                // field data 2 of 3 such failures had executed. So this counts as
-                // a lost ack, and a reply in the rest of the window still decides.
-                try {
-                    return await awaitReply();
-                } catch (timeout) {
-                    if (!(timeout instanceof BluetoothTimeout)) {
-                        throw timeout;
-                    }
-                    // Silence after a failed write is what a dead link looks like,
-                    // whatever `isConnected` says.
-                    this.loseLink(link, `write failed: ${describe(error)}`);
-                    throw new BluetoothTimeout(timeout.data, timeout.status, { cause: error });
+                return await awaitOutcome();
+            } finally {
+                if (watcher && this.broadcastWatchers[domain] === watcher) {
+                    delete this.broadcastWatchers[domain];
                 }
             }
-
-            if (optimistic) {
-                return RoutableMessage.create({});
-            }
-            return awaitReply();
         });
+    }
+
+    /**
+     * Watch for broadcasts showing the requested state. A lost ack does not stop
+     * the car broadcasting the change it caused. A broadcast that shows anything
+     * else only counts after the write, as one from before it says nothing.
+     */
+    private armBroadcastWatcher(domain: Domain, matches: (status: VehicleStatus) => boolean): BroadcastWatcher {
+        let resolve!: (message: RoutableMessage) => void;
+        const confirmed = new Promise<RoutableMessage>((done) => {
+            resolve = done;
+        });
+        const watcher: BroadcastWatcher = {
+            confirmed,
+            mismatched: false,
+            writeComplete: false,
+            onBroadcast: (message) => {
+                const status = decodeVcsecStatus(message);
+                if (status === null || watcher.confirmation) {
+                    return;
+                }
+                if (matches(status)) {
+                    watcher.confirmation = message;
+                    resolve(message);
+                } else if (watcher.writeComplete) {
+                    watcher.mismatched = true;
+                }
+            },
+        };
+        this.broadcastWatchers[domain] = watcher;
+        return watcher;
+    }
+
+    /**
+     * Race the addressed reply against a matching broadcast. A mismatch does not
+     * fail fast, because it may predate the actuation and a later broadcast can
+     * still confirm it. Only a mismatch still standing when the whole window has
+     * run out proves the command did not apply, and a lost link cuts the window
+     * short, so it proves nothing then.
+     */
+    private async awaitReplyOrBroadcast(
+        link: Link,
+        watcher: BroadcastWatcher,
+        awaitReply: (signal: AbortSignal) => Promise<RoutableMessage>,
+    ): Promise<RoutableMessage> {
+        const raceOver = new AbortController();
+        const reply = awaitReply(AbortSignal.any([link.closed.signal, raceOver.signal]));
+        try {
+            const winner = await Promise.race([
+                reply.then(
+                    () => "reply",
+                    () => "reply",
+                ),
+                watcher.confirmed,
+            ]);
+            if (winner !== "reply") {
+                return winner as RoutableMessage;
+            }
+            return await reply;
+        } catch (error) {
+            if (error instanceof BluetoothTimeout) {
+                if (watcher.confirmation) {
+                    return watcher.confirmation;
+                }
+                if (watcher.mismatched && !link.lost) {
+                    throw new BluetoothCommandFailed(error.data, error.status, { cause: error });
+                }
+            }
+            throw error;
+        } finally {
+            // The queue has one consumer at a time, so see this one out before `_send` returns.
+            raceOver.abort();
+            await reply.catch(() => undefined);
+        }
     }
 
     /**
@@ -623,9 +775,78 @@ export default class VehicleBluetooth extends BroadcastListeners {
         }
     }
 
+    /**
+     * Sign and write a mutating command, with no reply wait. A write that fails
+     * provably before submission still raises. One that entered the backend may
+     * have reached the car, so even here it must not let a router replay it, and
+     * it follows `raise_unconfirmed`.
+     */
+    private async sendOptimistic(domain: Domain, command: Buffer, name: string): Promise<CommandResponse> {
+        const session = this.sessionFor(domain);
+        const send = (msg: RoutableMessage) => this._send(msg, "protobuf_message_as_bytes", { optimistic: true });
+        try {
+            if (domain === VCSEC) {
+                // VCSEC needs strict counter order, so the send stays under the lock.
+                await session.withLock(() => send(this.buildMessage(session, command)));
+            } else {
+                await send(await session.withLock(() => this.buildMessage(session, command)));
+            }
+        } catch (error) {
+            if (!(error instanceof BluetoothTimeout)) {
+                throw error;
+            }
+            return this.unconfirmedOutcome(name, new BluetoothUnconfirmedCommand(error.data, error.status, { cause: error }));
+        }
+        return success();
+    }
+
+    /** End a ladder that could not determine what happened. */
+    private unconfirmedOutcome(name: string, unconfirmed: BluetoothUnconfirmedCommand): CommandResponse {
+        if (this.raise_unconfirmed) {
+            throw unconfirmed;
+        }
+        this.log(`command=${name} transport=${this._transport_name} raise_unconfirmed=False result=success (best-effort)`);
+        return success();
+    }
+
+    /**
+     * Confirm a timed-out command by state, when `"verify"` asks for it.
+     * @returns Success, or `null` if the state could not be read. An unreadable car is never woken to verify.
+     * @throws BluetoothCommandFailed when the state shows it did not apply, whatever `raise_unconfirmed` says.
+     */
+    private async verifyTimeout(name: string, plan: VerifyPlan | null, timeout: BluetoothTimeout): Promise<CommandResponse | null> {
+        if (this.confirmation !== "verify" || !plan) {
+            return null;
+        }
+        let state: VehicleStatus | ChargeState | MediaState | ClimateState;
+        try {
+            state = await this[plan.reader]();
+        } catch (error) {
+            if (error instanceof TeslaFleetError) {
+                this.log(`command=${name} transport=${this._transport_name} verify_commands=unresolved`);
+                return null;
+            }
+            throw error;
+        }
+        const executed = plan.executed(state as never);
+        if (executed === undefined) {
+            this.log(`command=${name} transport=${this._transport_name} verify_commands=unresolved`);
+            return null;
+        }
+        this.log(`command=${name} transport=${this._transport_name} verify_commands=resolved result=${executed}`);
+        if (!executed) {
+            throw new BluetoothCommandFailed(timeout.data, timeout.status, { cause: timeout });
+        }
+        return success();
+    }
+
+    /**
+     * Send a VCSEC actuation through the confirmation ladder. A plan's check also
+     * races the ack, so `options` is ignored: the plan is the only source of it.
+     */
     protected override async sendVehicleSecurity(
         command: UnsignedMessage,
-        options: Pick<SendOptions, "confirmBroadcast"> = {},
+        _options: Pick<SendOptions, "confirmBroadcast"> = {},
     ): Promise<CommandResponse> {
         try {
             await this.ensureHandshake(VCSEC);
@@ -633,10 +854,31 @@ export default class VehicleBluetooth extends BroadcastListeners {
             await this.dropLinkOnFailure("vehicle security handshake failed", error);
             throw error;
         }
-        return super.sendVehicleSecurity(command, options);
+        const name = vcsec_command_name(command);
+        if (this.confirmation === "optimistic") {
+            return this.sendOptimistic(VCSEC, Buffer.from(UnsignedMessage.encode(command).finish()), name);
+        }
+        const plan = vcsecVerifyPlan(command);
+        try {
+            return await super.sendVehicleSecurity(command, { confirmBroadcast: plan?.executed });
+        } catch (error) {
+            if (!(error instanceof BluetoothTimeout)) {
+                throw error;
+            }
+            const unconfirmed = new BluetoothUnconfirmedCommand(error.data, error.status, { cause: error });
+            return (await this.verifyTimeout(name, plan, unconfirmed)) ?? this.unconfirmedOutcome(name, unconfirmed);
+        }
     }
 
-    protected override async sendInfotainment(action: Action, options: { mutating?: boolean } = {}): Promise<SignedCommandResponse> {
+    /**
+     * Send an infotainment command through the confirmation ladder. `mutating:
+     * false` is exempt: `ping` always waits for its real reply.
+     */
+    protected override async sendInfotainment(action: Action, { mutating = true }: { mutating?: boolean } = {}): Promise<SignedCommandResponse> {
+        return this.infotainmentLadder(action, mutating, this.wake_if_asleep);
+    }
+
+    private async infotainmentLadder(action: Action, mutating: boolean, wake: boolean): Promise<SignedCommandResponse> {
         try {
             await this.ensureHandshake(INFOTAINMENT);
         } catch (error) {
@@ -644,17 +886,45 @@ export default class VehicleBluetooth extends BroadcastListeners {
                 await this.dropLinkOnFailure("infotainment handshake failed", error);
                 throw error;
             }
-            // Nothing was sent, so waking cannot run the command twice.
             if ((await this.sleepStatus()) !== VehicleSleepStatusE.VEHICLE_SLEEP_STATUS_ASLEEP) {
                 await this.dropLink("infotainment handshake failed");
                 throw error;
             }
-            if (!this.wake_if_asleep) {
+            // A sleeping car's silent infotainment is expected, and that read
+            // proved the link, so it stays. Nothing was sent, so waking is safe.
+            if (!wake) {
                 throw error;
             }
             await this.wakeForCommand(error);
+            wake = false;
         }
-        return super.sendInfotainment(action, options);
+
+        const name = infotainment_command_name(action);
+        if (this.confirmation === "optimistic" && mutating) {
+            return this.sendOptimistic(INFOTAINMENT, Buffer.from(Action.encode(action).finish()), name);
+        }
+        try {
+            return await super.sendInfotainment(action);
+        } catch (error) {
+            if (!(error instanceof BluetoothTimeout) || !mutating) {
+                throw error;
+            }
+            const unconfirmed = new BluetoothUnconfirmedCommand(error.data, error.status, { cause: error });
+            const verified = await this.verifyTimeout(name, infotainmentVerifyPlan(action.vehicleAction), unconfirmed);
+            if (verified) {
+                return verified;
+            }
+            // Best-effort success would stop a router's cloud fallback, so first ask
+            // VCSEC, which answers while asleep, whether this could have run at all.
+            if (!this.raise_unconfirmed && (await this.vehicleAsleep())) {
+                if (!wake) {
+                    throw new BluetoothCommandFailed(error.data, error.status, { cause: error });
+                }
+                await this.wakeForCommand(error);
+                return this.infotainmentLadder(action, mutating, false);
+            }
+            return this.unconfirmedOutcome(name, unconfirmed);
+        }
     }
 
     /**
@@ -698,6 +968,32 @@ export default class VehicleBluetooth extends BroadcastListeners {
                 }),
             }),
         );
+    }
+
+    private async readVehicleData<K extends keyof VehicleData>(request: Partial<GetVehicleData>, field: K): Promise<NonNullable<VehicleData[K]>> {
+        const data = await this._getInfotainment(
+            Action.create({ vehicleAction: VehicleAction.create({ getVehicleData: GetVehicleData.create(request) }) }),
+        );
+        const value = data[field];
+        if (value === undefined || value === null) {
+            throw new InvalidResponse({ missing: field });
+        }
+        return value;
+    }
+
+    /** The charging state. */
+    async charge_state(): Promise<ChargeState> {
+        return this.readVehicleData({ getChargeState: GetChargeState.create({}) }, "chargeState");
+    }
+
+    /** The HVAC and cabin climate state. */
+    async climate_state(): Promise<ClimateState> {
+        return this.readVehicleData({ getClimateState: GetClimateState.create({}) }, "climateState");
+    }
+
+    /** The media playback state. */
+    async media_state(): Promise<MediaState> {
+        return this.readVehicleData({ getMediaState: GetMediaState.create({}) }, "mediaState");
     }
 
     /**
