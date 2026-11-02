@@ -11,7 +11,8 @@ export type Logger = { debug(message: string): void };
  * separators removed. `migrate_to_oauth` sends and receives tokens through
  * `_request`; PINs travel as `pin` or `password` body keys (Fleet, Teslemetry)
  * or query parameters (Tessie); `trigger_homelink` and the telemetry JWS send
- * `token`; a vehicle reply lists `tokens`.
+ * `token`; a vehicle reply lists `tokens`; a signed `routable_message` executes
+ * again if replayed before it expires, up to 30 seconds later.
  */
 const SECRET_KEYS = new Set([
   "accesstoken",
@@ -21,6 +22,7 @@ const SECRET_KEYS = new Set([
   "pin",
   "privatekey",
   "refreshtoken",
+  "routablemessage",
   "token",
   "tokens",
 ]);

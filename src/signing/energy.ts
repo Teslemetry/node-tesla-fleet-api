@@ -15,6 +15,7 @@ import {
     Tag,
 } from "@teslemetry/tesla-protocol/energy_device/signed_message";
 import { MessageEnvelope } from "@teslemetry/tesla-protocol/energy_device/transport";
+import { validate_island_mode } from "../energyisland.js";
 import { uint32BE } from "./crypto.js";
 import { rsaPublicDerPkcs1 } from "./keys.js";
 
@@ -107,9 +108,13 @@ export class EnergyDeviceSigner {
      * the unsigned `grpc_command` sends, so every command can be signed without
      * per-command code. `delivery_channel` stays unset, as in the envelope
      * proven on the cloud path.
-     * @throws TypeError for a field the message does not have.
+     * @throws TypeError for a field the message does not have, or an island mode that is not 1 or 6.
      */
     static envelope(din: string, category: string, command: string, params?: Record<string, unknown> | null): Uint8Array {
+        // `assertParsed` cannot refuse these: 0, 3 and 5 are real enum values, and -1 looks like an integer field.
+        if (category === "teg" && command === "set_island_mode_request") {
+            validate_island_mode(params?.mode, params?.force);
+        }
         const input = camelCaseKeys({ [category]: { [command]: params ?? {} } });
         const envelope = MessageEnvelope.fromJSON(input);
         assertParsed(input, envelope, "message");
