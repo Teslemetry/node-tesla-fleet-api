@@ -21,6 +21,7 @@ Reply shapes:
 Arguments:
 
 - `trigger_homelink` takes `(token?, lat?, lon?)`, after `vehicle_tag` on `Vehicle`.
+- `navigation_request` takes `(value, type?, locale?, timestamp_ms?)`, after `vehicle_tag` on `Vehicle`. `locale` was second and required.
 - `remote_seat_cooler_request` takes `AutoSeat` positions on both paths.
 - Signed `remote_steering_wheel_heat_level_request` takes `Level` 0, 1 and 3, where 3 is high.
 - `backup_history` and `energy_history` take `(period, start_date?, end_date?, time_zone?)`, and `charge_history` takes `(start_date, end_date, time_zone?)`.

@@ -100,7 +100,6 @@ const NOT_PORTED: ReadonlyArray<[RegExp, string]> = [
 /** Missing, and not in document 01 section 12. Each needs a decision. */
 const NAMED_GAPS: ReadonlyArray<[RegExp, string]> = [
     [/^const\.py:LOGGER$/, "not in doc 01 s12: Node has a per-client `logger` option, no module logger"],
-    [/^tesla\/vehicle\/fleet\.py:DEFAULT_LOCALE$/, "not in doc 01 s12: Node has no process locale default, and navigation_request requires `locale`"],
     [/^tesla\/vehicle\/commands\.py:Hvac/, "not in doc 01 s12: Python's lookups of proto values, internal here"],
     [/^tesla\/vehicle\/bluetooth\.py:ReassemblingBuffer\.discard_packet$/, "not in doc 01 s12: private in Node, driven only by `receive`"],
 ];
@@ -123,11 +122,10 @@ const DELIBERATE: ReadonlyArray<[RegExp, string]> = [
     [/:Session\.(keys_for|hmac_personalized|aes_gcm_personalized)$/, "Internal to signing"],
     [/:Session\.commit$/, "The keys travel as one `SessionKeys`, and pinning ignores them after first contact"],
     [/:Commands\.validate_msg$/, "Takes the request's domain, because a reply's fromDestination is unauthenticated"],
-    [/:Commands\.navigation_request$/, "Unused arguments keep the REST signature callable on a signed vehicle"],
+    [/:Commands\.navigation_request$/, "The signed protocol has no such fields, so the unused arguments keep REST's positions and the router's types agree"],
     [/:Commands\.navigation_sc_request$/, "doc 01 s12: protocol 6 needs `id`. Python never sets it"],
     [/:Commands\.navigation_gps_destination_request$/, "`order` defaults to 0, replace on protocol 6"],
     [/:Commands\.fleet_telemetry_config_create$/, "Python's `Commands` raises and only VehicleSigned signs. Node's VehicleSigned overrides it too, and VehicleBluetooth's REST path raises"],
-    [/:VehicleFleet\.navigation_request$/, "Not deliberate: `locale` is second and required, `type` third, and `timestamp_ms` cannot be passed"],
     [/:VehicleFleet\.remote_boombox$/, "`sound` defaults to 0"],
     [/:VehicleFleet\.(warranty_details|fleet_status)$/, "The bound class passes its own VIN. The argument form is on Vehicle"],
     [/:Vehicles\.(createSigned|specificSigned)$/, "doc 01 s3: keys are optional arguments here"],
@@ -137,7 +135,6 @@ const DELIBERATE: ReadonlyArray<[RegExp, string]> = [
 /** Differences the checks below cannot see. These rows are partial whatever else they pass. */
 const UNSEEN: ReadonlyArray<[RegExp, string]> = [
     [/:VehicleFleet\.fleet_telemetry_config_create$/, "takes the inner `config` and wraps this VIN, where Python takes `{ vins, config }`. VehicleSigned takes both"],
-    [/:VehicleFleet\.navigation_request$/, "`timestamp_ms` is sent as a string, an integer in Python"],
 ];
 
 type PyParam = { name: string; optional: boolean };

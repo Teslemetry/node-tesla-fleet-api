@@ -1479,13 +1479,13 @@ export default abstract class Commands extends VehicleSpecific {
     /**
      * Sends a location to the in-vehicle navigation system.
      *
-     * `locale` and `type` are REST-only fields with no equivalent in the
-     * signed-command protocol (which only carries a destination string and a
-     * multi-stop order), so they are accepted for cross-transport signature
-     * parity but not sent.
+     * `type`, `locale` and `timestamp_ms` are REST-only fields with no equivalent
+     * in the signed-command protocol, which only carries a destination string
+     * and a multi-stop order. They keep REST's positions, so the router's types
+     * agree, and are not sent.
      * @param value Destination text
      */
-    async navigation_request(value: string, _locale?: string, _type?: string): Promise<CommandResponse> {
+    async navigation_request(value: string, _type?: string, _locale?: string | null, _timestamp_ms?: number | null): Promise<CommandResponse> {
         return this.vehicleAction(VehicleAction.create({ navigationRequest: NavigationRequest.create({ destination: value }) }));
     }
 

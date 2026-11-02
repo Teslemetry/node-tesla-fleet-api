@@ -47,10 +47,9 @@ await vehicle.remote_seat_cooler_request(AutoSeat.FRONT_LEFT, Level.LOW);
 await vehicle.add_charge_schedule("Mon,Tues", true, -33.8, 151.2, 120);
 ```
 
-Three things are easy to get wrong:
+Two things are easy to get wrong:
 
 - `Seats` is 0-indexed and only for seat heating. Seat cooling and auto seat climate take the 1-indexed `AutoSeat`.
-- `navigation_request` differs from Python's order: `(value, locale, type?)`.
 - `fleet_telemetry_config_create` takes the inner config here, and adds this VIN.
 
 Some routes are not on every vehicle or account, and a refused command resolves as `{ response: { result: false, reason } }`. Failures of the request itself raise the classes in `src/exceptions.ts`.

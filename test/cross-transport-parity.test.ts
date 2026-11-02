@@ -255,12 +255,12 @@ describe("cross-transport parity", () => {
         }
     });
 
-    // Accepted gap: `locale` and `type` are REST intent fields with no equivalent in the signed protocol.
+    // Accepted gap: `type`, `locale` and `timestamp_ms` are REST intent fields with no equivalent in the signed protocol.
     it("navigation_request carries the destination on both transports", async () => {
-        await call(rest, "navigation_request", ["Home", "en-AU"]);
-        await call(signed, "navigation_request", ["Home", "en-AU"]);
+        await call(rest, "navigation_request", ["Home", "share_ext_content_raw", "en-AU", 1234]);
+        await call(signed, "navigation_request", ["Home", "share_ext_content_raw", "en-AU", 1234]);
 
-        expect(request.mock.calls[0][3]).toMatchObject({ locale: "en-AU", value: { "android.intent.extra.TEXT": "Home" } });
+        expect(request.mock.calls[0][3]).toMatchObject({ locale: "en-AU", timestamp_ms: 1234, value: { "android.intent.extra.TEXT": "Home" } });
         expect(signed.fakeVehicle.infotainmentActions[0].vehicleAction?.navigationRequest?.destination).toBe("Home");
     });
 

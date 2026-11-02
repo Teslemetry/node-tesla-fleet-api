@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { DAY_OF_WEEK_BITS, days_of_week_mask } from "../src/index.js";
+import { DAY_OF_WEEK_BITS, DEFAULT_LOCALE, days_of_week_mask } from "../src/index.js";
 import TeslaFleetApi from "../src/teslafleetapi.js";
 import Vehicle from "../src/vehicle.js";
 
@@ -106,6 +106,54 @@ describe("VehicleSpecific REST routes match python-tesla-fleet-api", () => {
             "Either start_time or end_time or both must be provided",
         );
         expect(request).not.toHaveBeenCalled();
+    });
+});
+
+describe("navigation_request", () => {
+    const PATH = `api/1/vehicles/${VIN}/command/navigation_request`;
+    function client() {
+        const fetchMock = vi.fn(async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }));
+        const api = new TeslaFleetApi({ accessToken: "token", region: "na", fetch: fetchMock as unknown as typeof fetch });
+        const sent = () => {
+            const [url, init] = fetchMock.mock.calls[0] as unknown as [URL | string, RequestInit];
+            return { url: String(url), method: init.method, body: JSON.parse(init.body as string) };
+        };
+        return { api, sent };
+    }
+
+    it("sends Python's body, in Python's key order, from Python's argument order", async () => {
+        const { api, sent } = client();
+        await api.vehicles!.createFleet(VIN).navigation_request("Home", "custom_type", "en-AU", 1234);
+        const { url, method, body } = sent();
+        expect(url).toContain(PATH);
+        expect(method).toBe("POST");
+        expect(JSON.stringify(body)).toBe('{"value":{"android.intent.extra.TEXT":"Home"},"type":"custom_type","locale":"en-AU","timestamp_ms":1234}');
+    });
+
+    it("takes the same arguments after vehicle_tag on Vehicle", async () => {
+        const { api, sent } = client();
+        await api.vehicles!.navigation_request(VIN, "Home", "custom_type", "en-AU", 1234);
+        expect(sent().url).toContain(PATH);
+        expect(sent().body).toEqual({ value: { "android.intent.extra.TEXT": "Home" }, type: "custom_type", locale: "en-AU", timestamp_ms: 1234 });
+    });
+
+    it("defaults the type, DEFAULT_LOCALE and now, with an integer timestamp", async () => {
+        const { api, sent } = client();
+        const before = Date.now();
+        await api.vehicles!.createFleet(VIN).navigation_request("Home");
+        const { body } = sent();
+        expect(body.type).toBe("share_ext_content_raw");
+        expect(body.locale).toBe(DEFAULT_LOCALE);
+        expect(Number.isInteger(body.timestamp_ms)).toBe(true);
+        expect(body.timestamp_ms).toBeGreaterThanOrEqual(before);
+        expect(body.timestamp_ms).toBeLessThanOrEqual(Date.now());
+    });
+
+    it("treats an empty locale and a zero timestamp as unset, as Python's `or` does", async () => {
+        const { api, sent } = client();
+        await api.vehicles!.createFleet(VIN).navigation_request("Home", undefined, "", 0);
+        expect(sent().body.locale).toBe(DEFAULT_LOCALE);
+        expect(sent().body.timestamp_ms).toBeGreaterThan(0);
     });
 });
 
