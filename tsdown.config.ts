@@ -12,6 +12,7 @@ export default defineConfig({
         types: "src/types/index.ts",
         bluetooth: "src/bluetooth/index.ts",
         "bluetooth/noble": "src/bluetooth/adapters/noble.ts",
+        "bluetooth/esphome": "src/bluetooth/adapters/esphome.ts",
     },
     format: ["esm", "cjs"],
     dts: true,

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { RKEActionE, VehicleLockStateE } from "@teslemetry/tesla-protocol/command/vcsec";
+import { EsphomeBleTransport } from "../../../src/bluetooth/adapters/esphome.js";
 import { NobleBleTransport } from "../../../src/bluetooth/adapters/noble.js";
 import { BleConnection, BleDeviceRef, BleLinkHandlers, BleNotSubmittedError, BleTransport } from "../../../src/bluetooth/transport.js";
 import { bleHarness } from "../../helpers/blevehicle.js";
-import { flush, noHandlers, STUB_NAME, StubLink, stubNoble } from "../../helpers/stubbackends.js";
+import { flush, noHandlers, STUB_NAME, StubLink, stubEsphome, stubNoble } from "../../helpers/stubbackends.js";
 
 interface Subject {
     transport: BleTransport;
@@ -17,6 +18,13 @@ const ADAPTERS: Array<[string, () => Subject]> = [
         () => {
             const { noble, link, device } = stubNoble();
             return { transport: new NobleBleTransport({ noble }), link, device };
+        },
+    ],
+    [
+        "esphome",
+        () => {
+            const { proxy, link, device } = stubEsphome();
+            return { transport: new EsphomeBleTransport({ connection: proxy }), link, device };
         },
     ],
 ];

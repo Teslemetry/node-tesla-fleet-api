@@ -27,8 +27,10 @@ assert.equal(typeof router.is_failover_safe, "function");
 
 // Each adapter must load with no backend installed, and only fail once it is used.
 const { NobleBleTransport } = require("tesla-fleet-api/bluetooth/noble");
+const { EsphomeBleTransport } = require("tesla-fleet-api/bluetooth/esphome");
 (async () => {
     await assert.rejects(new NobleBleTransport().scan({ timeoutMs: 1000 }), /@stoprocent\/noble/);
+    await assert.rejects(new EsphomeBleTransport({ host: "proxy.test" }).scan({ timeoutMs: 1000 }), /@2colors\/esphome-native-api/);
     console.log("CJS consumer OK");
 })().catch((error) => {
     console.error(error);

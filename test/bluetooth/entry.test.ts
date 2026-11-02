@@ -47,7 +47,7 @@ describe("the entry points", () => {
         expect([...packages].filter((name) => !allowed.test(name))).toEqual([]);
     });
 
-    it.each(["noble"])("the %s adapter statically imports no package at all", (adapter) => {
+    it.each(["noble", "esphome"])("the %s adapter statically imports no package at all", (adapter) => {
         expect([...walk(`src/bluetooth/adapters/${adapter}.ts`).packages]).toEqual([]);
     });
 
@@ -58,7 +58,7 @@ describe("the entry points", () => {
     it("exports each adapter in both package.json and tsdown.config.ts", () => {
         const manifest = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
         const build = readFileSync(resolve(ROOT, "tsdown.config.ts"), "utf8");
-        for (const adapter of ["noble"]) {
+        for (const adapter of ["noble", "esphome"]) {
             expect(manifest.exports[`./bluetooth/${adapter}`].import.default).toBe(`./dist/bluetooth/${adapter}.mjs`);
             expect(build).toContain(`"bluetooth/${adapter}": "src/bluetooth/adapters/${adapter}.ts"`);
         }

@@ -8,9 +8,11 @@ import { Models, SERVERS } from "tesla-fleet-api/const";
 import * as router from "tesla-fleet-api/router";
 import { BleNotSubmittedError, ReassemblingBuffer, SERVICE_UUID } from "tesla-fleet-api/bluetooth";
 import { NobleBleTransport } from "tesla-fleet-api/bluetooth/noble";
+import { EsphomeBleTransport } from "tesla-fleet-api/bluetooth/esphome";
 
 // Each adapter must load with no backend installed, and only fail once it is used.
 await assert.rejects(new NobleBleTransport().scan({ timeoutMs: 1000 }), /@stoprocent\/noble/);
+await assert.rejects(new EsphomeBleTransport({ host: "proxy.test" }).scan({ timeoutMs: 1000 }), /@2colors\/esphome-native-api/);
 
 assert.equal(typeof TeslaFleetApi, "function");
 // ./bluetooth must load with no GATT backend installed.
