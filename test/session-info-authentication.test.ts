@@ -5,7 +5,7 @@ import { SessionInfo, SessionInfoStatus, SignatureType, Tag } from "@teslemetry/
 import Commands from "../src/commands.js";
 import TeslaFleetApi from "../src/teslafleetapi.js";
 import Vehicle from "../src/vehicle.js";
-import { NotOnWhitelistFault, SessionInfoAuthenticationFault } from "../src/exceptions.js";
+import { NotOnWhitelistFault, SessionInfoAuthenticationFault, SigningDisabled } from "../src/exceptions.js";
 import { deriveSharedKey, publicKeyFor } from "../src/signing/crypto.js";
 import { Session } from "../src/signing/session.js";
 
@@ -32,7 +32,7 @@ class ConcreteCommands extends Commands {
     }
 }
 
-function makeCommands(vin: string = VIN, privateKey: Buffer = OUR_PRIVATE_KEY): ConcreteCommands {
+function makeCommands(vin: string = VIN, privateKey: Buffer | false = OUR_PRIVATE_KEY): ConcreteCommands {
     return new ConcreteCommands(new Vehicle(new TeslaFleetApi({ server: "https://fleet.test" })), vin, privateKey);
 }
 
@@ -120,6 +120,12 @@ describe("session info tag authentication", () => {
         expect(() => commands.validate_msg(unlabelled, REQUEST_UUID, VCSEC)).toThrow(SessionInfoAuthenticationFault);
         expect(() => commands.validate_msg(reply(info(), REQUEST_UUID), REQUEST_UUID, undefined)).toThrow(SessionInfoAuthenticationFault);
         expect(commands.session().ready).toBe(false);
+    });
+
+    it("lets SigningDisabled through, rather than blaming the reply", () => {
+        const disabled = makeCommands(VIN, false);
+        expect(() => disabled.validate_msg(reply(info(), REQUEST_UUID), REQUEST_UUID, VCSEC)).toThrow(SigningDisabled);
+        expect(disabled.session().ready).toBe(false);
     });
 
     it("rejects session info bytes that do not decode", () => {

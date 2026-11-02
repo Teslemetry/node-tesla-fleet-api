@@ -443,7 +443,7 @@ export default abstract class Commands extends VehicleSpecific {
             try {
                 keys = session.trustedKeys(Buffer.from(info.publicKey));
             } catch (cause) {
-                if (cause instanceof SessionInfoAuthenticationFault) {
+                if (cause instanceof SessionInfoAuthenticationFault || cause instanceof SigningDisabled) {
                     throw cause;
                 }
                 throw new SessionInfoAuthenticationFault("Session info reply has an invalid public key.", null, { cause });
