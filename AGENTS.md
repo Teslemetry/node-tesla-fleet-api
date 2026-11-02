@@ -31,7 +31,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - `TeslemetryVehicle` and `TessieVehicle` extend `VehicleSpecific`, and `vehicles.create(vin)` is their only factory. `TeslemetryVehicles`/`TessieVehicles` must still extend `Vehicle`, so the base factories can't be removed: they are shadowed as `undefined as never` fields, which makes calling one a compile error and leaves it undefined at run time.
 - Python call sites use keyword arguments, so a Python method with many optional arguments becomes an options object here (with `start`/`end`, sent as `from`/`to`); short ones stay positional, in Python's order. Tessie's `tessie_*` commands take `max_attempts` before `wait_for_completion`, the reverse of every other Tessie command.
-- `_request` log lines go through `redactedJson`/`redactedQuery` in `src/log.ts`: `migrate_to_oauth` sends a token in a body and Tessie sends PINs in the query string. A new secret-bearing key belongs in `SECRET_KEYS`.
+- `_request` log lines go through `redactedJson`/`redactedQuery` in `src/log.ts`, matched by key name: `migrate_to_oauth` sends a token in a body, Tessie sends PINs in the query string, and Fleet's `set_pin_to_drive` and `set_valet_mode` call their PIN `password`. A new secret-bearing key belongs in `SECRET_KEYS`. Error lines log a message only for `TeslaFleetError`, whose message is fixed per class; anything else logs its type alone, and error `data` is never logged.
 
 ## Errors (`src/exceptions.ts`)
 
