@@ -61,6 +61,18 @@ describe("TeslemetryEnergySites", () => {
 });
 
 describe("keyless Teslemetry routes", () => {
+    it("never falls back to the parent's RSA key", async () => {
+        const { fetchMock } = makeSite();
+        const api = new Teslemetry("token", "na", { fetch: fetchMock as unknown as typeof fetch });
+        api.rsa_private_key = TEST_KEY;
+        const site = api.energySites!.create(SITE_ID, undefined, DIN);
+
+        await site.go_off_grid();
+
+        expect(site.signing).toBe(false);
+        expect(sent(fetchMock).path).toBe(`${BASE}/set_island_mode`);
+    });
+
     it.each<[string, unknown[], string, string, unknown]>([
         ["get_system_info", [], "GET", "system_info", null],
         ["raw_networking_status", [], "GET", "networking_status", null],

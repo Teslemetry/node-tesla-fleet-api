@@ -63,26 +63,21 @@ describe("signing key argument", () => {
         expect(makeApi().api.energySites!.create(SITE_ID, undefined, DIN).signing).toBe(false);
     });
 
-    it("falls back to the parent's RSA key on undefined", () => {
-        const { api } = makeApi();
+    it("never falls back to the parent's RSA key", async () => {
+        const { api, fetchMock } = makeApi();
         api.rsa_private_key = TEST_KEY;
+        const site = api.energySites!.create(SITE_ID, undefined, DIN);
 
-        expect(api.energySites!.create(SITE_ID, undefined, DIN).signing).toBe(true);
-    });
+        await site.get_teg_config();
 
-    it("stays unsigned on a fallback key with no din to sign for", () => {
-        const { api } = makeApi();
-        api.rsa_private_key = TEST_KEY;
-
-        expect(api.energySites!.create(SITE_ID).signing).toBe(false);
-    });
-
-    it("disables signing on false, even with a parent key", () => {
-        const { api } = makeApi();
-        api.rsa_private_key = TEST_KEY;
-
-        expect(api.energySites!.create(SITE_ID, false, DIN).signing).toBe(false);
-        expect(api.energySites!.create(SITE_ID, false).signing).toBe(false);
+        expect(site.signing).toBe(false);
+        expect(sent(fetchMock)).toEqual({
+            path: `api/1/energy_sites/${SITE_ID}/command`,
+            body: {
+                command_type: "grpc_command",
+                command_properties: { message: { teg: { get_config_request: {} } }, identifier_type: 1 },
+            },
+        });
     });
 
     it("rejects a non-RSA key", () => {

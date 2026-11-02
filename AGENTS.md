@@ -29,6 +29,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 ## Energy device commands
 
+- An energy site signs only with the `private_key` passed to it: unlike vehicles, an omitted key means unsigned, nothing reads the parent's `rsa_private_key`, and there is no `false` sentinel. This matches Python's `EnergySite`.
 - `EnergySpecific._command` signs everything except `UNSIGNED_DEVICE_COMMANDS`; `TeslemetryEnergySite` overrides every method on `_command` with its own route, and `test/teslemetry-energy.test.ts` fails if one is missed. `src/signing/energy.ts`'s `EnergyDeviceSigner` is stateless RSA, so identical bytes execute again before `expires_at`: a signed send never retries.
 - `EnergyDeviceSigner.envelope` takes Python's snake_case names. ts-proto's `fromJSON` reads camelCase and silently drops the rest, so `envelope` converts the keys and `assertParsed` raises on anything dropped, matching Python's `ParseDict`.
 - `set_island_mode`, `go_off_grid` and `reconnect_grid` must never reach the unsigned `grpc_command`: gateways acknowledge it without moving the contactor. They go straight to `_signed_command`, never `_command`.

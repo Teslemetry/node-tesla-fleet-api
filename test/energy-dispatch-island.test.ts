@@ -11,7 +11,7 @@ import TeslaFleetApi from "../src/teslafleetapi.js";
 const SITE_ID = 12345;
 const TEST_KEY = crypto.createPrivateKey(ENERGY_TEST_KEY_PEM);
 
-function makeSite(privateKey?: crypto.KeyObject | false, reply: unknown = { response: {} }) {
+function makeSite(privateKey?: crypto.KeyObject, reply: unknown = { response: {} }) {
     const fetchMock = vi.fn(async (_url: string, _init: RequestInit) =>
         new Response(JSON.stringify(reply), { status: 200 }),
     );
@@ -144,8 +144,10 @@ describe("island mode", () => {
         expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it.each(ISLAND_CALLS)("%s also refuses a site with signing disabled", async (_name, call) => {
-        const { site, fetchMock } = makeSite(false);
+    it.each(ISLAND_CALLS)("%s ignores a key on the parent", async (_name, call) => {
+        const { site, fetchMock } = makeSite();
+        site.parent.parent.rsa_private_key = TEST_KEY;
+        site.din = DIN;
 
         await expect(call(site)).rejects.toThrow(SignedCommandRequired);
 

@@ -384,7 +384,7 @@ export class TeslemetryEnergySite extends EnergySpecific {
 export class TeslemetryEnergySites extends Energy {
     static override Site = TeslemetryEnergySite;
 
-    override create(energy_site_id: number, private_key?: KeyObject | false, din?: string): TeslemetryEnergySite {
+    override create(energy_site_id: number, private_key?: KeyObject, din?: string): TeslemetryEnergySite {
         return super.create(energy_site_id, private_key, din) as TeslemetryEnergySite;
     }
 }

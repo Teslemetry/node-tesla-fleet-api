@@ -12,7 +12,7 @@ export default class Energy {
   static Site: new (
     parent: Energy,
     energy_site_id: number,
-    private_key?: KeyObject | false,
+    private_key?: KeyObject,
     din?: string,
   ) => EnergySpecific = EnergySpecific;
 
@@ -27,13 +27,13 @@ export default class Energy {
   /**
    * Create an Energy class for a specific site.
    * @param energy_site_id ID field of an energy site from /api/1/products endpoint.
-   * @param private_key RSA key `VERIFIED` on this gateway, for client-signed device commands. Requires `din`. `undefined` falls back to the parent's `rsa_private_key`, and `false` disables signing.
+   * @param private_key RSA key `VERIFIED` on this gateway, for client-signed device commands. Requires `din`. Without one the site is unsigned: unlike vehicles, there is no fallback to the parent's key.
    * @param din Gateway DIN (the energy site's `gateway_id` in `products`).
    * @returns `EnergySpecific` class
    */
   create(
     energy_site_id: number,
-    private_key?: KeyObject | false,
+    private_key?: KeyObject,
     din?: string,
   ): EnergySpecific {
     const site = new (this.constructor as typeof Energy).Site(

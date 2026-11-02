@@ -23,8 +23,6 @@ await site.live_status();
 await site.go_off_grid();
 ```
 
-For an energy site, `private_key` left `undefined` falls back to the parent's `rsa_private_key` when a `din` is given, and `false` disables signing. Pass `false` for a key that is not yet `VERIFIED`, such as while pairing it with `add_authorized_client`: signed commands from an unpaired key are refused.
-
 Each factory remembers what it created: `api.vehicles.byVin` and `api.energySites.byId` are `Map`s. `specific` and `specificSigned` remain as legacy names for `createFleet` and `createSigned`.
 
 The classes a factory instantiates are static fields, so a subclass swaps them without redefining a constructor:

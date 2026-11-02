@@ -122,20 +122,19 @@ export default class EnergySpecific {
      * most of them with 400.
      * @param parent
      * @param energy_site_id
-     * @param private_key RSA key `VERIFIED` on this gateway. `undefined` falls back to the parent's `rsa_private_key`, and `false` disables signing.
-     * @param din Gateway DIN (the energy site's `gateway_id` in `products`). Without it a fallback key cannot sign, so the site stays unsigned.
+     * @param private_key RSA key `VERIFIED` on this gateway. Without one the site is unsigned: unlike vehicles, there is no fallback to the parent's key.
+     * @param din Gateway DIN (the energy site's `gateway_id` in `products`). Required with `private_key`.
      * @throws TypeError for a key that is not RSA.
      */
-    constructor(parent: Energy, energy_site_id: number, private_key?: KeyObject | false, din?: string) {
-        if (private_key !== undefined && private_key !== false && !din) {
-            throw new Error("A signing private_key requires the gateway din.");
-        }
+    constructor(parent: Energy, energy_site_id: number, private_key?: KeyObject, din?: string) {
         this.parent = parent;
         this.energy_site_id = energy_site_id;
         this.din = din;
-        const key = private_key === undefined ? parent.parent.rsa_private_key : private_key;
-        if (key !== false && key !== null && din) {
-            this.#signer = new EnergyDeviceSigner(key);
+        if (private_key != null) {
+            if (!din) {
+                throw new Error("A signing private_key requires the gateway din.");
+            }
+            this.#signer = new EnergyDeviceSigner(private_key);
         }
     }
 
