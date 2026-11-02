@@ -52,6 +52,8 @@ const router = new EnergySiteRouter([new PowerwallEnergySite(client), teslemetry
 await router.live_status();
 ```
 
+The cloud's answer is not trusted. An address outside the private and link-local IPv4 ranges gets no request, so a bad reply cannot collect the password. When the DIN is known, from `expectedDin` or the cloud site's `din`, a gateway with another DIN is refused. It has seen the login by then, because reading the DIN needs a token.
+
 Build the router whatever the outcome. A client that cannot connect fails over to the cloud on each call, so the site degrades to cloud control.
 
 | Outcome | Meaning | What to do |

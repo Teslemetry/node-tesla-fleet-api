@@ -2,6 +2,7 @@
 // password and key. Only the cloud can report the LAN address, so healing takes
 // any `find_gateway_address`. Homey passes `parse_gateway_address` over a raw
 // `@teslemetry/api` reply.
+import { is_lan_address } from "../energyparsers.js";
 import { DEFAULT_GATEWAY_HOST, PowerwallClient, type PowerwallClientOptions } from "./client.js";
 import {
     PowerwallAuthenticationError,
@@ -25,10 +26,12 @@ export type GatewayOutcome =
 
 export type ConnectGatewayOptions = {
     client: PowerwallClientOptions;
-    /** A cloud site, or anything that can report the gateway's address. */
-    cloud: { find_gateway_address(): Promise<string | null> };
+    /** A cloud site, or anything that can report the gateway's address. Its `din`, when set, is the DIN to expect. */
+    cloud: { find_gateway_address(): Promise<string | null>; din?: string };
     /** Use `PowerwallClient.legacy_gateway` for an early Gateway 1 unit. */
     legacy_gateway?: boolean;
+    /** Which reported addresses may receive the password. Defaults to private and link-local IPv4. */
+    allow_address?: (address: string) => boolean;
 };
 
 export type ConnectGatewayResult = {
@@ -47,6 +50,11 @@ function createClient(options: PowerwallClientOptions, legacy_gateway?: boolean)
  * Connect at the stored host, and if that fails ask the cloud where the gateway
  * is. Any error is a lead, because another device may have taken the address.
  *
+ * Certificate checks are off and a login sends the password, so the reported
+ * address is not trusted: anything outside a private or link-local range gets no
+ * request at all. A gateway whose DIN is not the expected one is refused after
+ * login, because the DIN read needs a token.
+ *
  * Every outcome returns a client, so the caller still builds the router. A stale
  * client's calls fail with `PowerwallConnectionError` and go to the cloud, so a
  * site degrades to cloud control and does not break.
@@ -54,7 +62,8 @@ function createClient(options: PowerwallClientOptions, legacy_gateway?: boolean)
  * @throws PowerwallAuthenticationError for a bad PEM, which no address can repair.
  */
 export async function connect_gateway(options: ConnectGatewayOptions): Promise<ConnectGatewayResult> {
-    const { client: clientOptions, cloud, legacy_gateway } = options;
+    const { cloud, legacy_gateway, allow_address = is_lan_address } = options;
+    const clientOptions = { ...options.client, expectedDin: options.client.expectedDin ?? cloud.din };
     const stored = clientOptions.host ?? DEFAULT_GATEWAY_HOST;
     const client = createClient(clientOptions, legacy_gateway);
 
@@ -82,7 +91,7 @@ export async function connect_gateway(options: ConnectGatewayOptions): Promise<C
     if (address === stored && !(error instanceof PowerwallConnectionError)) {
         return { client, host: stored, outcome: "refused", error };
     }
-    if (address != null && address !== stored) {
+    if (address != null && address !== stored && allow_address(address)) {
         const moved = createClient({ ...clientOptions, host: address }, legacy_gateway);
         try {
             await moved.connect();

@@ -26,6 +26,7 @@ import {
 } from "@teslemetry/tesla-protocol/energy_device/teg_api";
 import { DeliveryChannel, MessageEnvelope } from "@teslemetry/tesla-protocol/energy_device/transport";
 import {
+    PowerwallAuthenticationError,
     PowerwallCommandError,
     PowerwallNotSupportedError,
     PowerwallProtocolError,
@@ -307,6 +308,8 @@ export interface PowerwallClientOptions {
     rsaPrivateKeyPem: string | Buffer;
     /** Total time allowed per request. */
     timeoutMs?: number;
+    /** The gateway's DIN, when known. Any other DIN fails `connect`, so nothing is sent to the wrong gateway. */
+    expectedDin?: string;
     /** Receives debug lines. */
     logger?: Logger;
 }
@@ -323,6 +326,7 @@ export class PowerwallClient {
     // Native private field: the transport holds the password, token and signing key.
     readonly #transport: V1rTransport;
     readonly #logger?: Logger;
+    readonly #expectedDin?: string;
     #din: string | null = null;
     #connecting: Promise<string> | null = null;
     // What `curtail` replaced. Held only here, so it does not survive a restart.
@@ -340,6 +344,7 @@ export class PowerwallClient {
             legacyGateway: _legacyGateway,
         });
         this.#logger = options.logger;
+        this.#expectedDin = options.expectedDin;
     }
 
     /**
@@ -371,8 +376,12 @@ export class PowerwallClient {
         }
         this.#connecting ??= (async () => {
             await this.#transport.login();
-            this.#din = await this.#transport.fetch_din();
-            return this.#din;
+            const din = await this.#transport.fetch_din();
+            if (this.#expectedDin && din !== this.#expectedDin) {
+                throw new PowerwallAuthenticationError("The gateway at this address is not the expected one");
+            }
+            this.#din = din;
+            return din;
         })().finally(() => {
             this.#connecting = null;
         });
