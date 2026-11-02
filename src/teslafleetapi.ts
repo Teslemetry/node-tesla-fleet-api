@@ -22,13 +22,18 @@ export type ProductsByType = {
 };
 
 export default class TeslaFleetApi {
+  /** Class backing `vehicles`; a subclass (e.g. `Teslemetry`) overrides it instead of its constructor. */
+  static Vehicles: new (parent: TeslaFleetApi) => Vehicle = Vehicle;
+  /** Class backing `energySites`; a subclass overrides it instead of its constructor. */
+  static EnergySites: new (parent: TeslaFleetApi) => Energy = Energy;
+
   server: string | null = null;
   accessToken: string | null;
   charging?: Charging;
-  energy?: Energy;
+  energySites?: Energy;
   partner?: Partner;
   user?: User;
-  vehicle?: Vehicle;
+  vehicles?: Vehicle;
   debug: boolean = false;
   /** Abort a request (including reading its body) after this many milliseconds; `null` waits indefinitely. */
   timeout: number | null;
@@ -59,11 +64,13 @@ export default class TeslaFleetApi {
 
     this.debug && console.debug(`Using server ${this.server}`);
 
+    const factories = this.constructor as typeof TeslaFleetApi;
+
     if (options.chargingScope !== false) {
       this.charging = new Charging(this);
     }
     if (options.energyScope !== false) {
-      this.energy = new Energy(this);
+      this.energySites = new factories.EnergySites(this);
     }
     if (options.userScope !== false) {
       this.user = new User(this);
@@ -73,7 +80,7 @@ export default class TeslaFleetApi {
     }
 
     if (options.vehicleScope !== false) {
-      this.vehicle = new Vehicle(this);
+      this.vehicles = new factories.Vehicles(this);
     }
   }
 
