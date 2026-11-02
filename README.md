@@ -34,3 +34,15 @@ class MyApi extends Teslemetry {
   static override Vehicles = MyVehicles;
 }
 ```
+
+## OAuth
+
+```ts
+import { Scope, TeslaFleetOAuth } from "tesla-fleet-api";
+
+const api = new TeslaFleetOAuth({ region: "na", client_id, client_secret, redirect_uri });
+const url = api.get_login_url([Scope.OPENID, Scope.OFFLINE_ACCESS]);
+await api.get_refresh_token(code);
+```
+
+An expired token refreshes before the next request. Tesla's refresh tokens are single use, so store `api.refresh_token` and `api.expires` (epoch seconds) after `get_refresh_token`, and whatever `refresh_access_token()` or `check_access_token()` returns. To store a refresh made by a request, read those two fields after it.
