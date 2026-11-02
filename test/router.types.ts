@@ -1,7 +1,7 @@
 // Compile-time checks, run by `npx tsc -p tsconfig.test.json --noEmit`. Never
 // executed. An unused `@ts-expect-error` is itself an error, so a router type that
 // stops rejecting one of these fails that command.
-import { Router, VehicleRouter, type Routed } from "../src/router/index.js";
+import { EnergySiteRouter, Router, VehicleRouter, merge_live_status, merge_site_info, type Routed } from "../src/router/index.js";
 import type { CommandResponse } from "../src/types/commands.js";
 import { TeslemetryVehicle } from "../src/teslemetryvehicle.js";
 import { TessieVehicle } from "../src/tessievehicle.js";
@@ -138,3 +138,45 @@ export async function realBackends(
 }
 
 export type RoutedSigned = Routed<VehicleSigned>["door_lock"];
+
+class LocalSite {
+    readonly energy_site_id = 1;
+
+    operation(mode: "backup" | "self_consumption"): Promise<CommandResponse> {
+        throw new Error(`type check only: ${mode}`);
+    }
+    local_config(): Promise<{ din: string }> {
+        return Promise.resolve({ din: "" });
+    }
+}
+
+class CloudSite {
+    readonly energy_site_id = 2;
+
+    operation(mode: "backup" | "self_consumption"): Promise<CommandResponse> {
+        throw new Error(`type check only: ${mode}`);
+    }
+    site_info(): Promise<{ response: { id: string } }> {
+        return Promise.resolve({ response: { id: "" } });
+    }
+}
+
+export async function energySites(local: LocalSite, cloud: CloudSite): Promise<void> {
+    const router = new EnergySiteRouter([local, cloud]);
+    assertType<Equal<ReturnType<typeof router.operation>, Promise<CommandResponse>>>();
+    assertType<Equal<Awaited<ReturnType<typeof router.local_config>>, { din: string }>>();
+    assertType<Equal<Awaited<ReturnType<typeof router.site_info>>, { response: { id: string } }>>();
+    assertType<Equal<typeof router.primary, LocalSite>>();
+    assertType<Equal<typeof router.energy_site_id, 1 | 2>>();
+
+    // @ts-expect-error `operation` takes a mode.
+    await router.operation("off");
+    // @ts-expect-error No backend has this method.
+    await router.storm_mode(true);
+
+    // Merge helpers keep the cloud document's type, and take unwrapped documents.
+    const _merged = merge_live_status({ grid_power: 1 }, { grid_power: 0 });
+    assertType<Equal<typeof _merged, { grid_power: number }>>();
+    // @ts-expect-error `local` is an object or null.
+    merge_site_info({}, "local");
+}

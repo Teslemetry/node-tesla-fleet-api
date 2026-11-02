@@ -44,7 +44,7 @@ type MethodKeys<B> = {
     [K in keyof B]-?: K extends `_${string}` | "then" ? never : B[K] extends (...args: never[]) => unknown ? K : never;
 }[keyof B];
 type AllMethodKeys<B> = B extends unknown ? MethodKeys<B> : never;
-type MemberOf<B, K extends PropertyKey> = B extends { [P in K]: infer F } ? F : never;
+export type MemberOf<B, K extends PropertyKey> = B extends { [P in K]: infer F } ? F : never;
 type Asynced<F> = F extends (...args: infer A) => infer R ? (...args: A) => Promise<Awaited<R>> : never;
 
 /** Every method of the union `B`. A name on several members must satisfy all their signatures. */
