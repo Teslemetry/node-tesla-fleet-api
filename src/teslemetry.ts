@@ -1,6 +1,7 @@
 import { is_valid_region } from "./const.js";
 import { InvalidResponse, TeslemetryRegistrationError } from "./exceptions.js";
 import TeslaFleetApi, { AccessToken, Logger } from "./teslafleetapi.js";
+import { TeslemetryEnergySites } from "./teslemetryenergy.js";
 import { TeslemetryVehicles } from "./teslemetryvehicle.js";
 import { Scope } from "./types/commands.js";
 import Vehicle from "./vehicle.js";
@@ -91,6 +92,9 @@ export default class Teslemetry extends TeslaFleetApi {
 
   declare vehicles: TeslemetryVehicles;
 
+  static override EnergySites = TeslemetryEnergySites;
+
+  declare energySites?: TeslemetryEnergySites;
   override readonly _transport_name: string = "teslemetry";
 
   constructor(accessToken: AccessToken, region: Region = "api", options: TeslemetryOptions = {}) {

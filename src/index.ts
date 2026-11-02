@@ -1,6 +1,10 @@
 import Commands, { infotainment_command_name, vcsec_command_name } from "./commands.js";
 import Energy from "./energy.js";
-import EnergySpecific from "./energyspecific.js";
+import EnergySpecific, {
+    MAX_DISPATCH_DURATION_SECONDS,
+    UNSIGNED_DEVICE_COMMANDS,
+    validate_dispatch_battery_power,
+} from "./energyspecific.js";
 import TeslaFleetApi from "./teslafleetapi.js";
 import TeslaFleetOAuth from "./oauth.js";
 import Teslemetry, { REGISTER_URL, register_client } from "./teslemetry.js";
@@ -29,9 +33,20 @@ export { Commands, Energy, EnergySpecific, TeslaFleetApi, TeslaFleetOAuth, Tesle
 export { REGISTER_URL, infotainment_command_name, register_client, vcsec_command_name };
 export type { TeslemetryClientRegistration } from "./teslemetry.js";
 export type { SendOptions, SendRequires, SignedCommandResponse, SignedReply } from "./commands.js";
+export { MAX_DISPATCH_DURATION_SECONDS, UNSIGNED_DEVICE_COMMANDS, validate_dispatch_battery_power };
+export { ENERGY_SIGNATURE_TTL_SECONDS, EnergyDeviceSigner } from "./signing/energy.js";
 export type { AccessToken } from "./teslafleetapi.js";
 export type { RefreshedToken, TeslaFleetOAuthOptions } from "./oauth.js";
 export type { Logger } from "./log.js";
+export {
+    DEFAULT_PAIRING_POLL_INTERVAL,
+    DEFAULT_PAIRING_TIMEOUT,
+    TeslemetryEnergySite,
+    TeslemetryEnergySites,
+    parse_authorized_clients,
+    parse_gateway_address,
+} from "./teslemetryenergy.js";
+export type { AuthorizedClient, AuthorizedClients } from "./teslemetryenergy.js";
 export { Session } from "./signing/session.js";
 export * as jws from "./signing/jws.js";
 export {
