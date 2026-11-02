@@ -329,6 +329,7 @@ export class PowerwallClient {
     readonly #expectedDin?: string;
     #din: string | null = null;
     #connecting: Promise<string> | null = null;
+    #configWrites: Promise<unknown> = Promise.resolve();
     // What `curtail` replaced. Held only here, so it does not survive a restart.
     #savedRealMode: string | null = null;
     #savedReservePercent: number | null = null;
@@ -582,11 +583,20 @@ export class PowerwallClient {
      * the read unchanged: it is an optimistic lock held by the gateway, and the
      * client never computes one.
      * @param updates Dotted paths to values, such as `{"site_info.backup_reserve_percent": 24}`.
+     * Writes on one client run one at a time, so two cannot interleave. Another
+     * client's write is caught by that lock instead, and refused.
      * @throws RangeError on a number that is not finite, before any request.
      * @throws PowerwallProtocolError on bad JSON, or a reply with no `filestore`.
      */
     async write_config(updates: Record<string, unknown>): Promise<void> {
         requireFiniteNumbers(updates, "updates");
+        const write = this.#configWrites.then(() => this._write_config(updates));
+        // A failed write stops only its own caller, not the writes queued behind it.
+        this.#configWrites = write.catch(() => undefined);
+        return write;
+    }
+
+    private async _write_config(updates: Record<string, unknown>): Promise<void> {
         const din = await this.connect();
         const { blob, hash } = await this._read_config(din);
         const config = decodeConfig(blob);

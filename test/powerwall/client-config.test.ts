@@ -26,6 +26,43 @@ function setConfig(config: unknown): Buffer {
 }
 
 describe("write_config", () => {
+    it("runs concurrent writes one at a time, so neither loses the other's change", async () => {
+        await Promise.all([
+            client.write_config({ a: 1 }),
+            client.write_config({ b: 2 }),
+            client.set_operation_mode("autonomous"),
+        ]);
+
+        expect(gateway.configWrites).toHaveLength(3);
+        expect(gateway.configJson).toMatchObject({ a: 1, b: 2, default_real_mode: "autonomous" });
+    });
+
+    it("keeps each write's read and update together", async () => {
+        await Promise.all([client.write_config({ a: 1 }), client.write_config({ b: 2 })]);
+
+        const kinds = gateway.posts.map((post) => (post.envelope.filestore?.readFileRequest ? "read" : "update"));
+        expect(kinds).toEqual(["read", "update", "read", "update"]);
+    });
+
+    it("carries on after a failed write, and still reports that failure", async () => {
+        gateway.forceStatus("/tedapi/v1r", 500);
+        const results = await Promise.allSettled([client.write_config({ a: 1 }), client.write_config({ b: 2 })]);
+
+        expect(results.map((result) => result.status)).toEqual(["rejected", "fulfilled"]);
+        expect(gateway.configJson.b).toBe(2);
+    });
+
+    it("queues per client", async () => {
+        const other = new PowerwallClient({ host: gateway.host, gatewayPassword: GATEWAY_PASSWORD, rsaPrivateKeyPem: TEST_KEY_PEM });
+        await Promise.all([client.connect(), other.connect()]);
+        const reads = gateway.posts.length;
+        const first = client.write_config({ a: 1 });
+        const second = other.write_config({ b: 2 });
+        await Promise.allSettled([first, second]);
+        other.close();
+        expect(gateway.posts.slice(reads, reads + 2).every((post) => post.envelope.filestore?.readFileRequest)).toBe(true);
+    });
+
     it("sends the original hash", async () => {
         const hash = setConfig({ site_info: { backup_reserve_percent: 24 } });
 

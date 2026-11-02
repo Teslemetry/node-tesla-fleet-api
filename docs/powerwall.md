@@ -106,7 +106,7 @@ live.last_error;
 | `operation` | `set_operation_mode` | Writes `config.json` |
 | `backup` | `set_backup_reserve`, `set_backup_reserve_raw` | Writes `config.json`. `backup` takes the app's scale. |
 | `grid_import_export` | `set_grid_import_export`, `set_export_rule`, `set_grid_charging` | Writes `config.json`. Both settings in one call is one write. |
-| `set_island_mode`, `go_off_grid`, `reconnect_grid` | `set_island_mode`, `go_off_grid`, `reconnect_grid` | Moves the grid contactor. A success-shaped reply does not prove it moved: read `control.islanding.contactorClosed` afterwards. |
+| `set_island_mode`, `go_off_grid`, `reconnect_grid` | `set_island_mode`, `go_off_grid`, `reconnect_grid` | Moves the grid contactor. Takes mode 1 or 6 only. A success-shaped reply does not prove it moved: read `control.islanding.contactorClosed` afterwards. |
 | `schedule_backup_event`, `cancel_backup_event` | `schedule_max_backup`, `cancel_max_backup` | Always starts now at maximum priority |
 | `dispatch_battery_power`, `resume_battery_operation` | `dispatch_battery_power`, `resume_battery_operation` | Use short durations and renew them. The gateway refuses above its limit. |
 | `remove_authorized_client` | `remove_authorized_client` | Removing the signing key locks this client out |
