@@ -252,10 +252,13 @@ const SeatHeaterLevels: Array<keyof HvacSeatHeaterActions_HvacSeatHeaterAction> 
     "seatHeaterHigh",
 ];
 
-/** Seat cooling and auto-climate only cover the front seats on the wire protocol. */
+/**
+ * Keyed by the REST `seat_position`, which Tesla's vehicle-command proxy reads
+ * as the proto enum value (1 front left, 2 front right), not the 0-based `Seats`.
+ */
 const SeatCoolerPositions: Partial<Record<number, HvacSeatCoolerActions_HvacSeatCoolerPositionE>> = {
-    [Seats.FRONT_LEFT]: HvacSeatCoolerActions_HvacSeatCoolerPositionE.HvacSeatCoolerPosition_FrontLeft,
-    [Seats.FRONT_RIGHT]: HvacSeatCoolerActions_HvacSeatCoolerPositionE.HvacSeatCoolerPosition_FrontRight,
+    [AutoSeat.FRONT_LEFT]: HvacSeatCoolerActions_HvacSeatCoolerPositionE.HvacSeatCoolerPosition_FrontLeft,
+    [AutoSeat.FRONT_RIGHT]: HvacSeatCoolerActions_HvacSeatCoolerPositionE.HvacSeatCoolerPosition_FrontRight,
 };
 
 const SeatCoolerLevels = [
@@ -271,7 +274,12 @@ const AutoSeatPositions: Partial<Record<number, AutoSeatClimateAction_AutoSeatPo
     [AutoSeat.FRONT_RIGHT]: AutoSeatClimateAction_AutoSeatPositionE.AutoSeatPosition_FrontRight,
 };
 
-const StwHeatLevels = [StwHeatLevel.StwHeatLevel_Off, StwHeatLevel.StwHeatLevel_Low, StwHeatLevel.StwHeatLevel_High];
+/** Keyed by the REST `Level`, which takes 0, 1 and 3 here: the protocol has no medium steering wheel heat. */
+const StwHeatLevels: Partial<Record<number, StwHeatLevel>> = {
+    0: StwHeatLevel.StwHeatLevel_Off,
+    1: StwHeatLevel.StwHeatLevel_Low,
+    3: StwHeatLevel.StwHeatLevel_High,
+};
 
 const ClimateKeeperActions: Record<number, HvacClimateKeeperAction_ClimateKeeperActionE> = {
     [ClimateModes.Off]: HvacClimateKeeperAction_ClimateKeeperActionE.ClimateKeeperAction_Off,
@@ -1213,6 +1221,9 @@ export default abstract class Commands extends VehicleSpecific {
      * @param volume A floating point number from 0.0 to 11.0.
      */
     async adjust_volume(volume: number): Promise<CommandResponse> {
+        if (volume < 0 || volume > 11) {
+            throw new Error("Volume must a number from 0.0 to 11.0");
+        }
         return this.vehicleAction(
             VehicleAction.create({ mediaUpdateVolume: MediaUpdateVolume.create({ volumeAbsoluteFloat: volume }) }),
         );
@@ -1575,11 +1586,11 @@ export default abstract class Commands extends VehicleSpecific {
 
     /**
      * Sets seat cooling. Only the front seats support this action.
-     * @param seat_position Seat position
+     * @param seat_position `AutoSeat` position (1-indexed: front left is 1, front right is 2), unlike seat heating
      * @param seat_cooler_level Cooling level
      */
-    async remote_seat_cooler_request(seat_position: Seat | number, seat_cooler_level: Level): Promise<CommandResponse> {
-        const position = SeatCoolerPositions[this.resolveSeat(seat_position)];
+    async remote_seat_cooler_request(seat_position: keyof typeof AutoSeat | number, seat_cooler_level: Level): Promise<CommandResponse> {
+        const position = SeatCoolerPositions[typeof seat_position === "string" ? AutoSeat[seat_position] : seat_position];
         if (position === undefined) {
             throw new Error(`Invalid seat position for seat cooling: ${seat_position}`);
         }
@@ -1631,12 +1642,12 @@ export default abstract class Commands extends VehicleSpecific {
 
     /**
      * Sets steering wheel heat level.
-     * @param level Heating level (0=Off, 1=Low, 2=High)
+     * @param level `Level` OFF, LOW or HIGH (0, 1, 3). There is no medium level.
      */
     async remote_steering_wheel_heat_level_request(level: Level): Promise<CommandResponse> {
         const stwLevel = StwHeatLevels[level];
         if (stwLevel === undefined) {
-            throw new Error(`Invalid steering wheel heat level: ${level}`);
+            throw new Error(`Invalid steering wheel heat level ${level}; expected 0, 1 or 3`);
         }
         return this.vehicleAction(VehicleAction.create({ stwHeatLevelAction: StwHeatLevelAction.create({ stwHeatLevel: stwLevel }) }));
     }
@@ -1923,9 +1934,11 @@ export default abstract class Commands extends VehicleSpecific {
      * @param on `true` or `false`
      * @param password Four-digit passcode
      */
-    async set_valet_mode(on: boolean, password: string | number): Promise<CommandResponse> {
+    async set_valet_mode(on: boolean, password?: string | number): Promise<CommandResponse> {
         return this.vehicleAction(
-            VehicleAction.create({ vehicleControlSetValetModeAction: VehicleControlSetValetModeAction.create({ on, password: String(password) }) }),
+            VehicleAction.create({
+                vehicleControlSetValetModeAction: VehicleControlSetValetModeAction.create({ on, password: password == null ? undefined : String(password) }),
+            }),
         );
     }
 
@@ -2012,12 +2025,14 @@ export default abstract class Commands extends VehicleSpecific {
      *
      * "stop" has no corresponding field in the signed-command protobuf (only
      * vent/close/open), so it is rejected rather than guessed at.
-     * @param state "close" or "vent"
+     * @param state "open", "close" or "vent"
      */
-    async sun_roof_control(state: "stop" | "close" | "vent"): Promise<CommandResponse> {
+    async sun_roof_control(state: "stop" | "close" | "vent" | "open"): Promise<CommandResponse> {
         let action: VehicleControlSunroofOpenCloseAction;
         if (state === "vent") {
             action = VehicleControlSunroofOpenCloseAction.create({ vent: VOID });
+        } else if (state === "open") {
+            action = VehicleControlSunroofOpenCloseAction.create({ open: VOID });
         } else if (state === "close") {
             action = VehicleControlSunroofOpenCloseAction.create({ close: VOID });
         } else {
@@ -2039,15 +2054,15 @@ export default abstract class Commands extends VehicleSpecific {
 
     /**
      * Turns on HomeLink (used to open and close garage doors).
-     * @param lat Latitude
+     * @param lat Latitude. `0` is a coordinate; the location is sent when both are given.
      * @param lon Longitude
      * @param token
      */
-    async trigger_homelink(lat: number, lon: number, token: string = ""): Promise<CommandResponse> {
+    async trigger_homelink(lat?: number, lon?: number, token?: string): Promise<CommandResponse> {
         return this.vehicleAction(
             VehicleAction.create({
                 vehicleControlTriggerHomelinkAction: VehicleControlTriggerHomelinkAction.create({
-                    location: LatLong.create({ latitude: lat, longitude: lon }),
+                    location: lat != null && lon != null ? LatLong.create({ latitude: lat, longitude: lon }) : undefined,
                     token,
                 }),
             }),
@@ -2102,10 +2117,14 @@ export default abstract class Commands extends VehicleSpecific {
      * @param lon Longitude
      */
     async window_control(command: "vent" | "close", _lat?: number, _lon?: number): Promise<CommandResponse> {
-        const action =
-            command === "vent"
-                ? VehicleControlWindowAction.create({ vent: VOID })
-                : VehicleControlWindowAction.create({ close: VOID });
+        let action: VehicleControlWindowAction;
+        if (command === "vent") {
+            action = VehicleControlWindowAction.create({ vent: VOID });
+        } else if (command === "close") {
+            action = VehicleControlWindowAction.create({ close: VOID });
+        } else {
+            throw new Error(`Invalid window command: ${command}`);
+        }
         return this.vehicleAction(VehicleAction.create({ vehicleControlWindowAction: action }));
     }
 

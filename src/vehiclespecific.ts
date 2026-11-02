@@ -295,11 +295,11 @@ export default class VehicleSpecific {
 
   /**
    * Sets seat cooling.
-   * @param seat_position Seat position
+   * @param seat_position `AutoSeat` position (1-indexed: front left is 1, front right is 2), unlike seat heating
    * @param seat_cooler_level Cooling level
    */
   async remote_seat_cooler_request(
-    seat_position: Seat | number,
+    seat_position: keyof typeof AutoSeat | number,
     seat_cooler_level: Level,
   ): Promise<CommandResponse> {
     return this.parent.remote_seat_cooler_request(
@@ -670,7 +670,7 @@ export default class VehicleSpecific {
    */
   async set_valet_mode(
     on: boolean,
-    password: string | number,
+    password?: string | number,
   ): Promise<CommandResponse> {
     return this.parent.set_valet_mode(this.vin, on, password);
   }
@@ -747,8 +747,8 @@ export default class VehicleSpecific {
    * @param lon Longitude
    */
   async trigger_homelink(
-    lat: number,
-    lon: number,
+    lat?: number,
+    lon?: number,
     token?: string,
   ): Promise<CommandResponse> {
     return this.parent.trigger_homelink(this.vin, lat, lon, token);
@@ -772,8 +772,8 @@ export default class VehicleSpecific {
    */
   async window_control(
     command: "vent" | "close",
-    lat: number,
-    lon: number,
+    lat?: number,
+    lon?: number,
   ): Promise<CommandResponse> {
     return this.parent.window_control(this.vin, command, lat, lon);
   }
