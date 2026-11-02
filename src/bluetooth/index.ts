@@ -6,6 +6,8 @@ export * from "./constants.js";
 export { ReassemblingBuffer, parseFrame, prependLength, splitFrame } from "./framing.js";
 export { get_name, name_matches_vin, valid_name } from "./names.js";
 export { default as TeslaBluetooth, VehiclesBluetooth } from "./teslabluetooth.js";
+export { BleBroadcastPublisher, BleBroadcastStreamGlue, GEAR_STATES, TONNEAU_POSITION_STATES } from "./streamglue.js";
+export type { StreamSink } from "./streamglue.js";
 export { BleNotSubmittedError } from "./transport.js";
 export type { BluetoothConfirmation } from "./verify.js";
 export { default as VehicleBluetooth } from "./vehiclebluetooth.js";
