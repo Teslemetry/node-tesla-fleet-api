@@ -23,6 +23,8 @@ jobs:
 
       - run: npx tsc --noEmit
 
+      - run: npx tsc -p tsconfig.test.json --noEmit
+
       - run: pnpm run lint
 
       - run: pnpm test
