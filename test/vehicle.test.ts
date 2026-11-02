@@ -71,6 +71,12 @@ describe("VehicleSpecific REST routes", () => {
         expect(request).toHaveBeenCalledWith("POST", `api/1/vehicles/${VIN}/command/clear_pin_to_drive_admin`, null, { pin: "1234" });
     });
 
+    it("clear_pin_to_drive_admin leaves the pin out when omitted", async () => {
+        const { vehicle, request } = makeVehicle();
+        await vehicle.clear_pin_to_drive_admin();
+        expect(request).toHaveBeenCalledWith("POST", `api/1/vehicles/${VIN}/command/clear_pin_to_drive_admin`, null, { pin: undefined });
+    });
+
     it("remote_seat_heater_request sends heater and level", async () => {
         const { request, vehicle } = stubRequest();
         await vehicle.remote_seat_heater_request("FRONT_RIGHT", 3);

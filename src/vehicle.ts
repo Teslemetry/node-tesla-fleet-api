@@ -178,10 +178,10 @@ export default class Vehicle {
     /**
      * Deactivates PIN to Drive and resets the associated PIN for vehicles running firmware versions 2023.44+. This command is only accessible to fleet managers or owners.
      * @param vehicle_tag VIN or id field of a vehicle
-     * @param pin Four-digit PIN
+     * @param pin Optional four-digit PIN
      */
-    async clear_pin_to_drive_admin(vehicle_tag: string | number, pin: string | number): Promise<CommandResponse> {
-        return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/clear_pin_to_drive_admin`, null, { pin: String(pin) });
+    async clear_pin_to_drive_admin(vehicle_tag: string | number, pin?: string | number): Promise<CommandResponse> {
+        return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/clear_pin_to_drive_admin`, null, { pin: pin == null ? undefined : String(pin) });
     }
 
     /**
