@@ -36,6 +36,26 @@ export const STALE_CHUNK_TIMEOUT_MS = 1000;
 export const DEFAULT_KEEPALIVE_INTERVAL_MS = 20_000;
 /** Infotainment answers a handshake 4 to 16 s after an RKE wake. */
 export const DEFAULT_WAKE_TIMEOUT_MS = 30_000;
+/**
+ * One infotainment readiness probe. A ready infotainment answers in 0.26 to 0.39 s.
+ * The window opens once the request is fully written, so a slow 20-byte link
+ * spends none of it writing. Raise it with `wake_probe_timeout_ms` if a link's
+ * replies are slower than this, as a probe that keeps timing out never proves
+ * the car is ready.
+ */
+export const DEFAULT_WAKE_PROBE_TIMEOUT_MS = 1000;
+/** How often a wake is resent while infotainment stays silent: a first wake can be missed after a long sleep. */
+export const WAKE_RESEND_INTERVAL_MS = 3000;
+/** How long an awake car's infotainment may take to finish booting. */
+export const INFOTAINMENT_BOOT_TIMEOUT_MS = 20_000;
+/** How long a charge-port opening has to show in charge state. It took about 1.4 s in live trials. */
+export const CHARGE_PORT_VERIFY_TIMEOUT_MS = 5000;
+/** Between charge-state polls, while waiting for readiness or for the latch. */
+export const CHARGE_PORT_VERIFY_INTERVAL_MS = 250;
+/** How long `pair` waits for someone to tap a key card. */
+export const DEFAULT_PAIR_TIMEOUT_MS = 300_000;
+/** Between `pair`'s checks of whether the key was accepted. */
+export const DEFAULT_PAIR_POLL_INTERVAL_MS = 5000;
 /** Connect attempts. Each is bounded by `DEFAULT_CONNECT_TIMEOUT_MS`. */
 export const DEFAULT_CONNECT_ATTEMPTS = 3;
 /** One connect attempt. Python takes the same figure from `bleak-retry-connector`. */

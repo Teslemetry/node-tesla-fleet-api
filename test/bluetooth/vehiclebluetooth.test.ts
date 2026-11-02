@@ -421,6 +421,42 @@ describe("connecting", () => {
         expect(link.openConnections).toBe(0);
     });
 
+    it("lets a late attempt close before the next, so it cannot end a link on a shared peripheral", async () => {
+        const { vehicle, link } = bleHarness({ max_connect_attempts: 2, connect_timeout_ms: 4000 });
+        link.sharesPeripheral = true;
+        link.hangConnect(1);
+
+        const connecting = vehicle.connect();
+        await vi.advanceTimersByTimeAsync(4000 + 1000);
+        link.releaseHungConnects();
+        await finish(connecting);
+        await vi.advanceTimersByTimeAsync(10_000);
+
+        expect(link.openConnections).toBe(1);
+        expect(link.connection?.isConnected).toBe(true);
+        await expect(finish(vehicle.door_lock())).resolves.toMatchObject({ response: { result: true } });
+        expect(link.connections).toHaveLength(2);
+    });
+
+    it("waits a bounded time for an attempt that never lands", async () => {
+        const { vehicle, link } = bleHarness({ max_connect_attempts: 2, connect_timeout_ms: 4000 });
+        link.hangConnect(1);
+
+        const { elapsedMs, error } = await timed(() => vehicle.connect());
+
+        expect(error).toBeUndefined();
+        expect(elapsedMs).toBeLessThanOrEqual(4000 + LINK_TEARDOWN_TIMEOUT_MS + 100);
+        expect(link.openConnections).toBe(1);
+    });
+
+    it("does not let an attempt that never lands wedge a later disconnect", async () => {
+        const { vehicle, link } = bleHarness({ max_connect_attempts: 1, connect_timeout_ms: 4000 });
+        link.hangConnect(1);
+        await timed(() => vehicle.connect());
+
+        await expect(finish(vehicle.disconnect(), 10_000)).resolves.toBe(false);
+    });
+
     it("ignores notifications from an abandoned attempt", async () => {
         const { vehicle, link } = bleHarness({ connect_timeout_ms: 4000, max_connect_attempts: 2 });
         link.hangConnect();

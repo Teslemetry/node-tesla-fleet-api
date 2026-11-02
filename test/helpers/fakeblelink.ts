@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { Domain, RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
-import { FromVCSECMessage, VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
+import { FromVCSECMessage, UnsignedMessage, VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
 import type {
     BleCharacteristic,
     BleConnection,
@@ -69,9 +69,12 @@ class FakeConnection implements BleConnection {
 
     async disconnect(): Promise<void> {
         this.link.calls.push({ kind: "disconnect" });
-        this.live = false;
-        this.reported = false;
-        this.handlers.onDisconnect();
+        // On a backend with one peripheral object, closing any handle closes the link.
+        for (const connection of this.link.sharesPeripheral ? this.link.connections : [this]) {
+            connection.live = false;
+            connection.reported = false;
+            connection.handlers.onDisconnect();
+        }
     }
 }
 
@@ -98,17 +101,31 @@ export class FakeBleLink implements BleTransport {
     readonly calls: GattCall[] = [];
     /** Every frame that reached the vehicle whole. */
     readonly frames: RoutableMessage[] = [];
+    /**
+     * Every VCSEC command the client finished writing, in the clear. A write that
+     * then failed still counts, as it may have reached the car, so this and not
+     * `frames` is what proves "exactly one".
+     */
+    readonly vcsecWrites: UnsignedMessage[] = [];
     readonly connections: FakeConnection[] = [];
     /** Bytes a read of `version` returns. */
     version: Uint8Array = Buffer.from([0x00, 0x01]);
+    /** Bytes a read of Device Name returns, and of Appearance. */
+    genericAccess: { deviceName: Uint8Array; appearance: Uint8Array } = { deviceName: Buffer.alloc(0), appearance: Buffer.alloc(0) };
     /** What a scan finds. It returns all of them, matching or not, as a Homey `discover()` does. */
     devices: BleDeviceRef[];
     /** How long a scan takes. */
     scanWindowMs = 0;
     /** How long each write takes. */
     writeDelayMs = 0;
+    /** How long each read takes. */
+    readDelayMs = 0;
     /** How a dead link treats a write it was not told about. */
     silentlyDroppedWrites: "hang" | "reject" = "hang";
+    /** Every connect returns the one peripheral, so closing any of them ends all of them, as on Homey. */
+    sharesPeripheral = false;
+    /** Frames that reach the radio but no computer that answers, as infotainment is while the car sleeps. */
+    deafTo: ((request: RoutableMessage) => boolean) | null = null;
 
     private readonly mtu: number;
     private readonly writeSize: number | null | undefined;
@@ -322,11 +339,21 @@ export class FakeBleLink implements BleTransport {
         this.rx = this.rx.subarray(payload.length + 2);
         const request = RoutableMessage.decode(payload);
 
+        const command = this.vehicle.peekVcsecCommand(request);
+        if (command) {
+            this.vcsecWrites.push(command);
+        }
         const fault = this.takeFirst(this.writeFaults, request);
         if (fault?.when === "before") {
             await this.applyFault(fault);
         }
         this.frames.push(request);
+        if (this.deafTo?.(request)) {
+            if (fault) {
+                await this.applyFault(fault);
+            }
+            return;
+        }
         const reply = this.vehicle.handle(Buffer.from(payload));
         this.scheduleReply(connection, request, reply);
         if (fault) {
@@ -337,14 +364,17 @@ export class FakeBleLink implements BleTransport {
     /** @internal */
     async onRead(connection: FakeConnection, characteristic: BleCharacteristic): Promise<Uint8Array> {
         this.calls.push({ kind: "read", characteristic });
+        if (this.readDelayMs > 0) {
+            await sleep(this.readDelayMs);
+        }
         const fault = this.readFaults.shift();
+        if (fault instanceof Error) {
+            throw fault;
+        }
         if (fault === "hang" || !connection.live) {
             await new Promise(() => undefined);
         }
-        if (fault) {
-            throw fault;
-        }
-        return this.version;
+        return characteristic === "version" ? this.version : this.genericAccess[characteristic];
     }
 
     private kindOf(frame: RoutableMessage): FrameKind {

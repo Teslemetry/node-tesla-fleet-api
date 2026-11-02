@@ -217,8 +217,15 @@ export interface SendOptions {
     timeoutMs?: number;
     /** Return as soon as the message is written, without a reply. */
     optimistic?: boolean;
-    /** Lets an unsolicited state broadcast confirm the command alongside the addressed ack. */
-    confirmBroadcast?: (status: VehicleStatus) => boolean;
+    /** Lets an unsolicited state broadcast confirm the command alongside the addressed ack. `undefined` means the status says nothing either way. */
+    confirmBroadcast?: (status: VehicleStatus) => boolean | undefined;
+    /**
+     * Called each time a frame may have reached the vehicle: its write completed,
+     * or failed after entering the backend. A failure before any such call sent nothing.
+     */
+    onSubmitted?: () => void;
+    /** Once aborted, nothing more is written: the send rejects with the signal's reason instead. */
+    signal?: AbortSignal;
 }
 
 /** What one signed dispatch resolves to: a command outcome, or the data a read asked for. */
@@ -902,7 +909,7 @@ export default abstract class Commands extends VehicleSpecific {
         return ok();
     }
 
-    private raiseWhitelistFault(information: WhitelistOperationInformationE | undefined): void {
+    protected raiseWhitelistFault(information: WhitelistOperationInformationE | undefined): void {
         if (!information) {
             return;
         }
@@ -1026,7 +1033,7 @@ export default abstract class Commands extends VehicleSpecific {
     /** Sign and send an actuation: its reply is a bare terminal ack, so `expectsData` is false. */
     protected async sendVehicleSecurity(
         command: UnsignedMessage,
-        options: Pick<SendOptions, "confirmBroadcast"> = {},
+        options: Pick<SendOptions, "confirmBroadcast" | "onSubmitted"> = {},
     ): Promise<CommandResponse> {
         const reply = await this.dispatchLogged(
             vcsec_command_name(command),
@@ -1056,11 +1063,15 @@ export default abstract class Commands extends VehicleSpecific {
      * the vehicle, so a transport can give up on it rather than ask whether it
      * ran; `ping` is the only one. The cloud transport has no use for it.
      */
-    protected async sendInfotainment(action: Action, _options: { mutating?: boolean } = {}): Promise<SignedCommandResponse> {
+    protected async sendInfotainment(
+        action: Action,
+        { onSubmitted }: { mutating?: boolean } & Pick<SendOptions, "onSubmitted"> = {},
+    ): Promise<SignedCommandResponse> {
         const reply = await this.dispatchLogged(
             infotainment_command_name(action),
             Domain.DOMAIN_INFOTAINMENT,
             Buffer.from(Action.encode(action).finish()),
+            { onSubmitted },
         );
         return reply as SignedCommandResponse;
     }

@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import { Domain, RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
-import { VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
+import { RKEActionE, VehicleSleepStatusE, VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
 import { SendOptions, SendRequires } from "../../src/commands.js";
 import TeslaBluetooth from "../../src/bluetooth/teslabluetooth.js";
 import type { BleTransport } from "../../src/bluetooth/transport.js";
@@ -30,6 +30,17 @@ export class TestVehicle extends VehicleBluetooth {
     read(characteristic: "version" | "deviceName" | "appearance", timeoutMs?: number) {
         return this.gattRead(characteristic, timeoutMs);
     }
+
+    /** Shorten one of the ladder's timings. */
+    tune(timings: {
+        wakeTimeoutMs?: number;
+        infotainmentBootTimeoutMs?: number;
+        wakeResendIntervalMs?: number;
+        chargePortVerifyTimeoutMs?: number;
+        chargePortVerifyIntervalMs?: number;
+    }): void {
+        Object.assign(this, timings);
+    }
 }
 
 export interface BleHarnessOptions extends Partial<VehicleBluetoothOptions> {
@@ -47,6 +58,33 @@ export function bleHarness({ mtu, maxWriteSize, logger, ...options }: BleHarness
     const tesla = new TeslaBluetooth({ privateKey: OUR_PRIVATE_KEY, logger });
     const vehicle = new TestVehicle(tesla.vehicles, VIN, { keepalive_interval_ms: null, ...options, transport });
     return { tesla, vehicle, link, fakeVehicle };
+}
+
+/**
+ * Make the car behave as it does asleep: VCSEC answers and reports its state,
+ * infotainment hears nothing. An RKE wake makes VCSEC report awake at once and
+ * infotainment answer `bootMs` later, with `-1` for a car that never wakes.
+ */
+export function sleepingCar({ link, fakeVehicle }: Pick<ReturnType<typeof bleHarness>, "link" | "fakeVehicle">, bootMs: number = 6000) {
+    const car = { infotainmentUp: false, wakes: 0 };
+    const report = (vehicleSleepStatus: VehicleSleepStatusE) => {
+        fakeVehicle.vehicleStatus = VehicleStatus.create({ vehicleSleepStatus });
+    };
+    report(VehicleSleepStatusE.VEHICLE_SLEEP_STATUS_ASLEEP);
+    link.deafTo = (request) => request.toDestination?.domain === INFOTAINMENT && !car.infotainmentUp;
+    fakeVehicle.onVcsecCommand = (command) => {
+        if (command.RKEAction !== RKEActionE.RKE_ACTION_WAKE_VEHICLE) {
+            return;
+        }
+        car.wakes++;
+        if (bootMs >= 0 && car.wakes === 1) {
+            report(VehicleSleepStatusE.VEHICLE_SLEEP_STATUS_AWAKE);
+            setTimeout(() => {
+                car.infotainmentUp = true;
+            }, bootMs);
+        }
+    };
+    return car;
 }
 
 /**

@@ -57,6 +57,48 @@ export function withTimeout<T>(operation: () => Promise<T>, timeoutMs: number, s
     });
 }
 
+/** Resolve after `ms`, or as soon as `signal` aborts. */
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve) => {
+        if (signal?.aborted) {
+            resolve();
+            return;
+        }
+        const finish = () => {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", finish);
+            resolve();
+        };
+        const timer = setTimeout(finish, ms);
+        signal?.addEventListener("abort", finish, { once: true });
+    });
+}
+
+/** Settle with `operation`, or reject with the signal's reason as soon as it aborts. */
+export function abortable<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (!signal) {
+        return operation;
+    }
+    return new Promise<T>((resolve, reject) => {
+        const onAbort = () => reject(signal.reason);
+        if (signal.aborted) {
+            onAbort();
+        }
+        signal.addEventListener("abort", onAbort, { once: true });
+        const stop = () => signal.removeEventListener("abort", onAbort);
+        operation.then(
+            (value) => {
+                stop();
+                resolve(value);
+            },
+            (error: unknown) => {
+                stop();
+                reject(error);
+            },
+        );
+    });
+}
+
 /** A queue with one consumer at a time. */
 export class ReplyQueue<T> {
     private items: T[] = [];
