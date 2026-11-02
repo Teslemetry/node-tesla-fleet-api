@@ -109,6 +109,8 @@ export class FakeBleLink implements BleTransport {
     writeDelayMs = 0;
     /** How a dead link treats a write it was not told about. */
     silentlyDroppedWrites: "hang" | "reject" = "hang";
+    /** Frames that reach the radio but no computer that answers, as infotainment is while the car sleeps. */
+    deafTo: ((request: RoutableMessage) => boolean) | null = null;
 
     private readonly mtu: number;
     private readonly writeSize: number | null | undefined;
@@ -327,6 +329,12 @@ export class FakeBleLink implements BleTransport {
             await this.applyFault(fault);
         }
         this.frames.push(request);
+        if (this.deafTo?.(request)) {
+            if (fault) {
+                await this.applyFault(fault);
+            }
+            return;
+        }
         const reply = this.vehicle.handle(Buffer.from(payload));
         this.scheduleReply(connection, request, reply);
         if (fault) {

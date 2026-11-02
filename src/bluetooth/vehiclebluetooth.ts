@@ -26,6 +26,7 @@ import {
     BluetoothTransportError,
     BluetoothUnconfirmedCommand,
     InvalidResponse,
+    SessionInfoAuthenticationFault,
     SigningDisabled,
     TeslaFleetError,
 } from "../exceptions.js";
@@ -37,10 +38,13 @@ import {
     DEFAULT_KEEPALIVE_INTERVAL_MS,
     DEFAULT_MAX_WRITE_SIZE,
     DEFAULT_SCAN_TIMEOUT_MS,
+    DEFAULT_WAKE_PROBE_TIMEOUT_MS,
     DEFAULT_WAKE_TIMEOUT_MS,
     GATT_READ_TIMEOUT_MS,
     GATT_WRITE_TIMEOUT_MS,
+    INFOTAINMENT_BOOT_TIMEOUT_MS,
     LINK_TEARDOWN_TIMEOUT_MS,
+    WAKE_RESEND_INTERVAL_MS,
 } from "./constants.js";
 import { ReassemblingBuffer, prependLength, splitFrame } from "./framing.js";
 import { get_name, name_matches_vin } from "./names.js";
@@ -74,6 +78,12 @@ export interface VehicleBluetoothOptions {
     connect_timeout_ms?: number;
     /** One scan, which must outlast the backend's scan window. Defaults to 10000. */
     scan_timeout_ms?: number;
+    /**
+     * The reply wait of one infotainment readiness probe. Defaults to 1000, which
+     * a ready car beats by 0.6 s. It starts after the last write, so a slow link
+     * loses none of it to writing, but a link with slow replies needs more.
+     */
+    wake_probe_timeout_ms?: number;
 }
 
 export interface FindVehicleOptions {
@@ -165,6 +175,10 @@ export default class VehicleBluetooth extends BroadcastListeners {
     protected ackFollowupTimeoutMs = 2000;
     /** How long a command woken by `wake_if_asleep` waits for infotainment. */
     protected wakeTimeoutMs = DEFAULT_WAKE_TIMEOUT_MS;
+    /** How often a wake is resent while infotainment stays silent. */
+    protected wakeResendIntervalMs = WAKE_RESEND_INTERVAL_MS;
+    /** How long an awake car's infotainment may take to finish booting. */
+    protected infotainmentBootTimeoutMs = INFOTAINMENT_BOOT_TIMEOUT_MS;
     /** Bound on one keepalive read. */
     protected keepaliveTimeoutMs = 2000;
 
@@ -182,6 +196,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
     private readonly maxConnectAttempts: number;
     private readonly connectTimeoutMs: number;
     private readonly scanTimeoutMs: number;
+    private readonly wakeProbeTimeoutMs: number;
     private readonly domainSendLock: Partial<Record<Domain, AsyncLock>> = {
         [VCSEC]: new AsyncLock(),
         [INFOTAINMENT]: new AsyncLock(),
@@ -214,6 +229,10 @@ export default class VehicleBluetooth extends BroadcastListeners {
         this.maxConnectAttempts = options.max_connect_attempts ?? DEFAULT_CONNECT_ATTEMPTS;
         this.connectTimeoutMs = options.connect_timeout_ms ?? DEFAULT_CONNECT_TIMEOUT_MS;
         this.scanTimeoutMs = options.scan_timeout_ms ?? DEFAULT_SCAN_TIMEOUT_MS;
+        this.wakeProbeTimeoutMs = options.wake_probe_timeout_ms ?? DEFAULT_WAKE_PROBE_TIMEOUT_MS;
+        if (this.wakeProbeTimeoutMs <= 0) {
+            throw new RangeError("wake_probe_timeout_ms must be greater than 0.");
+        }
         this.ble_name = get_name(vin);
     }
 
@@ -886,17 +905,31 @@ export default class VehicleBluetooth extends BroadcastListeners {
                 await this.dropLinkOnFailure("infotainment handshake failed", error);
                 throw error;
             }
-            if ((await this.sleepStatus()) !== VehicleSleepStatusE.VEHICLE_SLEEP_STATUS_ASLEEP) {
+            const sleepStatus = await this.sleepStatus();
+            if (sleepStatus === VehicleSleepStatusE.VEHICLE_SLEEP_STATUS_ASLEEP) {
+                // A sleeping car's silent infotainment is expected, and that read
+                // proved the link, so it stays. Nothing was sent, so waking is safe.
+                if (!wake) {
+                    throw error;
+                }
+                await this.wakeForCommand(error);
+                wake = false;
+            } else if (sleepStatus === VehicleSleepStatusE.VEHICLE_SLEEP_STATUS_AWAKE) {
+                // VCSEC reports awake seconds before infotainment finishes booting.
+                // Retrying wakes nothing, so `wake` has no say here.
+                try {
+                    await this.awaitInfotainment(this.infotainmentBootTimeoutMs, false);
+                } catch (bootError) {
+                    if (!(bootError instanceof BluetoothTimeout)) {
+                        throw bootError;
+                    }
+                    await this.dropLink("infotainment handshake failed");
+                    throw error;
+                }
+            } else {
                 await this.dropLink("infotainment handshake failed");
                 throw error;
             }
-            // A sleeping car's silent infotainment is expected, and that read
-            // proved the link, so it stays. Nothing was sent, so waking is safe.
-            if (!wake) {
-                throw error;
-            }
-            await this.wakeForCommand(error);
-            wake = false;
         }
 
         const name = infotainment_command_name(action);
@@ -1000,14 +1033,78 @@ export default class VehicleBluetooth extends BroadcastListeners {
      * Wake the vehicle. Takes `VehicleSpecific`'s options, but resolves to a
      * `CommandResponse`, not the REST `VehicleResponse`.
      *
-     * This sends the RKE wake to the vehicle security computer, which acks well
-     * before infotainment can answer.
+     * Without `wait`, this sends the RKE wake to the vehicle security computer,
+     * which acks well before infotainment can answer, so an infotainment command
+     * sent straight after can still time out.
+     *
+     * With `wait`, it blocks until infotainment completes a fresh handshake, the
+     * only proof it can take commands: VCSEC reports awake seconds before that.
+     * The wake is idempotent, so it is resent every 3 s until then.
+     * @param options.timeoutMs Deadline for `wait`, in milliseconds. Defaults to 30000.
+     * @throws BluetoothTimeout at the deadline, with the link dropped.
      */
-    override async wake_up({ wait = false }: WakeUpOptions = {}): Promise<any> {
-        if (wait) {
-            throw new BluetoothTimeout("wake_up with wait is not available yet.");
+    override async wake_up({ wait = false, timeoutMs = DEFAULT_WAKE_TIMEOUT_MS }: WakeUpOptions = {}): Promise<any> {
+        if (!wait) {
+            return this.sendVehicleSecurity(UnsignedMessage.create({ RKEAction: RKEActionE.RKE_ACTION_WAKE_VEHICLE }));
         }
-        return this.sendVehicleSecurity(UnsignedMessage.create({ RKEAction: RKEActionE.RKE_ACTION_WAKE_VEHICLE }));
+        try {
+            await this.awaitInfotainment(timeoutMs, true);
+        } catch (error) {
+            await this.dropLinkOnFailure("wake failed", error);
+            throw error;
+        }
+        return success();
+    }
+
+    /**
+     * Probe infotainment until it answers. With `wake`, the RKE wake is sent
+     * first and resent every `wakeResendIntervalMs`.
+     * @throws BluetoothTimeout at the deadline.
+     */
+    protected async awaitInfotainment(timeoutMs: number, wake: boolean): Promise<void> {
+        const deadline = performance.now() + timeoutMs;
+        let nextWake = performance.now();
+        for (;;) {
+            if (wake && performance.now() >= nextWake) {
+                try {
+                    await this.wake_up();
+                } catch (error) {
+                    // An unconfirmed wake may still have landed. The probe decides.
+                    if (!(error instanceof BluetoothTimeout)) {
+                        throw error;
+                    }
+                }
+                nextWake = performance.now() + this.wakeResendIntervalMs;
+            }
+            const remaining = deadline - performance.now();
+            if (remaining <= 0) {
+                throw new BluetoothTimeout();
+            }
+            try {
+                await this.probeInfotainment(Math.min(this.wakeProbeTimeoutMs, remaining));
+                return;
+            } catch (error) {
+                // A reply to the probe before this one fails this probe's challenge.
+                // It is discarded, never trusted, and the next probe asks again.
+                if (!(error instanceof BluetoothTimeout || error instanceof SessionInfoAuthenticationFault)) {
+                    throw error;
+                }
+            }
+        }
+    }
+
+    /**
+     * Handshake with infotainment, always with a fresh request: only a live reply
+     * proves it is awake, so a cached session counts for nothing.
+     */
+    private async probeInfotainment(timeoutMs: number): Promise<void> {
+        if (this.publicKey.length === 0) {
+            throw new SigningDisabled();
+        }
+        await this._send(this.sessionInfoRequest(INFOTAINMENT), "session_info", { timeoutMs });
+        if (!this.sessionFor(INFOTAINMENT).ready) {
+            throw new BluetoothTimeout();
+        }
     }
 }
 

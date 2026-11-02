@@ -64,10 +64,8 @@ export class FakeVehicle {
     private replyFlags = 0;
     /** What a VCSEC status read returns. Unset, it gets the same `commandStatus` OK as any other command. */
     vehicleStatus: VehicleStatus | null = null;
-    /** Every VCSEC command this vehicle authenticated, decrypted. */
-    readonly vcsecCommands: UnsignedMessage[] = [];
-    /** Every Infotainment action this vehicle authenticated, decrypted. */
-    readonly infotainmentActions: Action[] = [];
+    /** Called with each accepted VCSEC command, before the reply is built. */
+    onVcsecCommand: ((command: UnsignedMessage) => void) | null = null;
     /** Counters of every VCSEC command in the order this FakeVehicle actually received them - for concurrency/ordering tests. */
     readonly vcsecCounterArrivals: number[] = [];
     /** Every accepted VCSEC command, decoded on this side of the wire. */
@@ -448,6 +446,7 @@ export class FakeVehicle {
         if (domain === Domain.DOMAIN_VEHICLE_SECURITY) {
             const unsigned = UnsignedMessage.decode(command);
             this.vcsecCommands.push(unsigned);
+            this.onVcsecCommand?.(unsigned);
             const scripted = this.nextVcsecReply;
             this.nextVcsecReply = null;
             payload = FromVCSECMessage.encode(

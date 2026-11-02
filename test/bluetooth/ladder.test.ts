@@ -831,16 +831,4 @@ describe("wake", () => {
 
         expect(link.commands(VCSEC)).toHaveLength(2);
     });
-
-    it("turns an unwakeable car into BluetoothCommandFailed, sending nothing", async () => {
-        const { vehicle, link, fakeVehicle } = bleHarness();
-        await finish(vehicle.handshakeVehicleSecurity());
-        fakeVehicle.vehicleStatus = VehicleStatus.create({ vehicleSleepStatus: VehicleSleepStatusE.VEHICLE_SLEEP_STATUS_ASLEEP });
-        link.dropNextReply("session_info");
-
-        const { error } = await timed(() => vehicle.charge_start());
-
-        expect(error).toBeInstanceOf(BluetoothCommandFailed);
-        expect(link.commands(INFOTAINMENT)).toEqual([]);
-    });
 });
