@@ -16,6 +16,7 @@ export type { AccessToken } from "./teslafleetapi.js";
 export type { RefreshedToken, TeslaFleetOAuthOptions } from "./oauth.js";
 export type { Logger } from "./log.js";
 export { Session } from "./signing/session.js";
+export * as jws from "./signing/jws.js";
 export {
     ec_private_key_from_pem,
     generate_ec_private_key_pem,

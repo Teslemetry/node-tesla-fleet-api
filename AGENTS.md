@@ -20,7 +20,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `Commands.decryptResponse` runs only when a reply has `AESGCMResponseData`: firmware before 2024.38 ignores the flag and replies in plaintext. Response metadata uses the *response's* flags, always present, and the real request hash length; an HMAC request's hash is 33 bytes to Infotainment, truncated to 17 only for VCSEC. A reply that fails to open says nothing about whether the command ran. `aesGcmDecrypt`'s `authTagLength` is what rejects a truncated tag.
 - `_send` must never take `Session.withLock`: `dispatch` holds that non-reentrant lock across `_send` for VCSEC, so it would deadlock every VCSEC command. Nor may `ensureHandshake`, which takes it, run inside it.
 - `Commands`'s `#privateKey`/`#publicKey` are native private class fields, not `protected`/TS-only `private` — the raw signing key must be unreachable off the instance entirely (`JSON.stringify`, structured logs), not merely inaccessible to outside code. Tests observe key derivation through a captured handshake message on the wire, never by reading the field.
-- `test/helpers/fakevehicle.ts` is a from-scratch reimplementation of the vehicle side (independent HMAC verification, not a mock), so round-trip tests check the client against a second implementation of the wire format.
+- `test/helpers/fakevehicle.ts` is a from-scratch reimplementation of the vehicle side (independent HMAC and AES-GCM in both directions, not a mock), so round-trip tests check the client against a second implementation of the wire format.
+- `src/signing/jws.ts` (Tesla.SS256) takes the raw key, so a subclass reaches it only through `Commands.signFleetTelemetryConfig`. Its vectors in `test/fixtures/ss256_vectors.json` are Tesla's Go SDK output, copied from Python; never regenerate them. There is deliberately no low-`s` normalisation.
 
 ## Keys (`src/signing/keys.ts`)
 
@@ -49,6 +50,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 Releases go through Changesets, not hand-cut GitHub Releases: a PR that changes behavior includes a changeset (`pnpm changeset`). Merging to `main` runs `.github/workflows/publish.yml`, whose `validate` job re-runs `reusable-ci.yml` (lint/typecheck/test/publint/pack) on the exact SHA being released and whose `release` job (`needs: validate`) either opens/updates a "Version Packages" PR or, if one was just merged, publishes via `changeset publish`.
 
 - `ci.yml` and `publish.yml`'s `validate` both call `reusable-ci.yml` — keep checks there, not duplicated inline, and keep `needs: validate` so a stale CI run on another SHA can never stand in for the one being published.
+- `reusable-ci.yml`'s `gate` job exists to keep the check name `Build, Lint & Test / Build, Lint & Test`, which the `main` ruleset requires; the Node matrix job would otherwise report one differently named check per version.
 - The `production` environment has no protection rules configured: merging the "Version Packages" PR is the sole approval gate, and `release` publishes immediately after.
 - Publishing uses npm trusted publishing (OIDC, `id-token: write`, no `NPM_TOKEN`). It must be configured per-package on npmjs.com (package Settings → Trusted Publisher, github-actions provider, matching repo + `.github/workflows/publish.yml`).
 - `--provenance` requires `package.json`'s `repository.url` to resolve to `https://github.com/Teslemetry/node-tesla-fleet-api`; sigstore checks it against the Actions run's own repo and fails the publish (`E422`) on a mismatch.

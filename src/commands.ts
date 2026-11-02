@@ -91,6 +91,7 @@ import { ClimateMode, ClimateModes, CommandResponse, Level, Seat, Seats, Trunk }
 import { AutoSeat } from "./const.js";
 import Vehicle from "./vehicle.js";
 import VehicleSpecific from "./vehiclespecific.js";
+import { sign_fleet_telemetry_config } from "./signing/jws.js";
 import { Session, SessionKeys } from "./signing/session.js";
 import { logRequestError, logRequestResult } from "./log.js";
 import { aesGcmDecrypt, aesGcmEncrypt, deriveSharedKey, publicKeyFor, sha256, uint32BE } from "./signing/crypto.js";
@@ -357,6 +358,14 @@ export default abstract class Commands extends VehicleSpecific {
             throw new SigningDisabled();
         }
         return deriveSharedKey(this.#privateKey, vehicleKey);
+    }
+
+    /** A Tesla.SS256 JWS over a Fleet Telemetry config, signed here so the key never leaves this class. */
+    protected signFleetTelemetryConfig(config: Readonly<Record<string, unknown>>): string {
+        if (this.#privateKey === null) {
+            throw new SigningDisabled();
+        }
+        return sign_fleet_telemetry_config(this.#privateKey, config);
     }
 
     /**
