@@ -49,7 +49,7 @@ describe("schedule_max_backup", () => {
     });
 
     it("tolerates a cancel reply with nothing in it", async () => {
-        gateway.reply({ envelope: {} });
+        gateway.reply({ envelope: { teg: {} } });
         await expect(client.schedule_max_backup()).resolves.toBeUndefined();
     });
 
@@ -66,14 +66,14 @@ describe("schedule_max_backup", () => {
     });
 
     it("raises when the schedule reply lacks its response", async () => {
-        gateway.reply({ envelope: {} }, { envelope: {} });
+        gateway.reply({ envelope: { teg: {} } }, { envelope: { teg: {} } });
         await expect(client.schedule_max_backup()).rejects.toBeInstanceOf(PowerwallProtocolError);
     });
 });
 
 describe("cancel_max_backup tolerance", () => {
     it.each([
-        ["an empty reply", { envelope: {} }],
+        ["a reply without the response", { envelope: { teg: {} } }],
         ["a refusal", errorReply(5, "no active event")],
         ["a fault", { fault: MessageFaultE.MESSAGEFAULT_ERROR_BUSY }],
         ["an empty inner message", { noInner: true as const }],
@@ -206,7 +206,7 @@ describe("remove_authorized_client", () => {
     });
 
     it("returns on an empty acknowledgement", async () => {
-        gateway.reply({ envelope: {} });
+        gateway.reply({ envelope: { authorization: {} } });
         await expect(client.remove_authorized_client("AQID")).resolves.toBeUndefined();
     });
 

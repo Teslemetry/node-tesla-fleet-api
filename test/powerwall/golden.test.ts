@@ -74,8 +74,30 @@ describe("golden envelopes", () => {
         ["remove_authorized_client", (pw) => pw.remove_authorized_client(Buffer.from([1, 2, 3]))],
         ["delay_battery_calibration_24", (pw) => pw.delay_battery_calibration(24)],
         ["configure_ocpp", (pw) => pw.configure_ocpp("wss://example.invalid/ocpp")],
+        ["go_off_grid", (pw) => pw.go_off_grid()],
+        ["trigger_islanding", (pw) => pw.trigger_islanding()],
     ])("%s", async (name, call) => {
         await call(client);
         expect(sent()).toEqual(GOLDEN[name]);
+    });
+});
+
+describe("reconnect_grid", () => {
+    // Python's hand encoder writes `force = 0`, and the generated encoder omits
+    // it: Node drops the trailing `10 00` and the two length bytes shrink by 2.
+    it("differs from Python only by the omitted force = false", async () => {
+        await client.reconnect_grid();
+
+        const [golden] = GOLDEN.reconnect_grid;
+        expect(golden.endsWith("2a061a0408011000")).toBe(true);
+        expect(sent()).toEqual([`${golden.slice(0, -"2a061a0408011000".length)}2a041a020801`]);
+    });
+
+    it("decodes to mode 1 and force false, as Python's does", async () => {
+        await client.reconnect_grid();
+
+        const python = MessageEnvelope.decode(Buffer.from(GOLDEN.reconnect_grid[0], "hex"));
+        expect(gateway.posts[0].envelope.teg?.setIslandModeRequest).toEqual({ mode: 1, force: false });
+        expect(python.teg?.setIslandModeRequest).toEqual({ mode: 1, force: false });
     });
 });

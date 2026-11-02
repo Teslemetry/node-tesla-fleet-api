@@ -22,6 +22,9 @@ import {
     controllableDeviceProgramSettings_ContactorStateToJSON,
     type ControllableDeviceProgram as ProtoProgram,
     type ControllableDeviceProgramScheduleBoundary,
+    TEGIslandMode,
+    TEGSetIslandModeResult,
+    tEGSetIslandModeResultToJSON,
 } from "@teslemetry/tesla-protocol/energy_device/teg_api";
 import { DeliveryChannel, MessageEnvelope } from "@teslemetry/tesla-protocol/energy_device/transport";
 import {
@@ -31,6 +34,7 @@ import {
     PowerwallProtocolError,
 } from "./exceptions.js";
 import { validate_dispatch_battery_power } from "../energyspecific.js";
+import type { Logger } from "../log.js";
 import type {
     AuthorizedClientRecord,
     AuthorizedClientsPayload,
@@ -73,6 +77,14 @@ const MIN_BACKUP_DURATION_SECONDS = 60;
 const MAX_PRIORITY = "18446744073709551615";
 const MAX_UINT32 = 2 ** 32 - 1;
 
+/** The `TEGSetIslandModeResult` values that mean the gateway refused. */
+const ISLAND_MODE_REJECTIONS: ReadonlySet<number> = new Set([
+    TEGSetIslandModeResult.TEG_SET_ISLAND_MODE_RESULT_REJECTED_NOT_READY_FOR_ISLANDING,
+    TEGSetIslandModeResult.TEG_SET_ISLAND_MODE_RESULT_REJECTED_LOAD_DROP_EXPECTED,
+    TEGSetIslandModeResult.TEG_SET_ISLAND_MODE_RESULT_REJECTED_LOW_ENERGY,
+    TEGSetIslandModeResult.TEG_SET_ISLAND_MODE_RESULT_REJECTED_EXCESSIVE_SOLAR,
+]);
+
 /** `google.rpc.Code.UNIMPLEMENTED`, for a command the firmware does not implement. */
 const STATUS_UNIMPLEMENTED = 12;
 
@@ -89,7 +101,9 @@ type MissingReply =
     /** Raise. */
     | "raise"
     /** Accept any reply, and a fault or protocol failure from the POST: the reply is empty and some firmware omits it. */
-    | "tolerate";
+    | "tolerate"
+    /** Accept a reply that lacks the response or does not decode, but still raise on `common.error_response`. */
+    | "unverified";
 
 function isRecord(value: unknown): value is Record<string, any> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -281,6 +295,8 @@ export interface PowerwallClientOptions {
     rsaPrivateKeyPem: string | Buffer;
     /** Total time allowed per request. */
     timeoutMs?: number;
+    /** Receives debug lines. */
+    logger?: Logger;
 }
 
 /**
@@ -294,6 +310,7 @@ export interface PowerwallClientOptions {
 export class PowerwallClient {
     // Native private field: the transport holds the password, token and signing key.
     readonly #transport: V1rTransport;
+    readonly #logger?: Logger;
     #din: string | null = null;
     #connecting: Promise<string> | null = null;
     // What `curtail` replaced. Held only here, so it does not survive a restart.
@@ -310,6 +327,7 @@ export class PowerwallClient {
             timeoutMs: options.timeoutMs,
             legacyGateway: _legacyGateway,
         });
+        this.#logger = options.logger;
     }
 
     /**
@@ -856,6 +874,73 @@ export class PowerwallClient {
         );
     }
 
+    /**
+     * Ask the gateway to go off grid or reconnect.
+     *
+     * A success-shaped reply does not prove the contactor moved: PowerSync reports
+     * firmware that acknowledges without acting. Read `islanding.contactorClosed`
+     * from `get_status` afterwards before relying on it.
+     * @param options.off_grid Mode 6 (off grid) when true, mode 1 (on grid) when false.
+     * @param options.force Required by some Powerwalls.
+     * @param options.mode_override Send this mode instead.
+     * @throws PowerwallCommandError on a `REJECTED_*` result, with `code` the enum value and `status_message` its name, or on `common.error_response`.
+     */
+    async set_island_mode(options: { off_grid: boolean; force?: boolean; mode_override?: number | null }): Promise<void> {
+        const { off_grid, force = false, mode_override } = options;
+        const din = await this.connect();
+        const mode: TEGIslandMode =
+            mode_override ??
+            (off_grid
+                ? TEGIslandMode.TEG_ISLAND_MODE_INTENTIONAL_WITH_RECONNECT_FAILSAFE
+                : TEGIslandMode.TEG_ISLAND_MODE_AUTO_ACTIVE);
+        const response = await this._send_command_request(
+            din,
+            { teg: { setIslandModeRequest: { mode, force } } },
+            (reply) => reply.teg?.setIslandModeResponse,
+            "set_island_mode_request",
+            "unverified",
+        );
+
+        const result = response.teg?.setIslandModeResponse?.result;
+        this.#logger?.debug(`set_island_mode: mode=${mode} force=${force} result=${result ?? "absent"}`);
+        if (result !== undefined && ISLAND_MODE_REJECTIONS.has(result)) {
+            throw new PowerwallCommandError("set_island_mode_request", result, tEGSetIslandModeResultToJSON(result));
+        }
+    }
+
+    /**
+     * Disconnect from the grid. See `set_island_mode`, including its warning: read
+     * `islanding.contactorClosed` afterwards.
+     * @param options.force Defaults to true.
+     */
+    async go_off_grid(options: { force?: boolean; mode_override?: number | null } = {}): Promise<void> {
+        const { force = true, mode_override } = options;
+        await this.set_island_mode({ off_grid: true, force, mode_override });
+    }
+
+    /** Reconnect to the grid. See `set_island_mode`, including its warning: read `islanding.contactorClosed` afterwards. */
+    async reconnect_grid(): Promise<void> {
+        await this.set_island_mode({ off_grid: false, force: false });
+    }
+
+    /**
+     * The explicit black-start command, which drives the full islanding
+     * transition: grid-frequency ramp-down, contactor open, inverter restart.
+     * `set_island_mode` only updates the desired mode. No hardware result is
+     * recorded for this command, so check the contactor afterwards.
+     * @throws PowerwallCommandError on `common.error_response`.
+     */
+    async trigger_islanding(): Promise<void> {
+        const din = await this.connect();
+        await this._send_command_request(
+            din,
+            { teg: { triggerIslandingBlackStartRequest: {} } },
+            (reply) => reply.teg?.triggerIslandingBlackStartResponse,
+            "trigger_islanding_black_start_request",
+            "unverified",
+        );
+    }
+
     private async _cancel_manual_backup(din: string): Promise<void> {
         await this._send_command_request(
             din,
@@ -949,7 +1034,16 @@ export class PowerwallClient {
             throw error;
         }
 
-        const response = decodeEnvelope(inner, request);
+        let response: MessageEnvelope;
+        try {
+            response = decodeEnvelope(inner, request);
+        } catch (error) {
+            if (missing === "unverified") {
+                this.#logger?.debug(`${request}: reply does not decode (${inner.length} bytes)`);
+                return MessageEnvelope.create();
+            }
+            throw error;
+        }
         if (answered(response) !== undefined || missing === "tolerate") {
             return response;
         }
@@ -957,6 +1051,10 @@ export class PowerwallClient {
         if (status) {
             const ErrorClass = status.code === STATUS_UNIMPLEMENTED ? PowerwallNotSupportedError : PowerwallCommandError;
             throw new ErrorClass(request, status.code, status.message);
+        }
+        if (missing === "unverified") {
+            this.#logger?.debug(`${request}: reply has no response (${inner.length} bytes)`);
+            return response;
         }
         throw new PowerwallProtocolError(`${request} reply missing its response`);
     }
