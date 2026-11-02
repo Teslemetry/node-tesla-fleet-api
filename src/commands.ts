@@ -392,11 +392,12 @@ export default abstract class Commands extends VehicleSpecific {
      * it just sent - before returning it.
      *
      * A `SessionInfo` is untrusted wire data until its `session_info_tag` is
-     * verified: the tag is an HMAC over the exact bytes received, keyed by a
-     * key derived from the *candidate* vehicle public key carried inside that
-     * same SessionInfo, and bound to this request's `uuid` as a challenge (so
-     * a captured older reply can't be replayed against a newer request). Only
-     * once that tag checks out do we act on anything the message claims -
+     * verified: the tag is an HMAC over the exact bytes received, bound to this
+     * request's `uuid` as a challenge (so a captured older reply can't be
+     * replayed against a newer request). It is keyed by the session's stored
+     * key. Only at first contact, when there is none, is that key derived from
+     * the public key in the reply, which is trust on first use; see `Session`.
+     * Only once that tag checks out do we act on anything the message claims -
      * including its own whitelist-status field - and even then `Session.commit`
      * still refuses a clock time that regresses within the same epoch.
      *
@@ -439,8 +440,11 @@ export default abstract class Commands extends VehicleSpecific {
 
             let keys: SessionKeys;
             try {
-                keys = session.keysFor(Buffer.from(info.publicKey));
+                keys = session.trustedKeys(Buffer.from(info.publicKey));
             } catch (cause) {
+                if (cause instanceof SessionInfoAuthenticationFault) {
+                    throw cause;
+                }
                 throw new SessionInfoAuthenticationFault("Session info reply has an invalid public key.", null, { cause });
             }
 
