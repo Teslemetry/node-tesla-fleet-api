@@ -99,9 +99,9 @@ const NOT_PORTED: ReadonlyArray<[RegExp, string]> = [
 
 /** Missing, and not in document 01 section 12. Each needs a decision. */
 const NAMED_GAPS: ReadonlyArray<[RegExp, string]> = [
-    [/^const\.py:LOGGER$/, "not in doc 01 s12: Node has a per-client `logger` option, no module logger"],
-    [/^tesla\/vehicle\/commands\.py:Hvac/, "not in doc 01 s12: Python's lookups of proto values, internal here"],
-    [/^tesla\/vehicle\/bluetooth\.py:ReassemblingBuffer\.discard_packet$/, "not in doc 01 s12: private in Node, driven only by `receive`"],
+    [/^const\.py:LOGGER$/, "not ported: Node has a per-client `logger` option, no module logger"],
+    [/^tesla\/vehicle\/commands\.py:Hvac/, "left internal: only commands.py uses it, no package __init__ or doc exposes it, and ./const must import nothing. src/commands.ts holds the same table as SeatCoolerLevels, SeatCoolerPositions or ClimateKeeperActions"],
+    [/^tesla\/vehicle\/bluetooth\.py:ReassemblingBuffer\.discard_packet$/, "no behaviour gap: the same logic is the private discardPacket, and only `receive` calls it, in Python too"],
 ];
 
 /** Why a row is partial on purpose. Appended to what the check found. */
@@ -109,7 +109,7 @@ const DELIBERATE: ReadonlyArray<[RegExp, string]> = [
     [/:Seat$/, "A frozen object, and the type `Seat` is a member name. It adds the corrected REAR_LEFT_BACK and the THIRD_ROW aliases"],
     [/:(is_key_rejected|is_failover_safe)$/, "Same position, different name, which a positional caller cannot see"],
     [/\.(publish_result|publish_update)$/, "`observed_at` is an options field, so the time is named"],
-    [/^tariff\.py:(TariffRate|TariffResolution)$/, "camelCase fields, as `@teslemetry/api` consumes them"],
+    [/^tariff\.py:(TariffRate|TariffResolution)$/, "camelCase fields, as first published"],
     [/^tariff\.py:get_tariff_periods$/, "`opts.timeZone` is required, because a JS Date has no zone"],
     [/^(tariff\.py:unwrap_tariff_v2|util\.py:firmware_)/, "camelCase, as first published"],
     [/:(EnergySite|EnergySites|Tesla|VehicleFleet|Vehicle|Vehicles)$/, "doc 01 s3: Node's class names stay"],
@@ -553,10 +553,13 @@ function compareRoutes(py: Route[], node: Route[]): { diff: string | null; check
     const extra = [...b].filter((x) => !a.has(x));
     if (missing.length || extra.length) return { diff: `route: python ${[...a].join(" | ")} vs node ${[...b].join(" | ")}`, checked: true };
     for (const r of py) {
-        const n = node.find((x) => shape(x) === shape(r));
+        // A method can make the same call twice with different keys, so any match will do.
+        const same = node.filter((x) => shape(x) === shape(r));
         for (const part of ["json", "params"] as const) {
-            const [pk, nk] = [r[part], n?.[part]];
-            if (pk && nk && pk.join() !== nk.join()) return { diff: `${part} keys: python {${pk.join(", ")}} vs node {${nk.join(", ")}}`, checked: true };
+            const pk = r[part];
+            if (pk && !same.some((n) => n[part] === null || n[part]?.join() === pk.join())) {
+                return { diff: `${part} keys: python {${pk.join(", ")}} vs node {${same.map((n) => n[part]?.join(", ")).join(" | ")}}`, checked: true };
+            }
         }
     }
     return { diff: null, checked: true };
