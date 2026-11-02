@@ -66,6 +66,14 @@ describe("golden envelopes", () => {
         ["list_authorized_clients", (pw) => pw.list_authorized_clients()],
         ["get_battery_calibration_delay_status", (pw) => pw.get_battery_calibration_delay_status()],
         ["get_controllable_device_programs", (pw) => pw.get_controllable_device_programs()],
+        ["dispatch_500W_30s", (pw) => pw.dispatch_battery_power(500, 30)],
+        ["dispatch_-500W_30s", (pw) => pw.dispatch_battery_power(-500, 30)],
+        ["resume", (pw) => pw.resume_battery_operation()],
+        ["schedule_max_backup_7200", (pw) => pw.schedule_max_backup()],
+        ["cancel_max_backup", (pw) => pw.cancel_max_backup()],
+        ["remove_authorized_client", (pw) => pw.remove_authorized_client(Buffer.from([1, 2, 3]))],
+        ["delay_battery_calibration_24", (pw) => pw.delay_battery_calibration(24)],
+        ["configure_ocpp", (pw) => pw.configure_ocpp("wss://example.invalid/ocpp")],
     ])("%s", async (name, call) => {
         await call(client);
         expect(sent()).toEqual(GOLDEN[name]);

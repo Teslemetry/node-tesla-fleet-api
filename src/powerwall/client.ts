@@ -30,6 +30,7 @@ import {
     PowerwallNotSupportedError,
     PowerwallProtocolError,
 } from "./exceptions.js";
+import { validate_dispatch_battery_power } from "../energyspecific.js";
 import type {
     AuthorizedClientRecord,
     AuthorizedClientsPayload,
@@ -64,6 +65,13 @@ export const DEFAULT_GATEWAY_HOST = "192.168.91.1";
 export const OPERATION_MODES = ["self_consumption", "autonomous", "backup"] as const;
 /** Values of `site_info.customer_preferred_export_rule`. Each sticks and reads back verbatim on a Powerwall 3. */
 export const GRID_EXPORT_RULES = ["battery_ok", "pv_only", "never"] as const;
+
+/** The default length of a manual backup event, and the shortest the gateway takes. */
+const DEFAULT_BACKUP_DURATION_SECONDS = 7200;
+const MIN_BACKUP_DURATION_SECONDS = 60;
+/** `2^64 - 1`, which pre-empts any other event. A string because it does not fit a JS number. */
+const MAX_PRIORITY = "18446744073709551615";
+const MAX_UINT32 = 2 ** 32 - 1;
 
 /** `google.rpc.Code.UNIMPLEMENTED`, for a command the firmware does not implement. */
 const STATUS_UNIMPLEMENTED = 12;
@@ -164,6 +172,15 @@ function requireNonNegative(value: number, name: string): void {
     }
     if (!(value >= 0)) {
         throw new RangeError(`${name} must be non-negative`);
+    }
+}
+
+function requireIntegerInRange(value: number, name: string, minimum: number, maximum: number): void {
+    if (typeof value !== "number") {
+        throw new TypeError(`${name} must be a number`);
+    }
+    if (!Number.isInteger(value) || value < minimum || value > maximum) {
+        throw new RangeError(`${name} must be an integer from ${minimum} to ${maximum}`);
     }
 }
 
@@ -451,7 +468,7 @@ export class PowerwallClient {
                       start_time,
                       duration_seconds,
                       end_time,
-                      active: seconds(new Date()) < end_time,
+                      active: Math.floor(Date.now() / 1000) < end_time,
                       priority: manual.schedulingInfo?.priority ?? "0",
                   }
                 : null,
@@ -703,6 +720,150 @@ export class PowerwallClient {
             "site_info.backup_reserve_percent": this.#savedReservePercent ?? OFFSET,
         });
         this.#curtailmentActive = false;
+    }
+
+    /**
+     * Schedule a manual "max backup" event that starts now, at maximum priority.
+     * The gateway requires any earlier event to be cancelled first, even an
+     * expired one, so this sends that cancel before scheduling.
+     * @param duration_seconds At least 60.
+     * @throws RangeError on a shorter or fractional duration.
+     */
+    async schedule_max_backup(duration_seconds: number = DEFAULT_BACKUP_DURATION_SECONDS): Promise<void> {
+        requireIntegerInRange(duration_seconds, "duration_seconds", MIN_BACKUP_DURATION_SECONDS, MAX_UINT32);
+        const din = await this.connect();
+        await this._cancel_manual_backup(din);
+        await this._send_command_request(
+            din,
+            {
+                teg: {
+                    scheduleManualBackupEventRequest: {
+                        schedulingInfo: {
+                            startTime: new Date(Math.floor(Date.now() / 1000) * 1000),
+                            durationSeconds: duration_seconds,
+                            priority: MAX_PRIORITY,
+                        },
+                    },
+                },
+            },
+            (reply) => reply.teg?.scheduleManualBackupEventResponse,
+            "schedule_manual_backup_event_request",
+        );
+    }
+
+    /** Cancel the active manual backup event, if any. */
+    async cancel_max_backup(): Promise<void> {
+        await this._cancel_manual_backup(await this.connect());
+    }
+
+    /**
+     * Request a timed battery power setpoint.
+     *
+     * The gateway holds it for the duration and then returns to its mode by
+     * itself. A new call replaces the active setpoint, power and timer both. The
+     * reply only acknowledges the request, so read `get_meters_aggregates` to see
+     * what the battery does. Keep durations short and renew them: a third party
+     * reports a dispatch discharging below reserve and exporting regardless of the
+     * export setting. Verified on Powerwall 3 firmware 26.26.4.
+     * @param power_watts Positive discharges, negative charges.
+     * @param duration_seconds Whole seconds from 1 to 86400.
+     * @throws PowerwallCommandError with code 11 above the site limit. The gateway refuses, and does not clamp.
+     * @throws PowerwallNotSupportedError on firmware without this command.
+     */
+    async dispatch_battery_power(power_watts: number, duration_seconds: number): Promise<void> {
+        validate_dispatch_battery_power(power_watts, duration_seconds);
+        const din = await this.connect();
+        await this._send_command_request(
+            din,
+            {
+                teg: {
+                    dispatchBatteryPowerRequest: {
+                        realPower: { powerWatts: power_watts, durationSeconds: duration_seconds },
+                    },
+                },
+            },
+            (reply) => reply.teg?.dispatchBatteryPowerResponse,
+            "dispatch_battery_power_request",
+        );
+    }
+
+    /** Release a `dispatch_battery_power` setpoint. This does not cancel a manual backup event. */
+    async resume_battery_operation(): Promise<void> {
+        const din = await this.connect();
+        await this._send_command_request(
+            din,
+            { teg: { dispatchBatteryPowerRequest: { resumeDeviceMode: {} } } },
+            (reply) => reply.teg?.dispatchBatteryPowerResponse,
+            "dispatch_battery_power_request",
+        );
+    }
+
+    /**
+     * Postpone the next battery calibration. Powerwall 3 firmware 26.26.4
+     * acknowledges this, but its effect is unverified: that firmware cannot report
+     * the delay status.
+     * @param delay_hours An integer from 1 to `2^32 - 1`.
+     */
+    async delay_battery_calibration(delay_hours: number): Promise<void> {
+        requireIntegerInRange(delay_hours, "delay_hours", 1, MAX_UINT32);
+        const din = await this.connect();
+        await this._send_command_request(
+            din,
+            { teg: { delayBatteryCalibrationRequest: { delayHours: delay_hours } } },
+            (reply) => reply.teg?.delayBatteryCalibrationResponse,
+            "delay_battery_calibration_request",
+        );
+    }
+
+    /**
+     * Point the gateway at an OCPP central system.
+     * @throws PowerwallNotSupportedError on firmware without this command. Powerwall 3 firmware 26.26.4 is one.
+     */
+    async configure_ocpp(csms_base_url: string): Promise<void> {
+        requireNonEmptyString(csms_base_url, "csms_base_url");
+        const din = await this.connect();
+        await this._send_command_request(
+            din,
+            { teg: { configureOcppRequest: { csmsBaseUrl: csms_base_url } } },
+            (reply) => reply.teg?.configureOcppResponse,
+            "configure_ocpp_request",
+        );
+    }
+
+    /**
+     * Revoke a paired key. This needs no presence proof, and any paired key can
+     * remove any other. Removing the signing key locks this client out, and
+     * pairing it again needs the usual registration and breaker toggle. A success
+     * carries no fields, so call `list_authorized_clients` to confirm.
+     * @param public_key Raw DER bytes, or base64 as `list_authorized_clients` reports it.
+     * @throws RangeError on an empty key.
+     */
+    async remove_authorized_client(public_key: Uint8Array | string): Promise<void> {
+        const publicKey = typeof public_key === "string" ? Buffer.from(public_key, "base64") : public_key;
+        if (!(publicKey instanceof Uint8Array)) {
+            throw new TypeError("public_key must be bytes or a base64 string");
+        }
+        if (publicKey.length === 0) {
+            throw new RangeError("public_key must not be empty");
+        }
+        const din = await this.connect();
+        await this._send_command_request(
+            din,
+            { authorization: { removeAuthorizedClientRequest: { publicKey } } },
+            (reply) => reply.authorization?.removeAuthorizedClientResponse,
+            "remove_authorized_client_request",
+            "tolerate",
+        );
+    }
+
+    private async _cancel_manual_backup(din: string): Promise<void> {
+        await this._send_command_request(
+            din,
+            { teg: { cancelManualBackupEventRequest: {} } },
+            (reply) => reply.teg?.cancelManualBackupEventResponse,
+            "cancel_manual_backup_event_request",
+            "tolerate",
+        );
     }
 
     private async _query_graphql(query: string, code: Uint8Array, variables: string): Promise<string> {
