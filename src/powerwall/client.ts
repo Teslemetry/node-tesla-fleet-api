@@ -23,8 +23,6 @@ import {
     type ControllableDeviceProgram as ProtoProgram,
     type ControllableDeviceProgramScheduleBoundary,
     TEGIslandMode,
-    TEGSetIslandModeResult,
-    tEGSetIslandModeResultToJSON,
 } from "@teslemetry/tesla-protocol/energy_device/teg_api";
 import { DeliveryChannel, MessageEnvelope } from "@teslemetry/tesla-protocol/energy_device/transport";
 import {
@@ -32,6 +30,7 @@ import {
     PowerwallNotSupportedError,
     PowerwallProtocolError,
 } from "./exceptions.js";
+import { island_mode_rejection } from "../energyisland.js";
 import { validate_dispatch_battery_power } from "../energyspecific.js";
 import type { Logger } from "../log.js";
 import type {
@@ -75,14 +74,6 @@ const MIN_BACKUP_DURATION_SECONDS = 60;
 /** `2^64 - 1`, which pre-empts any other event. A string because it does not fit a JS number. */
 const MAX_PRIORITY = "18446744073709551615";
 const MAX_UINT32 = 2 ** 32 - 1;
-
-/** The `TEGSetIslandModeResult` values that mean the gateway refused. */
-const ISLAND_MODE_REJECTIONS: ReadonlySet<number> = new Set([
-    TEGSetIslandModeResult.TEG_SET_ISLAND_MODE_RESULT_REJECTED_NOT_READY_FOR_ISLANDING,
-    TEGSetIslandModeResult.TEG_SET_ISLAND_MODE_RESULT_REJECTED_LOAD_DROP_EXPECTED,
-    TEGSetIslandModeResult.TEG_SET_ISLAND_MODE_RESULT_REJECTED_LOW_ENERGY,
-    TEGSetIslandModeResult.TEG_SET_ISLAND_MODE_RESULT_REJECTED_EXCESSIVE_SOLAR,
-]);
 
 /** `google.rpc.Code.UNIMPLEMENTED`, for a command the firmware does not implement. */
 const STATUS_UNIMPLEMENTED = 12;
@@ -912,8 +903,9 @@ export class PowerwallClient {
 
         const result = response.teg?.setIslandModeResponse?.result;
         this.#logger?.debug(`set_island_mode: mode=${mode} force=${force} result=${result ?? "absent"}`);
-        if (result !== undefined && ISLAND_MODE_REJECTIONS.has(result)) {
-            throw new PowerwallCommandError("set_island_mode_request", result, tEGSetIslandModeResultToJSON(result));
+        const rejection = island_mode_rejection(result);
+        if (rejection) {
+            throw new PowerwallCommandError("set_island_mode_request", rejection.code, rejection.name);
         }
     }
 

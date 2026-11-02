@@ -8,6 +8,7 @@ import {
     TeslaEnergyPeriod,
 } from "./const.js";
 import Energy from "./energy.js";
+import { island_mode_rejection } from "./energyisland.js";
 import { DeviceUnexpectedResponse, InvalidCommand, SignedCommandRequired } from "./exceptions.js";
 import { EnergyDeviceSigner } from "./signing/energy.js";
 import { LiveStatusResponse } from "./types/live_status.js";
@@ -54,6 +55,24 @@ export function validate_dispatch_battery_power(power_watts: number, duration_se
 /** `google.rpc.Code` UNIMPLEMENTED: the gateway firmware has no handler. */
 const UNIMPLEMENTED = 12;
 
+/** The `MessageEnvelope` in a `device_command` reply, or `null` for a reply without decodable envelope bytes. */
+function replyEnvelope(result: unknown): MessageEnvelope | null {
+    const response = (result as { response?: unknown } | null)?.response;
+    if (typeof response !== "object" || response === null || Array.isArray(response)) {
+        return null;
+    }
+    const encoded = (response as { message_envelope_as_bytes?: unknown }).message_envelope_as_bytes;
+    // `Buffer.from` skips what it cannot read, so strict base64 is checked first.
+    if (typeof encoded !== "string" || encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) {
+        return null;
+    }
+    try {
+        return MessageEnvelope.decode(Buffer.from(encoded, "base64"));
+    } catch {
+        return null;
+    }
+}
+
 /**
  * Raise if a `device_command` reply holds `common.error_response`.
  *
@@ -64,22 +83,7 @@ const UNIMPLEMENTED = 12;
  * is left alone.
  */
 function _raise_on_error_response(result: unknown): void {
-    const response = (result as { response?: unknown } | null)?.response;
-    if (typeof response !== "object" || response === null || Array.isArray(response)) {
-        return;
-    }
-    const encoded = (response as { message_envelope_as_bytes?: unknown }).message_envelope_as_bytes;
-    // `Buffer.from` skips what it cannot read, so strict base64 is checked first.
-    if (typeof encoded !== "string" || encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) {
-        return;
-    }
-    let envelope: MessageEnvelope;
-    try {
-        envelope = MessageEnvelope.decode(Buffer.from(encoded, "base64"));
-    } catch {
-        return;
-    }
-    const error = envelope.common?.errorResponse;
+    const error = replyEnvelope(result)?.common?.errorResponse;
     if (error === undefined) {
         return;
     }
@@ -88,6 +92,21 @@ function _raise_on_error_response(result: unknown): void {
         throw new InvalidCommand(data);
     }
     throw new DeviceUnexpectedResponse(data);
+}
+
+/**
+ * Raise if a `set_island_mode` reply reports a `REJECTED_*` result, on the same
+ * codes as the LAN client. A signed reply carries it in the envelope, and
+ * Teslemetry's route decodes that and answers `{ response: { result } }`.
+ * @throws DeviceUnexpectedResponse with `{code, message}` as `data`, `message` being the result's name.
+ */
+export function raise_on_island_rejection(result: unknown): void {
+    const reported =
+        replyEnvelope(result)?.teg?.setIslandModeResponse?.result ?? (result as { response?: { result?: unknown } } | null)?.response?.result;
+    const rejection = island_mode_rejection(reported);
+    if (rejection) {
+        throw new DeviceUnexpectedResponse({ code: rejection.code, message: rejection.name });
+    }
 }
 
 /** A public key as the gateway reports it: raw DER bytes are base64-encoded, and a string passes as it is. */
@@ -424,9 +443,12 @@ export default class EnergySpecific {
      * @param mode `EnergyIslandMode.OFF_GRID` (6) or `ON_GRID` (1).
      * @param force Sent when given. Some gateways need `true` to open the contactor.
      * @throws SignedCommandRequired without a signing key, before any request.
+     * @throws DeviceUnexpectedResponse when the gateway refuses, as `REJECTED_LOW_ENERGY` and the like.
      */
     async set_island_mode(mode: EnergyIslandMode | number, force?: boolean | null): Promise<Record<string, any>> {
-        return this._signed_command("teg", "set_island_mode_request", force == null ? { mode } : { mode, force });
+        const result = await this._signed_command("teg", "set_island_mode_request", force == null ? { mode } : { mode, force });
+        raise_on_island_rejection(result);
+        return result;
     }
 
     /** Request off-grid mode, with `force`. Signed only: see `set_island_mode`. */

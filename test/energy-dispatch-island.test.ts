@@ -172,6 +172,33 @@ describe("island mode", () => {
         expect(signedEnvelope(on.fetchMock).teg?.setIslandModeRequest).toEqual({ mode: 1, force: false });
     });
 
+    const islandReply = (result: number) => ({
+        response: {
+            message_envelope_as_bytes: Buffer.from(
+                MessageEnvelope.encode(MessageEnvelope.create({ teg: { setIslandModeResponse: { result } } })).finish(),
+            ).toString("base64"),
+        },
+    });
+
+    it.each([
+        [2, "TEG_SET_ISLAND_MODE_RESULT_REJECTED_NOT_READY_FOR_ISLANDING"],
+        [3, "TEG_SET_ISLAND_MODE_RESULT_REJECTED_LOAD_DROP_EXPECTED"],
+        [4, "TEG_SET_ISLAND_MODE_RESULT_REJECTED_LOW_ENERGY"],
+        [5, "TEG_SET_ISLAND_MODE_RESULT_REJECTED_EXCESSIVE_SOLAR"],
+    ])("raises on signed result %i, as LAN does", async (code, message) => {
+        const { site } = makeSite(TEST_KEY, islandReply(code));
+
+        const error = await site.go_off_grid().catch((caught: unknown) => caught);
+
+        expect(error).toBeInstanceOf(DeviceUnexpectedResponse);
+        expect((error as DeviceUnexpectedResponse).data).toEqual({ code, message });
+    });
+
+    it.each([0, 1, 99])("returns on signed result %i, as LAN does", async (result) => {
+        const { site } = makeSite(TEST_KEY, islandReply(result));
+        await expect(site.reconnect_grid()).resolves.toEqual(islandReply(result));
+    });
+
     it("signs an explicit mode and force", async () => {
         const { site, fetchMock } = makeSite(TEST_KEY);
 

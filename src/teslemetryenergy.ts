@@ -11,6 +11,7 @@ import { AuthorizedClient, AuthorizedClients, parse_authorized_clients, parse_ga
 import EnergySpecific, {
     backupSchedulingInfo,
     publicKeyBase64,
+    raise_on_island_rejection,
     validate_dispatch_battery_power,
 } from "./energyspecific.js";
 import { AuthorizedClientPairingTimedOut, AuthorizedClientWaitExpired } from "./exceptions.js";
@@ -104,7 +105,9 @@ export class TeslemetryEnergySite extends EnergySpecific {
         if (this.signing) {
             return super.set_island_mode(mode, force);
         }
-        return this._post_route("set_island_mode", force == null ? { mode } : { mode, force });
+        const result = await this._post_route("set_island_mode", force == null ? { mode } : { mode, force });
+        raise_on_island_rejection(result);
+        return result;
     }
 
     /** Get backup events. Without a signing key, the Teslemetry route signs with Teslemetry's key. */
