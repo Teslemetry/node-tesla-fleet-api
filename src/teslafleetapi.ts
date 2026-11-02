@@ -19,7 +19,7 @@ import {
   ProductsData,
   VehicleProduct,
 } from "./types/products.js";
-import { Logger, logRequestError, logRequestResult } from "./log.js";
+import { Logger, logRequestError, logRequestResult, redactedJson, redactedQuery } from "./log.js";
 import { publicKeyFor } from "./signing/crypto.js";
 import { ecPrivateKeyFile, ecPublicKey, rsaPrivateKeyFile, rsaPublicDerPkcs1 } from "./signing/keys.js";
 
@@ -230,13 +230,13 @@ export default class TeslaFleetApi {
             query.append(key, typeof value === "boolean" ? (value ? "true" : "false") : String(value));
           }
         }
-        this._log(`Parameters: ${query.toString()}`);
+        this._log(`Parameters: ${redactedQuery(query)}`);
       }
       let body: string | null = null;
       if (json) {
         json = Object.fromEntries(Object.entries(json).filter(([_, v]) => v != null));
         body = JSON.stringify(json);
-        this._log(`Body: ${body}`);
+        this._log(`Body: ${redactedJson(json)}`);
         headers["Content-Type"] = "application/json";
       }
 
@@ -250,7 +250,7 @@ export default class TeslaFleetApi {
           body,
           signal: this.timeout != null ? AbortSignal.timeout(this.timeout) : null,
         });
-        this._log(`Status ${resp.status} from ${url}`);
+        this._log(`Status ${resp.status} from ${this.server}/${path}`);
         for (const [header, label] of [
           ["x-txid", "Response TXID"],
           ["RateLimit-Reset", "Rate limit reset"],
@@ -267,7 +267,7 @@ export default class TeslaFleetApi {
         }
         throw new TeslaFleetConnectionError(null, null, { cause: error });
       }
-      this._log(`Response JSON: ${JSON.stringify(data)}`);
+      this._log(`Response JSON: ${redactedJson(data)}`);
     } catch (error) {
       logRequestError((m) => this._log(m), command, this._transport_name, error);
       throw error;

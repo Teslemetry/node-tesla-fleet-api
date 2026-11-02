@@ -338,3 +338,24 @@ export const BluetoothVehicleData = Object.freeze({
     CHILD_PRESENCE_DETECTION_STATE: "GetChildPresenceDetectionState",
 } as const);
 export type BluetoothVehicleData = ValueOf<typeof BluetoothVehicleData>;
+
+/** Telemetry topics in Teslemetry snapshots. */
+export const SnapshotTopic = Object.freeze({
+    STATE: "state",
+    DATA: "data",
+    CONNECTIVITY: "connectivity",
+    ALERTS: "alerts",
+    ERRORS: "errors",
+    VEHICLE_DATA: "vehicle_data",
+} as const);
+export type SnapshotTopic = ValueOf<typeof SnapshotTopic>;
+
+/** Teslemetry telemetry topics that can be awaited. */
+export const WaitTopic = Object.freeze({
+    STATE: "state",
+    DATA: "data",
+    CONNECTIVITY: "connectivity",
+    ALERTS: "alerts",
+    ERRORS: "errors",
+} as const);
+export type WaitTopic = ValueOf<typeof WaitTopic>;

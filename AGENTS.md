@@ -54,6 +54,22 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - Golden envelopes (`test/fixtures/powerwall-envelopes.json`, from the real Python client; never regenerate them here) differ from Node in two expected ways, both asserted in `test/powerwall/golden.test.ts`: `reconnect_grid` omits `force = false`, and a `config.json` write has `JSON.stringify` spacing. `src/powerwall/queries.ts` is pinned by SHA-256: a client cannot sign a new query.
 - An empty `MessageEnvelope` encodes to zero bytes, which `post_v1r` rejects, so a fake reply meaning "no response field" must still carry a category, as `{ envelope: { teg: {} } }` does.
 
+## Cloud clients (`src/teslemetry.ts`, `src/tessie.ts`)
+
+- `TeslemetryVehicle` and `TessieVehicle` extend `VehicleSpecific`, and `vehicles.create(vin)` is their only factory. `TeslemetryVehicles`/`TessieVehicles` must still extend `Vehicle`, so the base factories can't be removed: they are shadowed as `undefined as never` fields, which makes calling one a compile error and leaves it undefined at run time. `test/factories.types.ts` enforces that through `npx tsc -p tsconfig.test.json --noEmit`, which CI runs over `test/*.types.ts`; plain `tsc` and vitest never typecheck `test/`.
+- Python call sites use keyword arguments, so a Python method with many optional arguments becomes an options object here (with `start`/`end`, sent as `from`/`to`); short ones stay positional, in Python's order. Tessie's `tessie_*` commands take `max_attempts` before `wait_for_completion`, the reverse of every other Tessie command.
+- `_request` log lines go through `redactedJson`/`redactedQuery` in `src/log.ts`, matched by key name: `migrate_to_oauth` sends a token in a body, Tessie sends PINs in the query string, and Fleet's `set_pin_to_drive` and `set_valet_mode` call their PIN `password`. A new secret-bearing key belongs in `SECRET_KEYS`. Error lines log a message only for `TeslaFleetError`, whose message is fixed per class; anything else logs its type alone, and error `data` is never logged.
+
+## Router (`src/router/`)
+
+- Port of Python's `router/`; design in Linear document 02. `./router` imports only `exceptions` at run time (`test/router.test.ts` enforces it): a backend that cannot be imported (Bluetooth, Powerwall) marks its own errors with a boolean `failover_safe`. No `Proxy` and no method list: methods come from the backends' prototypes at construction (`methodNames`), and `Routed<B>` types them. The two must agree on what is skipped (`_` names, `then`).
+- `BluetoothUnconfirmedCommand` is checked before `on_result` and before the policy, by `instanceof` **and** the `unconfirmed` field. `instanceof` alone fails across the dual-package hazard; `test/consumers/esm.mjs` proves this with both real copies. Unlike Python, `is_failover_safe` itself also answers false for it.
+- Backend methods must not use overloads (`infer` reads only the last one). `test/router.types.ts` runs in CI through `tsconfig.test.json`; `test/*.test.ts` is not typechecked at all.
+
+## Observation funnel (`src/funnel.ts`)
+
+A funnel, not a selector: do not add source health, availability, grace windows, priority or per-field selection. Unavailability is a value a source reports, never inferred from a dropped link. The module stays synchronous and never originates a request (`test/funnel.test.ts` checks its syntax tree); polling belongs to the consumer. Translations are positive allowlists: an unmapped value emits nothing.
+
 ## Errors (`src/exceptions.ts`)
 
 - A class-for-class port of `python-tesla-fleet-api`'s `exceptions.py`: same names, parents, and `message`/`status`/`key`/`code` (as statics, copied onto instances). Add new errors there under their Python name, with no aliases; don't reintroduce per-module error files. `message` is always the class message; per-instance detail goes in `data`.
