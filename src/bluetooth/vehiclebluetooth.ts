@@ -83,6 +83,7 @@ import {
     BluetoothTransportError,
     BluetoothUnconfirmedCommand,
     InvalidResponse,
+    NotOnWhitelistFault,
     SessionInfoAuthenticationFault,
     SignedCommandResponseReplayed,
     SigningDisabled,
@@ -643,7 +644,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
     }
 
     protected async _send(msg: RoutableMessage, requires: SendRequires, options: SendOptions = {}): Promise<RoutableMessage> {
-        const { expectsData = true, optimistic = false, confirmBroadcast } = options;
+        const { expectsData = true, optimistic = false, confirmBroadcast, onSubmitted } = options;
         const timeoutMs = options.timeoutMs ?? (expectsData ? this.defaultTimeoutMs : this.actuationTimeoutMs);
         const domain = msg.toDestination?.domain;
         const lock = domain === undefined ? undefined : this.domainSendLock[domain];
@@ -681,6 +682,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
                         this.loseLink(link, describe(error));
                         throw new BluetoothTransportError(null, null, { cause: error });
                     }
+                    onSubmitted?.();
                     if (optimistic) {
                         this.loseLink(link, `write failed: ${describe(error)}`);
                         throw new BluetoothTimeout(null, null, { cause: error });
@@ -702,6 +704,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
                     }
                 }
 
+                onSubmitted?.();
                 if (watcher) {
                     watcher.writeComplete = true;
                 }
@@ -969,15 +972,17 @@ export default class VehicleBluetooth extends BroadcastListeners {
         // kept as the cause. Pre-submission failures and explicit car-side
         // rejections stay as they are.
         let cause: unknown;
+        let submitted = false;
         try {
             const result = await super.sendVehicleSecurity(
                 UnsignedMessage.create({ closureMoveRequest: ClosureMoveRequest.create({ chargePort: ClosureMoveTypeE.CLOSURE_MOVE_TYPE_OPEN }) }),
+                { onSubmitted: () => (submitted = true) },
             );
             if (result.response.result === false) {
                 return result;
             }
         } catch (error) {
-            if (!leavesOpeningAmbiguous(error)) {
+            if (!submitted || !leavesOutcomeUnknown(error)) {
                 throw error;
             }
             cause = error;
@@ -1096,13 +1101,14 @@ export default class VehicleBluetooth extends BroadcastListeners {
             return this.sendOptimistic(VCSEC, Buffer.from(UnsignedMessage.encode(command).finish()), name);
         }
         const plan = vcsecVerifyPlan(command);
+        let submitted = false;
         try {
-            return await super.sendVehicleSecurity(command, { confirmBroadcast: plan?.executed });
+            return await super.sendVehicleSecurity(command, { confirmBroadcast: plan?.executed, onSubmitted: () => (submitted = true) });
         } catch (error) {
-            if (!(error instanceof BluetoothTimeout)) {
+            if (!submitted || !leavesOutcomeUnknown(error)) {
                 throw error;
             }
-            const unconfirmed = new BluetoothUnconfirmedCommand(error.data, error.status, { cause: error });
+            const unconfirmed = new BluetoothUnconfirmedCommand(null, null, { cause: error });
             return (await this.verifyTimeout(name, plan, unconfirmed)) ?? this.unconfirmedOutcome(name, unconfirmed);
         }
     }
@@ -1154,13 +1160,14 @@ export default class VehicleBluetooth extends BroadcastListeners {
         if (this.confirmation === "optimistic" && mutating) {
             return this.sendOptimistic(INFOTAINMENT, Buffer.from(Action.encode(action).finish()), name);
         }
+        let submitted = false;
         try {
-            return await super.sendInfotainment(action);
+            return await super.sendInfotainment(action, { onSubmitted: () => (submitted = true) });
         } catch (error) {
-            if (!(error instanceof BluetoothTimeout) || !mutating) {
+            if (!mutating || !submitted || !leavesOutcomeUnknown(error)) {
                 throw error;
             }
-            const unconfirmed = new BluetoothUnconfirmedCommand(error.data, error.status, { cause: error });
+            const unconfirmed = new BluetoothUnconfirmedCommand(null, null, { cause: error });
             const verified = await this.verifyTimeout(name, infotainmentVerifyPlan(action.vehicleAction), unconfirmed);
             if (verified) {
                 return verified;
@@ -1169,9 +1176,9 @@ export default class VehicleBluetooth extends BroadcastListeners {
             // VCSEC, which answers while asleep, whether this could have run at all.
             if (!this.raise_unconfirmed && (await this.vehicleAsleep())) {
                 if (!wake) {
-                    throw new BluetoothCommandFailed(error.data, error.status, { cause: error });
+                    throw new BluetoothCommandFailed(null, null, { cause: error });
                 }
-                await this.wakeForCommand(error);
+                await this.wakeForCommand(unconfirmed);
                 return this.infotainmentLadder(action, mutating, false);
             }
             return this.unconfirmedOutcome(name, unconfirmed);
@@ -1708,15 +1715,21 @@ function isWhitelistReply(reply: RoutableMessage): boolean {
 }
 
 /**
- * Whether a failed opening may still have run. An unauthenticated, replayed or
- * undecodable reply says nothing about that, nor does a backend failure, and a
- * reply too big for the MTU can follow execution. Only a proven pre-submission
- * failure or an explicit car-side rejection, both `TeslaFleetError`s, rule it out.
+ * Whether a failure after a write says nothing about whether the command ran.
+ * Only a car-side refusal rules that out, as the only `TeslaFleetError`s not
+ * listed here are. A silent, unauthenticated, replayed or undecodable reply
+ * proves nothing, a key fault may be a stale reply, a reply too big for the MTU
+ * can follow execution, and a transport failure now belongs to a resend, after
+ * the first frame was written. A router fails over on several of these, which is
+ * right before a write and a double execution after one, so the ladders turn all
+ * of them into an unresolved outcome first.
  */
-function leavesOpeningAmbiguous(error: unknown): boolean {
+function leavesOutcomeUnknown(error: unknown): boolean {
     return (
         !(error instanceof TeslaFleetError) ||
         error instanceof BluetoothTimeout ||
+        error instanceof BluetoothTransportError ||
+        error instanceof NotOnWhitelistFault ||
         error instanceof SessionInfoAuthenticationFault ||
         error instanceof SignedCommandResponseReplayed ||
         error instanceof TeslaFleetMessageFaultResponseSizeExceedsMTU
