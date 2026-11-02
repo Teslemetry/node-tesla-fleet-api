@@ -73,9 +73,12 @@ import {
     SetCopTempAction,
     SetVehicleNameAction,
     MediaUpdateVolume,
+    NavigationGpsDestinationRequest,
     NavigationGpsRequest,
     NavigationRequest,
+    NavigationRouteAction,
     NavigationSuperchargerRequest,
+    NavigationWaypointsRequest,
     DrivingSetSpeedLimitAction,
     DrivingSpeedLimitAction,
     DrivingClearSpeedLimitPinAction,
@@ -921,6 +924,10 @@ export default abstract class Commands extends VehicleSpecific {
         return this.sendInfotainment(Action.create({ vehicleAction: action }), options);
     }
 
+    private moveTonneau(tonneau: ClosureMoveTypeE): Promise<CommandResponse> {
+        return this.sendVehicleSecurity(UnsignedMessage.create({ closureMoveRequest: ClosureMoveRequest.create({ tonneau }) }));
+    }
+
     private resolveSeat(seat_position: Seat | number): number {
         return typeof seat_position === "string" ? Seats[seat_position] : seat_position;
     }
@@ -966,6 +973,11 @@ export default abstract class Commands extends VehicleSpecific {
     /** Stops climate preconditioning. */
     async auto_conditioning_stop(): Promise<CommandResponse> {
         return this.vehicleAction(VehicleAction.create({ hvacAutoAction: HvacAutoAction.create({ powerOn: false }) }));
+    }
+
+    /** Auto secures the vehicle: locks it and closes what it can. */
+    async auto_secure_vehicle(): Promise<CommandResponse> {
+        return this.sendVehicleSecurity(UnsignedMessage.create({ RKEAction: RKEActionE.RKE_ACTION_AUTO_SECURE_VEHICLE }));
     }
 
     /** Cancels the countdown to install the vehicle software update. */
@@ -1022,9 +1034,12 @@ export default abstract class Commands extends VehicleSpecific {
      * @param _pin Accepted for parity with the REST command; the signed action carries no PIN.
      */
     async clear_pin_to_drive_admin(_pin?: string | number): Promise<CommandResponse> {
-        return this.vehicleAction(
-            VehicleAction.create({ vehicleControlResetPinToDriveAdminAction: VehicleControlResetPinToDriveAdminAction.create({}) }),
-        );
+        return this.reset_pin_to_drive_admin();
+    }
+
+    /** Closes the Cybertruck tonneau cover. */
+    async close_tonneau(): Promise<CommandResponse> {
+        return this.moveTonneau(ClosureMoveTypeE.CLOSURE_MOVE_TYPE_CLOSE);
     }
 
     /** Locks the vehicle. */
@@ -1092,6 +1107,26 @@ export default abstract class Commands extends VehicleSpecific {
         return this.vehicleAction(VehicleAction.create({ mediaUpdateVolume: MediaUpdateVolume.create({ volumeDelta: -1 }) }));
     }
 
+    /** Turns the volume up by one. */
+    async media_volume_up(): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ mediaUpdateVolume: MediaUpdateVolume.create({ volumeDelta: 1 }) }));
+    }
+
+    /**
+     * Start navigation to coordinates with a named destination.
+     * @param lat Latitude
+     * @param lon Longitude
+     * @param destination Destination name
+     * @param order Trip order: `0` replaces the current trip (default), `1` prepends it as the next stop, `2` appends it as the last stop
+     */
+    async navigation_gps_destination_request(lat: number, lon: number, destination: string, order: number = 0): Promise<CommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({
+                navigationGpsDestinationRequest: NavigationGpsDestinationRequest.create({ lat, lon, destination, order }),
+            }),
+        );
+    }
+
     /**
      * Start navigation to given coordinates.
      * @param lat Latitude
@@ -1128,6 +1163,24 @@ export default abstract class Commands extends VehicleSpecific {
                 navigationSuperchargerRequest: NavigationSuperchargerRequest.create({ id, remoteNavTripOrder: order ?? 0 }),
             }),
         );
+    }
+
+    /** Triggers vehicle route navigation. */
+    async navigation_route(): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ navigationRouteAction: NavigationRouteAction.create({}) }));
+    }
+
+    /**
+     * Sends a list of waypoints to the vehicle's navigation system.
+     * @param waypoints Comma-separated Google Maps place IDs, e.g. `"refId:ChIJ...,refId:ChIJ..."`
+     */
+    async navigation_waypoints_request(waypoints: string): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ navigationWaypointsRequest: NavigationWaypointsRequest.create({ waypoints }) }));
+    }
+
+    /** Opens the Cybertruck tonneau cover. */
+    async open_tonneau(): Promise<CommandResponse> {
+        return this.moveTonneau(ClosureMoveTypeE.CLOSURE_MOVE_TYPE_OPEN);
     }
 
     /**
@@ -1239,6 +1292,17 @@ export default abstract class Commands extends VehicleSpecific {
      */
     async remote_steering_wheel_heater_request(on: boolean): Promise<CommandResponse> {
         return this.vehicleAction(VehicleAction.create({ hvacSteeringWheelHeaterAction: HvacSteeringWheelHeaterAction.create({ powerOn: on }) }));
+    }
+
+    /**
+     * Resets PIN to Drive for fleet managers and owners. Requires firmware 2023.44+.
+     * The vehicle only accepts this with account credentials, which the cloud
+     * transport has and a raw Bluetooth link does not.
+     */
+    async reset_pin_to_drive_admin(): Promise<CommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({ vehicleControlResetPinToDriveAdminAction: VehicleControlResetPinToDriveAdminAction.create({}) }),
+        );
     }
 
     /** Removes PIN to Drive. Requires the car to be in Pin to Drive mode and not in Valet mode. */
@@ -1492,6 +1556,11 @@ export default abstract class Commands extends VehicleSpecific {
      */
     async speed_limit_set_limit(limit_mph: number): Promise<CommandResponse> {
         return this.vehicleAction(VehicleAction.create({ drivingSetSpeedLimitAction: DrivingSetSpeedLimitAction.create({ limitMph: limit_mph }) }));
+    }
+
+    /** Stops the Cybertruck tonneau cover. */
+    async stop_tonneau(): Promise<CommandResponse> {
+        return this.moveTonneau(ClosureMoveTypeE.CLOSURE_MOVE_TYPE_STOP);
     }
 
     /**

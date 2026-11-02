@@ -57,13 +57,17 @@ export class FakeVehicle {
     private omitRequestUuidEcho = false;
     private emptyKeyHandshakeStatuses: SessionInfoStatus[] = [];
     private nextVcsecReply: FromVCSECMessage | null = null;
-    private nextInfotainmentReply: Response | null = null;
+    private nextInfotainmentReplies: Response[] = [];
     private plaintextReplies = false;
     private encryptHmacReplies = false;
     private corruptNextReply = false;
     private replyFlags = 0;
     /** Counters of every VCSEC command in the order this FakeVehicle actually received them - for concurrency/ordering tests. */
     readonly vcsecCounterArrivals: number[] = [];
+    /** Every accepted VCSEC command, decoded on this side of the wire. */
+    readonly vcsecCommands: UnsignedMessage[] = [];
+    /** Every accepted Infotainment command, decoded on this side of the wire. */
+    readonly infotainmentActions: Action[] = [];
 
     constructor(privateKey?: Buffer) {
         this.privateKey = privateKey ?? crypto.randomBytes(32);
@@ -112,9 +116,9 @@ export class FakeVehicle {
         this.nextVcsecReply = message;
     }
 
-    /** Answer the next accepted Infotainment command with this message instead of `actionStatus` OK. */
+    /** Answer the next accepted Infotainment command with this message instead of `actionStatus` OK. Calls queue up. */
     replyToNextInfotainmentCommandWith(message: Response): void {
-        this.nextInfotainmentReply = message;
+        this.nextInfotainmentReplies.push(message);
     }
 
     /** Ignore `FLAG_ENCRYPT_RESPONSE`, as firmware before 2024.38 does. */
@@ -429,7 +433,7 @@ export class FakeVehicle {
 
         let payload: Uint8Array;
         if (domain === Domain.DOMAIN_VEHICLE_SECURITY) {
-            UnsignedMessage.decode(command); // exercised for shape validation
+            this.vcsecCommands.push(UnsignedMessage.decode(command));
             const scripted = this.nextVcsecReply;
             this.nextVcsecReply = null;
             payload = FromVCSECMessage.encode(
@@ -440,8 +444,8 @@ export class FakeVehicle {
             ).finish();
         } else {
             const action = Action.decode(command);
-            const scripted = this.nextInfotainmentReply;
-            this.nextInfotainmentReply = null;
+            this.infotainmentActions.push(action);
+            const scripted = this.nextInfotainmentReplies.shift();
             const ping = action.vehicleAction?.ping;
             payload = Response.encode(
                 scripted ??
