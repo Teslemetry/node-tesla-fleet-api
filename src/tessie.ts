@@ -1,7 +1,9 @@
 import { LibraryError } from "./exceptions.js";
 import TeslaFleetApi, { AccessToken, Logger } from "./teslafleetapi.js";
+import { TessieVehicles } from "./tessievehicle.js";
 import { Scope } from "./types/commands.js";
 import { VehicleDataResponse } from "./types/vehicle_data.js";
+import Vehicle from "./vehicle.js";
 
 type TessieVehicleResponse = {
     vin: string,
@@ -9,11 +11,31 @@ type TessieVehicleResponse = {
     last_state: VehicleDataResponse,
 }
 
-export default class Tessie extends TeslaFleetApi {
-    override readonly _transport_name: string = "tessie";
+export type TessieOptions = {
+    debug?: boolean;
+    logger?: Logger;
+    fetch?: typeof fetch;
+    timeout?: number;
+    /** Default for each command's `wait_for_completion`. */
+    wait_for_completion?: boolean;
+    /** Default for each command's `max_attempts`. */
+    max_attempts?: number;
+};
 
-    constructor(accessToken: AccessToken, options: { debug?: boolean; logger?: Logger; fetch?: typeof fetch; timeout?: number } = {}) {
-        super({ ...options, accessToken, server: `https://api.tessie.com`, partnerScope: false, userScope: false });
+export default class Tessie extends TeslaFleetApi {
+    static override Vehicles: new (parent: TeslaFleetApi) => Vehicle = TessieVehicles;
+
+    declare vehicles: TessieVehicles;
+
+    override readonly _transport_name: string = "tessie";
+    wait_for_completion: boolean;
+    max_attempts: number;
+
+    constructor(accessToken: AccessToken, options: TessieOptions = {}) {
+        const { wait_for_completion = true, max_attempts = 3, ...rest } = options;
+        super({ ...rest, accessToken, server: `https://api.tessie.com`, partnerScope: false });
+        this.wait_for_completion = wait_for_completion;
+        this.max_attempts = max_attempts;
     }
 
     /** Tessie has one server; there is nothing to find. */
@@ -26,6 +48,11 @@ export default class Tessie extends TeslaFleetApi {
      */
     async tesla_scopes(): Promise<Scope[]> {
         return this._request("GET", "auth/tesla_scopes").then(({ scopes }) => scopes)
+    }
+
+    /** Get the user's scopes. */
+    async scopes(): Promise<Scope[]> {
+        return this._request("GET", "auth/tesla_scopes").then(({ scopes }) => scopes);
     }
 
     async metadata(): Promise<{ scopes: Scope[] }> {
@@ -46,8 +73,8 @@ export default class Tessie extends TeslaFleetApi {
         return this._request("GET", `${vin}/state`, { use_cache });
     }
 
-    async list_vehicles(only_active: boolean = false): Promise<TessieVehicleResponse[]> {
-        return this._request("GET", "vehicles", { only_active }).then(({ results }) => results);
+    async list_vehicles(only_active: boolean = false): Promise<{ results: TessieVehicleResponse[] }> {
+        return this._request("GET", "vehicles", { only_active });
     }
 
     async wake(vin: string): Promise<boolean> {

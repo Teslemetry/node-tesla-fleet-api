@@ -11,6 +11,13 @@ import VehicleSpecific from "./vehiclespecific.js";
 
 export { TeslemetryVehicle, TeslemetryVehicleTelemetry, TeslemetryVehicles } from "./teslemetryvehicle.js";
 export type { ClosureOptions, SeatHeaterOptions, TelemetryTopics } from "./teslemetryvehicle.js";
+export { TessieVehicle, TessieVehicles } from "./tessievehicle.js";
+export type {
+    TessieChargeScheduleOptions,
+    TessiePreconditionScheduleOptions,
+    TessieScheduledDepartureOptions,
+} from "./tessievehicle.js";
+export type { TessieOptions } from "./tessie.js";
 export { Commands, Energy, EnergySpecific, TeslaFleetApi, TeslaFleetOAuth, Teslemetry, Tessie, Vehicle, VehicleSigned, VehicleSpecific };
 export { REGISTER_URL, infotainment_command_name, register_client, vcsec_command_name };
 export type { TeslemetryClientRegistration } from "./teslemetry.js";
