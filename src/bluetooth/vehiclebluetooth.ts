@@ -193,6 +193,8 @@ interface BroadcastWatcher {
     confirmation?: RoutableMessage;
     /** Whether a broadcast after the write showed something else. */
     mismatched: boolean;
+    /** The write returned, well or badly. A status from before then says nothing. */
+    writeEnded: boolean;
     writeComplete: boolean;
 }
 
@@ -685,6 +687,9 @@ export default class VehicleBluetooth extends BroadcastListeners {
                         throw new BluetoothTransportError(null, null, { cause: error });
                     }
                     onSubmitted?.();
+                    if (watcher) {
+                        watcher.writeEnded = true;
+                    }
                     if (optimistic) {
                         this.loseLink(link, `write failed: ${describe(error)}`);
                         throw new BluetoothTimeout(null, null, { cause: error });
@@ -708,6 +713,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
 
                 onSubmitted?.();
                 if (watcher) {
+                    watcher.writeEnded = true;
                     watcher.writeComplete = true;
                 }
                 if (optimistic) {
@@ -724,10 +730,10 @@ export default class VehicleBluetooth extends BroadcastListeners {
 
     /**
      * Watch for broadcasts showing the requested state. A lost ack does not stop
-     * the car broadcasting the change it caused. A broadcast that shows anything
-     * else only counts after the write, as one from before it says nothing.
+     * the car broadcasting the change it caused. Only a status after the write
+     * counts, as one from before it says nothing.
      */
-    private armBroadcastWatcher(domain: Domain, matches: (status: VehicleStatus) => boolean): BroadcastWatcher {
+    private armBroadcastWatcher(domain: Domain, matches: NonNullable<SendOptions["confirmBroadcast"]>): BroadcastWatcher {
         let resolve!: (message: RoutableMessage) => void;
         const confirmed = new Promise<RoutableMessage>((done) => {
             resolve = done;
@@ -735,16 +741,18 @@ export default class VehicleBluetooth extends BroadcastListeners {
         const watcher: BroadcastWatcher = {
             confirmed,
             mismatched: false,
+            writeEnded: false,
             writeComplete: false,
             onBroadcast: (message) => {
                 const status = decodeVcsecStatus(message);
-                if (status === null || watcher.confirmation) {
+                if (status === null || watcher.confirmation || !watcher.writeEnded) {
                     return;
                 }
-                if (matches(status)) {
+                const executed = matches(status);
+                if (executed) {
                     watcher.confirmation = message;
                     resolve(message);
-                } else if (watcher.writeComplete) {
+                } else if (executed === false && watcher.writeComplete) {
                     watcher.mismatched = true;
                 }
             },

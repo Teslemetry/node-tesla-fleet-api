@@ -217,8 +217,8 @@ export interface SendOptions {
     timeoutMs?: number;
     /** Return as soon as the message is written, without a reply. */
     optimistic?: boolean;
-    /** Lets an unsolicited state broadcast confirm the command alongside the addressed ack. */
-    confirmBroadcast?: (status: VehicleStatus) => boolean;
+    /** Lets an unsolicited state broadcast confirm the command alongside the addressed ack. `undefined` means the status says nothing either way. */
+    confirmBroadcast?: (status: VehicleStatus) => boolean | undefined;
     /**
      * Called each time a frame may have reached the vehicle: its write completed,
      * or failed after entering the backend. A failure before any such call sent nothing.
