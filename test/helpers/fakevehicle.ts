@@ -12,7 +12,7 @@ import {
     Tag,
     SignatureType,
 } from "@teslemetry/tesla-protocol/command/signatures";
-import { UnsignedMessage, FromVCSECMessage, CommandStatus, OperationStatusE as VcsecOperationStatusE } from "@teslemetry/tesla-protocol/command/vcsec";
+import { UnsignedMessage, FromVCSECMessage, CommandStatus, OperationStatusE as VcsecOperationStatusE, VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
 import { Action, Response, ActionStatus, OperationStatusE as ActionOperationStatusE } from "@teslemetry/tesla-protocol/command/car_server";
 import { deriveSharedKey, publicKeyFor, uint32BE } from "../../src/signing/crypto.js";
 
@@ -62,6 +62,8 @@ export class FakeVehicle {
     private encryptHmacReplies = false;
     private corruptNextReply = false;
     private replyFlags = 0;
+    /** What a VCSEC status read returns. Unset, it gets the same `commandStatus` OK as any other command. */
+    vehicleStatus: VehicleStatus | null = null;
     /** Counters of every VCSEC command in the order this FakeVehicle actually received them - for concurrency/ordering tests. */
     readonly vcsecCounterArrivals: number[] = [];
 
@@ -436,14 +438,16 @@ export class FakeVehicle {
 
         let payload: Uint8Array;
         if (domain === Domain.DOMAIN_VEHICLE_SECURITY) {
-            UnsignedMessage.decode(command); // exercised for shape validation
+            const unsigned = UnsignedMessage.decode(command);
             const scripted = this.nextVcsecReply;
             this.nextVcsecReply = null;
             payload = FromVCSECMessage.encode(
                 scripted ??
-                    FromVCSECMessage.create({
-                        commandStatus: CommandStatus.create({ operationStatus: VcsecOperationStatusE.OPERATIONSTATUS_OK }),
-                    }),
+                    (unsigned.InformationRequest && this.vehicleStatus
+                        ? FromVCSECMessage.create({ vehicleStatus: this.vehicleStatus })
+                        : FromVCSECMessage.create({
+                              commandStatus: CommandStatus.create({ operationStatus: VcsecOperationStatusE.OPERATIONSTATUS_OK }),
+                          })),
             ).finish();
         } else {
             const action = Action.decode(command);
