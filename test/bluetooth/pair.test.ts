@@ -5,12 +5,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Role } from "@teslemetry/tesla-protocol/command/keys";
 import { RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
-import { FromVCSECMessage, KeyFormFactor, VehicleLockStateE, VehicleStatus, WhitelistOperationInformationE } from "@teslemetry/tesla-protocol/command/vcsec";
+import { FromVCSECMessage, KeyFormFactor, OperationStatusE, VehicleLockStateE, VehicleStatus, WhitelistOperationInformationE } from "@teslemetry/tesla-protocol/command/vcsec";
 import TeslaBluetooth from "../../src/bluetooth/teslabluetooth.js";
 import VehicleBluetooth from "../../src/bluetooth/vehiclebluetooth.js";
-import { BluetoothTimeout, BluetoothTransportError, SigningDisabled, WhitelistOperationWhitelistFull } from "../../src/exceptions.js";
+import { BluetoothTimeout, BluetoothTransportError, SigningDisabled, WhitelistOperationStatus, WhitelistOperationWhitelistFull } from "../../src/exceptions.js";
 import { publicKeyFor } from "../../src/signing/crypto.js";
-import { BleHarnessOptions, OUR_PRIVATE_KEY, VCSEC, VIN, bleHarness, finish, timed } from "../helpers/blevehicle.js";
+import { BleHarnessOptions, OUR_PRIVATE_KEY, VCSEC, VIN, bareAck, bleHarness, finish, timed } from "../helpers/blevehicle.js";
 
 function unpaired(options: BleHarnessOptions = {}) {
     const harness = bleHarness(options);
@@ -247,6 +247,93 @@ describe("the polling path", () => {
         await finish(harness.vehicle.pair());
 
         await expect(finish(harness.vehicle.door_lock())).resolves.toMatchObject({ response: { result: true } });
+    });
+});
+
+describe("what does not prove the key is on the car", () => {
+    const { OPERATIONSTATUS_ERROR, OPERATIONSTATUS_OK, OPERATIONSTATUS_WAIT } = OperationStatusE;
+    const payload = (message: object) => FromVCSECMessage.encode(FromVCSECMessage.fromPartial(message)).finish();
+
+    function replyWith({ link }: Harness, protobufMessageAsBytes: Uint8Array | undefined) {
+        link.rewriteNextReply((reply, request) => [{ message: { ...reply, protobufMessageAsBytes, requestUuid: request.uuid } }]);
+    }
+
+    it.each([
+        ["WAIT", payload({ commandStatus: { operationStatus: OPERATIONSTATUS_WAIT } })],
+        ["a WAIT on the whitelist status", payload({ commandStatus: { operationStatus: OPERATIONSTATUS_OK, whitelistOperationStatus: { operationStatus: OPERATIONSTATUS_WAIT } } })],
+        ["OK with no whitelist status", payload({ commandStatus: { operationStatus: OPERATIONSTATUS_OK } })],
+        ["a bare vehicleStatus", payload({ vehicleStatus: {} })],
+        ["a bare ack", undefined],
+        ["bytes that do not decode", Buffer.from([0xff])],
+    ])("%s keeps waiting, then times out", async (_name, bytes) => {
+        const harness = unpaired();
+        replyWith(harness, bytes);
+
+        // Longer than the wait for data after an ack, so a bare ack gets back to `pair`.
+        const { error } = await timed(() => harness.vehicle.pair({ pollIntervalMs: 3000, timeoutMs: 8000 }));
+
+        expect(error).toBeInstanceOf(BluetoothTimeout);
+        expect(harness.whitelistWrites()).toHaveLength(1);
+        expect(harness.fakeVehicle.keyEnrolled).toBe(false);
+    });
+
+    it("WAIT keeps waiting until the tap, without a second request", async () => {
+        const harness = unpaired();
+        replyWith(harness, payload({ commandStatus: { operationStatus: OPERATIONSTATUS_WAIT } }));
+        tapAfter(harness, 12_000);
+
+        await expect(finish(harness.vehicle.pair())).resolves.toBeUndefined();
+
+        expect(harness.whitelistWrites()).toHaveLength(1);
+        expect(harness.link.handshakes(VCSEC).length).toBeGreaterThanOrEqual(3);
+    });
+
+    it.each([
+        ["ERROR", payload({ commandStatus: { operationStatus: OPERATIONSTATUS_ERROR } })],
+        ["an ERROR on the whitelist status", payload({ commandStatus: { operationStatus: OPERATIONSTATUS_OK, whitelistOperationStatus: { operationStatus: OPERATIONSTATUS_ERROR } } })],
+        ["a nominalError", payload({ nominalError: { genericError: 1 } })],
+    ])("%s fails", async (_name, bytes) => {
+        const harness = unpaired();
+        replyWith(harness, bytes);
+
+        await expect(finish(harness.vehicle.pair())).rejects.toBeInstanceOf(WhitelistOperationStatus);
+
+        expect(harness.whitelistWrites()).toHaveLength(1);
+    });
+
+    it("does not take a bare ack of a probe for an enrolled key, whatever the session says", async () => {
+        const harness = unpaired();
+        const { vehicle, link, fakeVehicle } = harness;
+        fakeVehicle.keyEnrolled = true;
+        await finish(vehicle.handshakeVehicleSecurity());
+        fakeVehicle.keyEnrolled = false;
+        link.dropNextReply();
+        for (let i = 0; i < 20; i++) {
+            link.rewriteNextReply((reply, request) => [{ message: { ...bareAck(reply, request), sessionInfo: undefined } }], "session_info");
+        }
+
+        const { error } = await timed(() => vehicle.pair({ pollIntervalMs: 1000, timeoutMs: 8000 }));
+
+        expect(error).toBeInstanceOf(BluetoothTimeout);
+    });
+
+    it("does not take a late non-success for the reply", async () => {
+        const harness = unpaired();
+        const { vehicle, link } = harness;
+        link.dropNextReply();
+        setTimeout(() => {
+            link.injectMessage(
+                RoutableMessage.fromPartial({
+                    toDestination: { routingAddress: vehicle.routingAddress },
+                    fromDestination: { domain: VCSEC },
+                    protobufMessageAsBytes: payload({ commandStatus: { operationStatus: OPERATIONSTATUS_OK, whitelistOperationStatus: { operationStatus: OPERATIONSTATUS_WAIT } } }),
+                }),
+            );
+        }, 6000);
+
+        const { error } = await timed(() => vehicle.pair({ pollIntervalMs: 5000, timeoutMs: 12_000 }));
+
+        expect(error).toBeInstanceOf(BluetoothTimeout);
     });
 });
 

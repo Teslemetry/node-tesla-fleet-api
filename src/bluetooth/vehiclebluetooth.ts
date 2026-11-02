@@ -90,6 +90,7 @@ import {
     SigningDisabled,
     TeslaFleetError,
     TeslaFleetMessageFaultResponseSizeExceedsMTU,
+    WhitelistOperationStatus,
 } from "../exceptions.js";
 import { AsyncLock, BleCallTimeout, ReplyQueue, abortable, sleep, withTimeout } from "./async.js";
 import { BroadcastListeners, ListenerRegistry, Unsubscribe, decodeVcsecStatus } from "./broadcast.js";
@@ -1535,6 +1536,10 @@ export default class VehicleBluetooth extends BroadcastListeners {
      * handshake only succeeds once this key is whitelisted, and it reconnects, so
      * the wait survives a dropped link.
      *
+     * Success needs positive evidence: an explicit success reply, or an
+     * authenticated handshake with this key. Python takes any reply without a
+     * whitelist fault, which a WAIT or a bare ack satisfies before the tap.
+     *
      * Tesla's Go SDK sends a bare `ToVCSECMessage` here. This wraps the
      * `UnsignedMessage` in a `RoutableMessage`, as Python does, and that has paired
      * a real car. If pairing fails on another vehicle, look there first.
@@ -1592,8 +1597,9 @@ export default class VehicleBluetooth extends BroadcastListeners {
             const send = this._send(msg, "protobuf_message_as_bytes", {
                 timeoutMs: Math.max(0, Math.min(pollIntervalMs, deadline - performance.now())),
             });
-            this.raiseForWhitelistReply(await abortable(send, signal));
-            return;
+            if (this.whitelistReplyConfirms(await abortable(send, signal))) {
+                return;
+            }
         } catch (error) {
             if (!(error instanceof BluetoothTimeout)) {
                 throw error;
@@ -1629,8 +1635,11 @@ export default class VehicleBluetooth extends BroadcastListeners {
         const session = this.sessionFor(VCSEC);
         try {
             return await session.withLock(async () => {
-                await this._send(this.sessionInfoRequest(VCSEC), "session_info");
-                return session.ready;
+                // `_send` also returns a bare ack, and a session can be ready from
+                // before, so only a reply that carried session info counts. That
+                // one passed `validate_msg`, so its tag proved this key.
+                const reply = await this._send(this.sessionInfoRequest(VCSEC), "session_info");
+                return session.ready && (reply.sessionInfo?.length ?? 0) > 0;
             });
         } catch (error) {
             if (error instanceof TeslaFleetError) {
@@ -1644,7 +1653,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
      * Look for a whitelist reply that arrived after `_send` stopped waiting. This
      * must run before a probe, whose `_send` discards what is queued. Anything else
      * in the queue stays there.
-     * @returns Whether one was there and reported success.
+     * @returns Whether one was there and explicitly reported success.
      * @throws WhitelistOperationStatus or a subclass when it reported a refusal.
      */
     private consumeLateWhitelistReply(): boolean {
@@ -1657,16 +1666,30 @@ export default class VehicleBluetooth extends BroadcastListeners {
                 queue.push(queued);
             }
         }
-        if (reply === undefined) {
-            return false;
-        }
-        this.raiseForWhitelistReply(reply);
-        return true;
+        return reply !== undefined && this.whitelistReplyConfirms(reply);
     }
 
-    private raiseForWhitelistReply(reply: RoutableMessage): void {
-        const message = FromVCSECMessage.decode(reply.protobufMessageAsBytes ?? new Uint8Array());
-        this.raiseWhitelistFault(message.commandStatus?.whitelistOperationStatus?.whitelistOperationInformation);
+    /**
+     * Whether a reply to the whitelist operation says the key was added. Only an
+     * OK with a whitelist status and no failure does. A WAIT means the car is
+     * still waiting for the tap, and a bare ack, a status or anything else says
+     * nothing, so `pair` goes on polling.
+     * @throws WhitelistOperationStatus or a subclass when the reply is a refusal.
+     */
+    private whitelistReplyConfirms(reply: RoutableMessage): boolean {
+        let message: FromVCSECMessage;
+        try {
+            message = FromVCSECMessage.decode(reply.protobufMessageAsBytes ?? new Uint8Array());
+        } catch {
+            return false;
+        }
+        const whitelist = message.commandStatus?.whitelistOperationStatus;
+        this.raiseWhitelistFault(whitelist?.whitelistOperationInformation);
+        const { OPERATIONSTATUS_ERROR, OPERATIONSTATUS_OK } = VcsecOperationStatusE;
+        if (message.nominalError || message.commandStatus?.operationStatus === OPERATIONSTATUS_ERROR || whitelist?.operationStatus === OPERATIONSTATUS_ERROR) {
+            throw new WhitelistOperationStatus("The vehicle refused the whitelist operation.");
+        }
+        return message.commandStatus?.operationStatus === OPERATIONSTATUS_OK && whitelist?.operationStatus === OPERATIONSTATUS_OK;
     }
 
     /**
