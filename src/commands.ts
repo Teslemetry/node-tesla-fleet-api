@@ -371,7 +371,7 @@ export default abstract class Commands extends VehicleSpecific {
     /**
      * Transmit a signed (or session-handshake) `RoutableMessage` to the
      * vehicle and return its reply. Implementations must call
-     * `validate_msg(resp, msg.uuid)` on the reply before returning it, and
+     * `validate_msg(resp, msg.uuid, msg.toDestination?.domain)` on the reply before returning it, and
      * must not take `Session.withLock`: `dispatch` already holds that lock
      * across `_send` for VCSEC, and it is not reentrant.
      */
@@ -388,8 +388,10 @@ export default abstract class Commands extends VehicleSpecific {
     /**
      * Absorb session info piggy-backed on any signed-command reply and raise
      * on a whitelist rejection or a terminal message fault. Every concrete
-     * `_send` must call this on the reply - passing the `uuid` of the request
-     * it just sent - before returning it.
+     * `_send` must call this on the reply - passing the `uuid` and destination
+     * domain of the request it just sent - before returning it. The session comes
+     * from that request: a reply's own `fromDestination` is unauthenticated, so it
+     * can only be checked against the request, never select a session.
      *
      * A `SessionInfo` is untrusted wire data until its `session_info_tag` is
      * verified: the tag is an HMAC over the exact bytes received, bound to this
@@ -407,12 +409,11 @@ export default abstract class Commands extends VehicleSpecific {
      * one status is accepted unauthenticated. Any other status with no key is
      * malformed.
      */
-    validate_msg(resp: RoutableMessage, requestUuid: Buffer): void {
+    validate_msg(resp: RoutableMessage, requestUuid: Buffer, requestDomain: Domain | undefined): void {
         if (resp.sessionInfo && resp.sessionInfo.length > 0) {
-            const domain = resp.fromDestination?.domain;
-            const session = domain !== undefined ? this.sessions[domain] : undefined;
-            if (!session) {
-                throw new SessionInfoAuthenticationFault("Session info reply is missing a recognized source domain.");
+            const session = requestDomain !== undefined ? this.sessions[requestDomain] : undefined;
+            if (!session || resp.fromDestination?.domain !== requestDomain) {
+                throw new SessionInfoAuthenticationFault("Session info reply is not from the domain the request went to; discarded.");
             }
 
             // VCSEC typically leaves request_uuid empty on real vehicles

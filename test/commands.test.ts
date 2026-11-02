@@ -73,7 +73,7 @@ class TestCommands extends Commands {
         }
         const replyBytes = this.fakeVehicle.handle(Buffer.from(RoutableMessage.encode(msg).finish()));
         const resp = RoutableMessage.decode(replyBytes);
-        this.validate_msg(resp, Buffer.from(msg.uuid));
+        this.validate_msg(resp, Buffer.from(msg.uuid), msg.toDestination?.domain);
         return resp;
     }
 }
