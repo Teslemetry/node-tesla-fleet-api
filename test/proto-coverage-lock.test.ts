@@ -79,35 +79,6 @@ const KNOWN_UNWRAPPED_VEHICLE_ACTION_FIELDS = new Set([
 /** Added by tesla-protocol 5.0.0. The reader is follow-up work with the keep-on-port actions above. */
 const KNOWN_UNWRAPPED_GET_VEHICLE_DATA_FIELDS = new Set(["getKeepOnAccessoryPortsState"]);
 
-/**
- * Node only: Python's lock counts the readers on `VehicleBluetooth`, which Node
- * has not ported yet (doc 05 section 10). Each name leaves this list as its
- * reader lands, and the last test below fails until it does.
- */
-const BLUETOOTH_READERS_NOT_YET_PORTED = new Set([
-    "getDriveState",
-    "getLocationState",
-    "getClosuresState",
-    "getChargeScheduleState",
-    "getPreconditioningScheduleState",
-    "getTirePressureState",
-    "getMediaDetailState",
-    "getSoftwareUpdateState",
-    "getParentalControlsState",
-    "getGuiSettings",
-    "getParkedAccessoryState",
-    "getLegacyVehicleState",
-    "getVehicleState",
-    "getVehicleConfig",
-    "getSohState",
-    "getVehicleDetailState",
-    "getDisplayState",
-    "getAlertState",
-    "getLightShowState",
-    "getSuspensionState",
-    "getChildPresenceDetectionState",
-]);
-
 /** `VehicleSpecific` methods with no signed form, because they are Fleet API requests rather than vehicle commands. */
 const NOT_VEHICLE_COMMANDS = [
     "drivers",
@@ -154,7 +125,7 @@ describe("VehicleAction coverage lock", () => {
 });
 
 describe("GetVehicleData coverage lock", () => {
-    const allowlisted = new Set([...KNOWN_UNWRAPPED_GET_VEHICLE_DATA_FIELDS, ...BLUETOOTH_READERS_NOT_YET_PORTED]);
+    const allowlisted = new Set(KNOWN_UNWRAPPED_GET_VEHICLE_DATA_FIELDS);
 
     it("reads the whole message", () => {
         expect(getVehicleDataFields).toHaveLength(26);
@@ -170,10 +141,6 @@ describe("GetVehicleData coverage lock", () => {
 
     it("has no allowlist entry the proto dropped", () => {
         expect([...allowlisted].filter((field) => !getVehicleDataFields.includes(field))).toEqual([]);
-    });
-
-    it("drops a pending Bluetooth reader from the allowlist as it lands", () => {
-        expect([...BLUETOOTH_READERS_NOT_YET_PORTED].filter((field) => wrappedIn(BLUETOOTH_SOURCE, field))).toEqual([]);
     });
 });
 

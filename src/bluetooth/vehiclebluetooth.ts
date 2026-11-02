@@ -11,19 +11,68 @@ import {
 } from "@teslemetry/tesla-protocol/command/vcsec";
 import {
     Action,
+    GetAlertState,
+    GetChargeScheduleState,
     GetChargeState,
+    GetChildPresenceDetectionState,
     GetClimateState,
+    GetClosuresState,
+    GetDisplayState,
+    GetDriveState,
+    GetGuiSettings,
+    GetLegacyVehicleState,
+    GetLightShowState,
+    GetLocationState,
+    GetMediaDetailState,
     GetMediaState,
+    GetParentalControlsState,
+    GetParkedAccessoryState,
+    GetPreconditioningScheduleState,
+    GetSoftwareUpdateState,
+    GetSohState,
+    GetSuspensionState,
+    GetTirePressureState,
+    GetVehicleConfig,
+    GetVehicleDetailState,
+    GetVehicleState,
     GetVehicleData,
     VehicleAction,
 } from "@teslemetry/tesla-protocol/command/car_server";
-import { ChargeState, ClimateState, MediaState, VehicleData } from "@teslemetry/tesla-protocol/command/vehicle";
+import {
+    AlertState,
+    ChargeScheduleState,
+    ChargeState,
+    ChildPresenceDetectionState,
+    ClimateState,
+    ClosuresState,
+    CurrentVehicleState,
+    DisplayState,
+    DriveState,
+    GuiSettings,
+    LightShowState,
+    LocationState,
+    MediaDetailState,
+    MediaState,
+    ParentalControlsState,
+    ParkedAccessoryState,
+    PreconditioningScheduleState,
+    SoftwareUpdateState,
+    SohState,
+    SuspensionState,
+    TirePressureState,
+    VehicleConfig,
+    VehicleDetailState,
+    VehicleState,
+    VehicleData,
+} from "@teslemetry/tesla-protocol/command/vehicle";
+import { BluetoothVehicleData, VehicleDataEndpoint } from "../const.js";
 import { SendOptions, SendRequires, SignedCommandResponse, infotainment_command_name, vcsec_command_name } from "../commands.js";
 import { CommandResponse } from "../types/commands.js";
 import { WakeUpOptions } from "../types/vehicle.js";
 import { logRequestError, logRequestResult } from "../log.js";
 import Vehicle from "../vehicle.js";
 import {
+    BluetoothCloudUnavailableError,
     BluetoothCommandFailed,
     BluetoothTimeout,
     BluetoothTransportError,
@@ -103,6 +152,10 @@ export interface FindVehicleOptions {
 
 const VCSEC = Domain.DOMAIN_VEHICLE_SECURITY;
 const INFOTAINMENT = Domain.DOMAIN_INFOTAINMENT;
+
+/** What Device Name starts with once the vehicle's name is available. */
+const DISPLAY_NAME_PREFIX = "\u{1F511} ";
+const DISPLAY_NAME_RETRY_MS = 1000;
 
 function success(): CommandResponse {
     return { response: { result: true, reason: "" } };
@@ -1169,9 +1222,237 @@ export default class VehicleBluetooth extends BroadcastListeners {
         return this.readVehicleData({ getClimateState: GetClimateState.create({}) }, "climateState");
     }
 
+    /** The driving state, including speed and power. */
+    async drive_state(): Promise<DriveState> {
+        return this.readVehicleData({ getDriveState: GetDriveState.create({}) }, "driveState");
+    }
+
+    /** The vehicle's location. */
+    async location_state(): Promise<LocationState> {
+        return this.readVehicleData({ getLocationState: GetLocationState.create({}) }, "locationState");
+    }
+
+    /** The doors, windows, trunks and locks, as infotainment reports them. */
+    async closures_state(): Promise<ClosuresState> {
+        return this.readVehicleData({ getClosuresState: GetClosuresState.create({}) }, "closuresState");
+    }
+
+    /** The charge schedules. */
+    async charge_schedule_state(): Promise<ChargeScheduleState> {
+        return this.readVehicleData({ getChargeScheduleState: GetChargeScheduleState.create({}) }, "chargeScheduleState");
+    }
+
+    /** The preconditioning schedules. */
+    async preconditioning_schedule_state(): Promise<PreconditioningScheduleState> {
+        return this.readVehicleData({ getPreconditioningScheduleState: GetPreconditioningScheduleState.create({}) }, "preconditioningScheduleState");
+    }
+
+    /** The tire pressures. */
+    async tire_pressure_state(): Promise<TirePressureState> {
+        return this.readVehicleData({ getTirePressureState: GetTirePressureState.create({}) }, "tirePressureState");
+    }
+
     /** The media playback state. */
     async media_state(): Promise<MediaState> {
         return this.readVehicleData({ getMediaState: GetMediaState.create({}) }, "mediaState");
+    }
+
+    /** Detail on the media playing now. */
+    async media_detail_state(): Promise<MediaDetailState> {
+        return this.readVehicleData({ getMediaDetailState: GetMediaDetailState.create({}) }, "mediaDetailState");
+    }
+
+    /** The software update state. */
+    async software_update_state(): Promise<SoftwareUpdateState> {
+        return this.readVehicleData({ getSoftwareUpdateState: GetSoftwareUpdateState.create({}) }, "softwareUpdateState");
+    }
+
+    /** The parental controls state. */
+    async parental_controls_state(): Promise<ParentalControlsState> {
+        return this.readVehicleData({ getParentalControlsState: GetParentalControlsState.create({}) }, "parentalControlsState");
+    }
+
+    /** The display units and formats. */
+    async gui_settings(): Promise<GuiSettings> {
+        return this.readVehicleData({ getGuiSettings: GetGuiSettings.create({}) }, "guiSettings");
+    }
+
+    /** The state of parked accessories, such as a tent. */
+    async parked_accessory_state(): Promise<ParkedAccessoryState> {
+        return this.readVehicleData({ getParkedAccessoryState: GetParkedAccessoryState.create({}) }, "parkedAccessoryState");
+    }
+
+    /**
+     * The older infotainment vehicle state, tag 6, for older firmware. Not `current_vehicle_state`, nor VCSEC's `vehicle_state`.
+     */
+    async legacy_vehicle_state(): Promise<VehicleState> {
+        return this.readVehicleData({ getLegacyVehicleState: GetLegacyVehicleState.create({}) }, "legacyVehicleState");
+    }
+
+    /**
+     * The infotainment vehicle state, tag 18, on current firmware. Not `legacy_vehicle_state`, nor VCSEC's `vehicle_state`.
+     */
+    async current_vehicle_state(): Promise<CurrentVehicleState> {
+        return this.readVehicleData({ getVehicleState: GetVehicleState.create({}) }, "vehicleState");
+    }
+
+    /** The vehicle's fixed configuration. */
+    async vehicle_config(): Promise<VehicleConfig> {
+        return this.readVehicleData({ getVehicleConfig: GetVehicleConfig.create({}) }, "vehicleConfig");
+    }
+
+    /** The battery state of health. */
+    async soh_state(): Promise<SohState> {
+        return this.readVehicleData({ getSohState: GetSohState.create({}) }, "sohState");
+    }
+
+    /** The vehicle's name and software details. */
+    async vehicle_detail_state(): Promise<VehicleDetailState> {
+        return this.readVehicleData({ getVehicleDetailState: GetVehicleDetailState.create({}) }, "vehicleDetailState");
+    }
+
+    /** The display state. */
+    async display_state(): Promise<DisplayState> {
+        return this.readVehicleData({ getDisplayState: GetDisplayState.create({}) }, "displayState");
+    }
+
+    /** The active alerts. */
+    async alert_state(): Promise<AlertState> {
+        return this.readVehicleData({ getAlertState: GetAlertState.create({}) }, "alertState");
+    }
+
+    /** The light show state. */
+    async light_show_state(): Promise<LightShowState> {
+        return this.readVehicleData({ getLightShowState: GetLightShowState.create({}) }, "lightShowState");
+    }
+
+    /** The suspension state. */
+    async suspension_state(): Promise<SuspensionState> {
+        return this.readVehicleData({ getSuspensionState: GetSuspensionState.create({}) }, "suspensionState");
+    }
+
+    /** The child presence detection state. */
+    async child_presence_detection_state(): Promise<ChildPresenceDetectionState> {
+        return this.readVehicleData({ getChildPresenceDetectionState: GetChildPresenceDetectionState.create({}) }, "childPresenceDetectionState");
+    }
+
+    /**
+     * Several sub-states in one signed read. This is not the cloud method: it
+     * takes `BluetoothVehicleData` values, not `VehicleDataEndpoint`, and resolves
+     * to `VehicleData`, not a REST envelope. There is no default of every endpoint,
+     * because as few as two together have exceeded the response size limit, which
+     * raises `TeslaFleetMessageFaultResponseSizeExceedsMTU`. Prefer one reader each.
+     * @param endpoints An explicit list. `[]` asks for nothing.
+     * @throws BluetoothCloudUnavailableError for anything else, sending nothing: no argument and REST endpoint names are the cloud call, which a router can fail over to.
+     */
+    override async vehicle_data(endpoints?: BluetoothVehicleData[] | VehicleDataEndpoint[] | string): Promise<any> {
+        const known = Object.values(BluetoothVehicleData) as string[];
+        if (!Array.isArray(endpoints) || !endpoints.every((endpoint) => known.includes(endpoint))) {
+            throw new BluetoothCloudUnavailableError();
+        }
+        const request: Partial<Record<keyof GetVehicleData, object>> = {};
+        for (const endpoint of endpoints) {
+            request[`${endpoint[0]!.toLowerCase()}${endpoint.slice(1)}` as keyof GetVehicleData] = {};
+        }
+        return this._getInfotainment(Action.create({ vehicleAction: VehicleAction.create({ getVehicleData: GetVehicleData.create(request) }) }));
+    }
+
+    /**
+     * The name set in the vehicle, read from GATT Device Name. It is not advertised.
+     * The vehicle prefixes it with a key emoji once it is available.
+     * @returns The name, or `null` if it never appeared: a backend may hide Generic Access.
+     */
+    async query_display_name(max_attempts: number = 5): Promise<string | null> {
+        for (let attempt = 1; attempt <= max_attempts; attempt++) {
+            try {
+                await this.connect_if_needed();
+                const name = Buffer.from(await this.gattRead("deviceName")).toString("utf8");
+                if (name.startsWith(DISPLAY_NAME_PREFIX)) {
+                    return name.slice(DISPLAY_NAME_PREFIX.length);
+                }
+                await sleep(DISPLAY_NAME_RETRY_MS);
+            } catch (error) {
+                this.log(`BLE display name read failed: ${describe(error)}`);
+            }
+        }
+        return null;
+    }
+
+    /** GATT Appearance, or `null` if it cannot be read. */
+    async query_appearance(): Promise<Uint8Array | null> {
+        try {
+            await this.connect_if_needed();
+            return await this.gattRead("appearance");
+        } catch (error) {
+            this.log(`BLE appearance read failed: ${describe(error)}`);
+            return null;
+        }
+    }
+
+    /** The version characteristic as a big-endian integer, or `null` if it cannot be read. */
+    async query_version(): Promise<number | null> {
+        try {
+            await this.connect_if_needed();
+            const version = await this.gattRead("version");
+            return version.length === 0 ? null : version.reduce((value, byte) => value * 256 + byte, 0);
+        } catch (error) {
+            this.log(`BLE version read failed: ${describe(error)}`);
+            return null;
+        }
+    }
+
+    private moveClosure(closure: keyof ClosureMoveRequest, move: ClosureMoveTypeE): Promise<CommandResponse> {
+        return this.sendVehicleSecurity(UnsignedMessage.create({ closureMoveRequest: ClosureMoveRequest.create({ [closure]: move } as Partial<ClosureMoveRequest>) }));
+    }
+
+    /** Opens the front driver door. */
+    async open_front_driver_door(): Promise<CommandResponse> {
+        return this.moveClosure("frontDriverDoor", ClosureMoveTypeE.CLOSURE_MOVE_TYPE_OPEN);
+    }
+
+    /** Closes the front driver door. Doors have no reliable powered close on a Model 3. */
+    async close_front_driver_door(): Promise<CommandResponse> {
+        return this.moveClosure("frontDriverDoor", ClosureMoveTypeE.CLOSURE_MOVE_TYPE_CLOSE);
+    }
+
+    /** Opens the front passenger door. */
+    async open_front_passenger_door(): Promise<CommandResponse> {
+        return this.moveClosure("frontPassengerDoor", ClosureMoveTypeE.CLOSURE_MOVE_TYPE_OPEN);
+    }
+
+    /** Closes the front passenger door. Doors have no reliable powered close on a Model 3. */
+    async close_front_passenger_door(): Promise<CommandResponse> {
+        return this.moveClosure("frontPassengerDoor", ClosureMoveTypeE.CLOSURE_MOVE_TYPE_CLOSE);
+    }
+
+    /** Opens the rear driver door. */
+    async open_rear_driver_door(): Promise<CommandResponse> {
+        return this.moveClosure("rearDriverDoor", ClosureMoveTypeE.CLOSURE_MOVE_TYPE_OPEN);
+    }
+
+    /** Closes the rear driver door. Doors have no reliable powered close on a Model 3. */
+    async close_rear_driver_door(): Promise<CommandResponse> {
+        return this.moveClosure("rearDriverDoor", ClosureMoveTypeE.CLOSURE_MOVE_TYPE_CLOSE);
+    }
+
+    /** Opens the rear passenger door. */
+    async open_rear_passenger_door(): Promise<CommandResponse> {
+        return this.moveClosure("rearPassengerDoor", ClosureMoveTypeE.CLOSURE_MOVE_TYPE_OPEN);
+    }
+
+    /** Closes the rear passenger door. Doors have no reliable powered close on a Model 3. */
+    async close_rear_passenger_door(): Promise<CommandResponse> {
+        return this.moveClosure("rearPassengerDoor", ClosureMoveTypeE.CLOSURE_MOVE_TYPE_CLOSE);
+    }
+
+    /** Opens the rear trunk. */
+    async open_rear_trunk(): Promise<CommandResponse> {
+        return this.moveClosure("rearTrunk", ClosureMoveTypeE.CLOSURE_MOVE_TYPE_OPEN);
+    }
+
+    /** Closes the rear trunk. */
+    async close_rear_trunk(): Promise<CommandResponse> {
+        return this.moveClosure("rearTrunk", ClosureMoveTypeE.CLOSURE_MOVE_TYPE_CLOSE);
     }
 
     /**

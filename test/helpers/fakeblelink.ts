@@ -107,6 +107,8 @@ export class FakeBleLink implements BleTransport {
     readonly connections: FakeConnection[] = [];
     /** Bytes a read of `version` returns. */
     version: Uint8Array = Buffer.from([0x00, 0x01]);
+    /** Bytes a read of Device Name returns, and of Appearance. */
+    genericAccess: { deviceName: Uint8Array; appearance: Uint8Array } = { deviceName: Buffer.alloc(0), appearance: Buffer.alloc(0) };
     /** What a scan finds. It returns all of them, matching or not, as a Homey `discover()` does. */
     devices: BleDeviceRef[];
     /** How long a scan takes. */
@@ -362,7 +364,7 @@ export class FakeBleLink implements BleTransport {
         if (fault) {
             throw fault;
         }
-        return this.version;
+        return characteristic === "version" ? this.version : this.genericAccess[characteristic];
     }
 
     private kindOf(frame: RoutableMessage): FrameKind {
