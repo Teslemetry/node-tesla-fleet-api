@@ -1,20 +1,53 @@
 import { KeyObject } from "crypto";
 import {
     AuthorizedClientKeyType,
+    AuthorizedClientState,
     AuthorizedClientType,
     EnergyDeviceIdentifierType,
     EnergyIslandMode,
 } from "./const.js";
 import Energy from "./energy.js";
-import { AuthorizedClients, parse_authorized_clients, parse_gateway_address } from "./energyparsers.js";
+import { AuthorizedClient, AuthorizedClients, parse_authorized_clients, parse_gateway_address } from "./energyparsers.js";
 import EnergySpecific, {
     backupSchedulingInfo,
     publicKeyBase64,
     validate_dispatch_battery_power,
 } from "./energyspecific.js";
+import { AuthorizedClientPairingTimedOut, AuthorizedClientWaitExpired } from "./exceptions.js";
 
 export { parse_authorized_clients, parse_gateway_address };
 export type { AuthorizedClient, AuthorizedClients } from "./energyparsers.js";
+
+/** Default overall bound on `wait_until_paired`, in milliseconds. */
+export const DEFAULT_PAIRING_TIMEOUT = 600_000;
+/** Default delay between `wait_until_paired` polls, in milliseconds. */
+export const DEFAULT_PAIRING_POLL_INTERVAL = 5_000;
+
+const EXPIRED = Symbol("expired");
+
+/**
+ * Settle as `step` does, or resolve `EXPIRED` after `ms`, or reject with the
+ * signal's reason. JavaScript cannot cancel `step`, so one that outlives this
+ * is abandoned, and its late rejection stays handled here.
+ */
+function settleWithin<T>(step: () => Promise<T>, ms: number, signal?: AbortSignal): Promise<T | typeof EXPIRED> {
+    return new Promise((resolve, reject) => {
+        const finish = (settle: () => void) => {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", onAbort);
+            settle();
+        };
+        const onAbort = () => finish(() => reject(signal?.reason));
+        const timer = setTimeout(() => finish(() => resolve(EXPIRED)), ms);
+        signal?.addEventListener("abort", onAbort, { once: true });
+        Promise.resolve()
+            .then(step)
+            .then(
+                (value) => finish(() => resolve(value)),
+                (error: unknown) => finish(() => reject(error)),
+            );
+    });
+}
 
 /**
  * Teslemetry's energy site.
@@ -261,6 +294,89 @@ export class TeslemetryEnergySite extends EnergySpecific {
      */
     override async resume_battery_operation(): Promise<Record<string, any>> {
         return this.signing ? super.resume_battery_operation() : this._post_route("resume_battery_operation");
+    }
+
+    /**
+     * Wait for a key already registered with `add_authorized_client` to finish
+     * pairing, polling `find_authorized_clients` until its entry is `VERIFIED`.
+     *
+     * The gateway's presence-proof window is about 9 minutes, and a breaker toggle
+     * confirmed a key in as little as 59 s, with no cloud auto-verify observed.
+     * A poll that fails counts as no signal.
+     * @param public_key The key as passed to `add_authorized_client`, raw DER bytes or base64.
+     * @param options.verify_by_use A signed local read. Once the cloud reports `VERIFIED`, one successful call confirms the key is usable. A failure means "not yet" and polling continues, because `VERIFIED` can be seen slightly ahead of local usability.
+     * @param options.timeout_ms Overall bound on the wait.
+     * @param options.poll_interval_ms Delay between polls.
+     * @param options.signal Aborting rejects with the signal's reason. An in-flight call is abandoned, not cancelled.
+     * @returns The matched entry, once paired and confirmed.
+     * @throws AuthorizedClientPairingTimedOut at once on `PENDING_VERIFICATION_TIMEOUT`. The registration is dead: call `add_authorized_client` again with the same key, which resets the window, then wait again.
+     * @throws AuthorizedClientWaitExpired when `timeout_ms` elapses first. The registration is still alive: wait again.
+     */
+    async wait_until_paired(
+        public_key: Uint8Array | string,
+        options: {
+            verify_by_use?: () => Promise<unknown>;
+            timeout_ms?: number;
+            poll_interval_ms?: number;
+            signal?: AbortSignal;
+        } = {},
+    ): Promise<AuthorizedClient> {
+        const {
+            verify_by_use,
+            timeout_ms = DEFAULT_PAIRING_TIMEOUT,
+            poll_interval_ms = DEFAULT_PAIRING_POLL_INTERVAL,
+            signal,
+        } = options;
+        const target = publicKeyBase64(public_key);
+        const deadline = performance.now() + timeout_ms;
+        let last_state: AuthorizedClient["state"] = null;
+        const expired = () => new AuthorizedClientWaitExpired({ public_key: target, state: last_state });
+        /** Run one step under the deadline. A failed step is `undefined`, unless the wait was aborted. */
+        const attempt = async <T>(step: () => Promise<T>): Promise<T | undefined> => {
+            const result = await settleWithin(step, deadline - performance.now(), signal).catch((error: unknown) => {
+                if (signal?.aborted) {
+                    throw error;
+                }
+                return undefined;
+            });
+            if (result === EXPIRED) {
+                throw expired();
+            }
+            return result;
+        };
+
+        while (true) {
+            signal?.throwIfAborted();
+            if (performance.now() >= deadline) {
+                throw expired();
+            }
+            const clients = await attempt(() => this.find_authorized_clients());
+            const match = clients?.clients.find((client) => client.public_key === target);
+
+            if (match !== undefined) {
+                last_state = match.state;
+                if (match.state === AuthorizedClientState.PENDING_VERIFICATION_TIMEOUT) {
+                    throw new AuthorizedClientPairingTimedOut({ public_key: target, state: match.state });
+                }
+                if (match.state === AuthorizedClientState.VERIFIED) {
+                    if (verify_by_use === undefined) {
+                        return match;
+                    }
+                    if (performance.now() >= deadline) {
+                        throw expired();
+                    }
+                    if ((await attempt(async () => (await verify_by_use(), true))) === true) {
+                        return match;
+                    }
+                }
+            }
+
+            const remaining = deadline - performance.now();
+            if (remaining <= 0) {
+                throw expired();
+            }
+            await settleWithin(() => new Promise<never>(() => {}), Math.min(poll_interval_ms, remaining), signal);
+        }
     }
 }
 
