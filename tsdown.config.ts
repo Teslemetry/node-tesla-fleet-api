@@ -10,6 +10,7 @@ export default defineConfig({
         const: "src/const.ts",
         router: "src/router/index.ts",
         types: "src/types/index.ts",
+        bluetooth: "src/bluetooth/index.ts",
     },
     format: ["esm", "cjs"],
     dts: true,

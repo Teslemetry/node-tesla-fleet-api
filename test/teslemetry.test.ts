@@ -36,7 +36,7 @@ describe("Teslemetry", () => {
         const fetchMock = fakeFetch({ response: true });
         const api = new Teslemetry("test-token", "na");
 
-        await expect(api.test()).resolves.toBe(true);
+        await expect(api.test()).resolves.toEqual({ response: true });
         expect(requestedUrls(fetchMock)).toEqual([
             "https://na.teslemetry.com/api/test",
         ]);
