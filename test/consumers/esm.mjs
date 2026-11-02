@@ -7,10 +7,13 @@ import { getTariffPeriods, unwrapTariffV2 } from "tesla-fleet-api/tariff";
 import { Models, SERVERS } from "tesla-fleet-api/const";
 import * as router from "tesla-fleet-api/router";
 import { BleNotSubmittedError, ReassemblingBuffer, SERVICE_UUID } from "tesla-fleet-api/bluetooth";
+import { HOMEY_MAX_WRITE_SIZE, HomeyBleTransport } from "tesla-fleet-api/bluetooth/homey";
 import { NobleBleTransport } from "tesla-fleet-api/bluetooth/noble";
 import { EsphomeBleTransport } from "tesla-fleet-api/bluetooth/esphome";
 
 // Each adapter must load with no backend installed, and only fail once it is used.
+assert.equal(typeof HomeyBleTransport, "function");
+assert.equal(HOMEY_MAX_WRITE_SIZE, 20);
 await assert.rejects(new NobleBleTransport().scan({ timeoutMs: 1000 }), /@stoprocent\/noble/);
 await assert.rejects(new EsphomeBleTransport({ host: "proxy.test" }).scan({ timeoutMs: 1000 }), /@2colors\/esphome-native-api/);
 

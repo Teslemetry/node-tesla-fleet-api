@@ -11,6 +11,7 @@ export default defineConfig({
         router: "src/router/index.ts",
         types: "src/types/index.ts",
         bluetooth: "src/bluetooth/index.ts",
+        "bluetooth/homey": "src/bluetooth/adapters/homey.ts",
         "bluetooth/noble": "src/bluetooth/adapters/noble.ts",
         "bluetooth/esphome": "src/bluetooth/adapters/esphome.ts",
     },
