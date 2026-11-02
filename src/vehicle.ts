@@ -43,7 +43,7 @@ export default class Vehicle {
      * Command Protocol and dispatches them through the `/signed_command`
      * endpoint, instead of the plaintext REST commands.
      * @param vin
-     * @param private_key Raw 32-byte P-256 private key scalar. Falls back to `this.private_key`.
+     * @param private_key Raw 32-byte P-256 private key scalar. Falls back to `this.private_key`, then the client's `private_key`.
      * @param public_key Uncompressed P-256 public key point. Derived from `private_key` if omitted.
      */
     createSigned(vin: string, private_key?: Buffer, public_key?: Buffer): VehicleSigned {

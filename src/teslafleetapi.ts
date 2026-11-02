@@ -1,3 +1,4 @@
+import { KeyObject, createPublicKey } from "node:crypto";
 import Charging from "./charging.js";
 import Energy from "./energy.js";
 import Partner from "./partner.js";
@@ -19,6 +20,8 @@ import {
   VehicleProduct,
 } from "./types/products.js";
 import { Logger, logRequestError, logRequestResult } from "./log.js";
+import { publicKeyFor } from "./signing/crypto.js";
+import { ecPrivateKeyFile, ecPublicKey, rsaPrivateKeyFile, rsaPublicDerPkcs1 } from "./signing/keys.js";
 
 export type { Logger } from "./log.js";
 
@@ -55,6 +58,10 @@ export default class TeslaFleetApi {
   /** Transport identity for debug logging; Teslemetry and Tessie override this. */
   readonly _transport_name: string = "fleet";
   #fetch: typeof fetch | null;
+  // Native private fields, behind accessors: a key must not be reachable by
+  // walking the instance, e.g. in a structured log.
+  #privateKey: Buffer | null = null;
+  #rsaPrivateKey: KeyObject | null = null;
 
   constructor(options: {
     accessToken?: AccessToken;
@@ -337,18 +344,120 @@ export default class TeslaFleetApi {
     }));
   }
 
-  async loadPrivateKey(path: string): Promise<void> {
-    // Try read file, if not create it
-    return (await import("fs")).promises.readFile(path, "utf8").then((key) => {
-      this.accessToken = key;
+  /**
+   * Get or create the P-256 key that signs vehicle commands, and keep it as
+   * `private_key`. The file is an unencrypted PEM that Python's
+   * `get_private_key` shares, created at mode 0600. If another process wins the
+   * create race, its file is read instead.
+   * @param path Key file.
+   * @returns The raw 32-byte key `Commands` takes.
+   * @throws PrivateKeyError for an existing file that cannot be used.
+   */
+  async get_private_key(path: string = "private_key.pem"): Promise<Buffer> {
+    const key = await ecPrivateKeyFile(path);
+    this.private_key = key;
+    return key;
+  }
+
+  /** The raw 32-byte P-256 key, which `createSigned` falls back to. */
+  get private_key(): Buffer | null {
+    return this.#privateKey;
+  }
+
+  set private_key(key: Buffer | null) {
+    this.#privateKey = key;
+  }
+
+  /** Whether the private key has been set. */
+  get has_private_key(): boolean {
+    return this.#privateKey != null;
+  }
+
+  /** The public key in PEM format. */
+  get public_pem(): string {
+    return this.#ecPublicKey("Private key is not set").export({ type: "spki", format: "pem" }) as string;
+  }
+
+  /** The public key's uncompressed point, in hex. */
+  get public_uncompressed_point(): string {
+    if (this.#privateKey == null) {
+      throw new LibraryError("Private key is not set");
     }
-    ).catch(async () => {
-      // Create SECP256R1 private key and save it as a pem file at path
-      const { privateKey: _privateKey } = (await import("crypto")).generateKeyPairSync("ec", {
-        namedCurve: "secp256r1",
-        publicKeyEncoding: { type: "spki", format: "pem" },
-        privateKeyEncoding: { type: "pkcs8", format: "pem" },
-      });
-    });
+    return publicKeyFor(this.#privateKey).toString("hex");
+  }
+
+  /**
+   * The EC public key in DER SubjectPublicKeyInfo form, as an energy gateway
+   * expects when registering an ECC authorized client. It rejects the raw point
+   * that vehicles use.
+   */
+  get ec_public_der_spki(): Buffer {
+    return this.#ecPublicKey("EC private key is not set").export({ type: "spki", format: "der" });
+  }
+
+  /** `ec_public_der_spki`, base64-encoded. */
+  get ec_public_der_spki_b64(): string {
+    return this.ec_public_der_spki.toString("base64");
+  }
+
+  #ecPublicKey(unsetMessage: string): KeyObject {
+    if (this.#privateKey == null) {
+      throw new LibraryError(unsetMessage);
+    }
+    return ecPublicKey(this.#privateKey);
+  }
+
+  /**
+   * Get or create the RSA key for energy gateway client registration, and keep
+   * it as `rsa_private_key`. The file is an unencrypted PEM that Python's
+   * `get_rsa_private_key` shares, created at mode 0600. If another process wins
+   * the create race, its file is read instead. Generation runs off the event loop.
+   * @param path Key file.
+   * @param key_size Modulus length in bits for a new key; 4096 is what Powerwall v1r expects.
+   * @throws PrivateKeyError for an existing file that cannot be used.
+   */
+  async get_rsa_private_key(path: string = "tedapi_rsa_private.pem", key_size: number = 4096): Promise<KeyObject> {
+    const key = await rsaPrivateKeyFile(path, key_size);
+    this.rsa_private_key = key;
+    return key;
+  }
+
+  /** The RSA key for energy gateway client registration. */
+  get rsa_private_key(): KeyObject | null {
+    return this.#rsaPrivateKey;
+  }
+
+  set rsa_private_key(key: KeyObject | null) {
+    this.#rsaPrivateKey = key;
+  }
+
+  /** Whether the RSA private key has been set. */
+  get has_rsa_private_key(): boolean {
+    return this.#rsaPrivateKey != null;
+  }
+
+  /**
+   * The RSA public key in DER PKCS#1 form, as an energy gateway expects when
+   * registering an authorized client.
+   */
+  get rsa_public_der_pkcs1(): Buffer {
+    return rsaPublicDerPkcs1(this.#rsaKey());
+  }
+
+  /** `rsa_public_der_pkcs1`, base64-encoded. */
+  get rsa_public_der_pkcs1_b64(): string {
+    return this.rsa_public_der_pkcs1.toString("base64");
+  }
+
+  /** The RSA public key in PEM (SubjectPublicKeyInfo) format. */
+  get rsa_public_pem(): string {
+    return createPublicKey(this.#rsaKey()).export({ type: "spki", format: "pem" }) as string;
+  }
+
+  #rsaKey(): KeyObject {
+    if (this.#rsaPrivateKey == null) {
+      throw new LibraryError("RSA private key is not set");
+    }
+    return this.#rsaPrivateKey;
   }
 }

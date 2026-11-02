@@ -34,3 +34,40 @@ class MyApi extends Teslemetry {
   static override Vehicles = MyVehicles;
 }
 ```
+
+## OAuth
+
+```ts
+import { Scope, TeslaFleetOAuth } from "tesla-fleet-api";
+
+const api = new TeslaFleetOAuth({ region: "na", client_id, client_secret, redirect_uri });
+const url = api.get_login_url([Scope.OPENID, Scope.OFFLINE_ACCESS]);
+await api.get_refresh_token(code);
+```
+
+An expired token refreshes before the next request. Tesla's refresh tokens are single use, so store `api.refresh_token` and `api.expires` (epoch seconds) after `get_refresh_token`, and whatever `refresh_access_token()` or `check_access_token()` returns. To store a refresh made by a request, read those two fields after it.
+
+## Keys
+
+`get_private_key` and `get_rsa_private_key` load a PEM file, or create it at mode 0600. Python's library reads the same files.
+
+```ts
+const privateKey = await api.get_private_key("private_key.pem"); // raw 32-byte Buffer
+api.vehicles!.createSigned(vin); // falls back to it
+api.public_pem;
+
+await api.get_rsa_private_key("tedapi_rsa_private.pem"); // RSA KeyObject
+api.rsa_public_der_pkcs1_b64;
+```
+
+To keep keys somewhere other than a file, as Homey does:
+
+```ts
+const pem = await generate_ec_private_key_pem();
+api.private_key = ec_private_key_from_pem(pem);
+
+const rsaPem = await generate_rsa_private_key_pem();
+rsa_public_der_pkcs1(rsaPem);
+```
+
+An existing file or PEM that cannot be used raises `PrivateKeyError`, whose `reason` is `unreadable`, `encrypted`, `malformed` or `wrong_type`.
