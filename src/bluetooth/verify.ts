@@ -45,6 +45,21 @@ function same<T>(sent: T, reported: T | undefined): boolean | undefined {
     return reported === undefined ? undefined : sent === reported;
 }
 
+/**
+ * Whether a charge cable is plugged in, from positive evidence only. An absent or
+ * `SNA` cable field is not an unplugged cable, so `null` means unknown, and that
+ * includes a known cable reported as `Disconnected`. A `null` here must stop a
+ * charge-port opening: the two answers have different proofs of success.
+ */
+export function chargePortConnected(state: ChargeState): boolean | null {
+    const cable = state.connChargeCable;
+    const disconnected = state.chargingState?.Disconnected !== undefined;
+    if (cable?.IEC ?? cable?.SAE ?? cable?.gbAc ?? cable?.gbDc) {
+        return disconnected ? null : true;
+    }
+    return disconnected ? false : null;
+}
+
 /** The plan for a VCSEC actuation. Only lock and unlock have one. */
 export function vcsecVerifyPlan(command: UnsignedMessage): VcsecVerifyPlan | null {
     if (command.RKEAction === RKEActionE.RKE_ACTION_LOCK) {

@@ -1,5 +1,7 @@
 import { Domain, RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
 import {
+    ClosureMoveRequest,
+    ClosureMoveTypeE,
     InformationRequest,
     InformationRequestType,
     RKEActionE,
@@ -19,6 +21,7 @@ import { ChargeState, ClimateState, MediaState, VehicleData } from "@teslemetry/
 import { SendOptions, SendRequires, SignedCommandResponse, infotainment_command_name, vcsec_command_name } from "../commands.js";
 import { CommandResponse } from "../types/commands.js";
 import { WakeUpOptions } from "../types/vehicle.js";
+import { logRequestError, logRequestResult } from "../log.js";
 import Vehicle from "../vehicle.js";
 import {
     BluetoothCommandFailed,
@@ -27,12 +30,16 @@ import {
     BluetoothUnconfirmedCommand,
     InvalidResponse,
     SessionInfoAuthenticationFault,
+    SignedCommandResponseReplayed,
     SigningDisabled,
     TeslaFleetError,
+    TeslaFleetMessageFaultResponseSizeExceedsMTU,
 } from "../exceptions.js";
-import { AsyncLock, BleCallTimeout, ReplyQueue, withTimeout } from "./async.js";
+import { AsyncLock, BleCallTimeout, ReplyQueue, sleep, withTimeout } from "./async.js";
 import { BroadcastListeners, ListenerRegistry, Unsubscribe, decodeVcsecStatus } from "./broadcast.js";
 import {
+    CHARGE_PORT_VERIFY_INTERVAL_MS,
+    CHARGE_PORT_VERIFY_TIMEOUT_MS,
     DEFAULT_CONNECT_ATTEMPTS,
     DEFAULT_CONNECT_TIMEOUT_MS,
     DEFAULT_KEEPALIVE_INTERVAL_MS,
@@ -49,7 +56,7 @@ import {
 import { ReassemblingBuffer, prependLength, splitFrame } from "./framing.js";
 import { get_name, name_matches_vin } from "./names.js";
 import { BleCharacteristic, BleConnection, BleDeviceRef, BleNotSubmittedError, BleTransport } from "./transport.js";
-import { BluetoothConfirmation, VerifyPlan, infotainmentVerifyPlan, vcsecVerifyPlan } from "./verify.js";
+import { BluetoothConfirmation, VerifyPlan, chargePortConnected, infotainmentVerifyPlan, vcsecVerifyPlan } from "./verify.js";
 
 export interface VehicleBluetoothOptions {
     transport: BleTransport;
@@ -162,6 +169,7 @@ class Link {
  * - `BluetoothUnconfirmedCommand`: it may have run. Never replay it.
  * - A plain `BluetoothTimeout`: a read, or a step before any write.
  * - Best-effort success, when `raise_unconfirmed` is off and nothing resolved it.
+ *   `charge_port_door_open` under `"verify"` is the exception, and raises.
  */
 export default class VehicleBluetooth extends BroadcastListeners {
     readonly _transport_name: string = "bluetooth";
@@ -179,6 +187,10 @@ export default class VehicleBluetooth extends BroadcastListeners {
     protected wakeResendIntervalMs = WAKE_RESEND_INTERVAL_MS;
     /** How long an awake car's infotainment may take to finish booting. */
     protected infotainmentBootTimeoutMs = INFOTAINMENT_BOOT_TIMEOUT_MS;
+    /** How long a charge-port opening has to show in charge state. */
+    protected chargePortVerifyTimeoutMs = CHARGE_PORT_VERIFY_TIMEOUT_MS;
+    /** Between charge-state polls. */
+    protected chargePortVerifyIntervalMs = CHARGE_PORT_VERIFY_INTERVAL_MS;
     /** Bound on one keepalive read. */
     protected keepaliveTimeoutMs = 2000;
 
@@ -860,6 +872,139 @@ export default class VehicleBluetooth extends BroadcastListeners {
     }
 
     /**
+     * Open the flap or release a cable. Under `"verify"`, the charging subsystem
+     * is made ready first, and only physical state counts as success afterwards:
+     * an opening has been reported waking a sleeping car without releasing the
+     * latch. No readiness failure has sent anything, so a router may fail over on
+     * any of them. Once the one opening write has gone, an unresolved result always
+     * raises `BluetoothUnconfirmedCommand`, whatever `raise_unconfirmed` says, and
+     * it is never sent again: a best-effort success would hide a latch that never
+     * released, and a replay could release a cable the caller had plugged back in.
+     * Other modes keep the ordinary VCSEC ladder.
+     * @throws BluetoothCommandFailed when the car is asleep with `wake_if_asleep` off, or the cable state is unknown.
+     * @throws BluetoothTimeout when the car is not ready in time.
+     * @throws BluetoothUnconfirmedCommand when physical state never showed the opening.
+     */
+    override async charge_port_door_open(): Promise<CommandResponse> {
+        if (this.confirmation !== "verify") {
+            return super.charge_port_door_open();
+        }
+        const connected = await this.chargePortPreflight();
+
+        // A good ack and a lost one both go on to physical verification, so this
+        // bypasses the ladder. Replies that prove nothing about execution are
+        // kept as the cause. Pre-submission failures and explicit car-side
+        // rejections stay as they are.
+        let cause: unknown;
+        try {
+            const result = await super.sendVehicleSecurity(
+                UnsignedMessage.create({ closureMoveRequest: ClosureMoveRequest.create({ chargePort: ClosureMoveTypeE.CLOSURE_MOVE_TYPE_OPEN }) }),
+            );
+            if (result.response.result === false) {
+                return result;
+            }
+        } catch (error) {
+            if (!leavesOpeningAmbiguous(error)) {
+                throw error;
+            }
+            cause = error;
+        }
+        return this.verifyChargePortOpened(connected, cause);
+    }
+
+    /**
+     * Everything before the opening, under one `wakeTimeoutMs` deadline.
+     * @returns Whether a cable is connected, which picks the proof of success.
+     */
+    private async chargePortPreflight(): Promise<boolean> {
+        const deadline = performance.now() + this.wakeTimeoutMs;
+        const over = new AbortController();
+        try {
+            const connected = await withTimeout(() => this.chargePortReadiness(over.signal), this.wakeTimeoutMs);
+            try {
+                await withTimeout(() => this.ensureHandshake(VCSEC), deadline - performance.now());
+            } catch (error) {
+                await this.dropLinkOnFailure("vehicle security handshake failed", error);
+                throw error;
+            }
+            return connected;
+        } catch (error) {
+            if (error instanceof BleCallTimeout) {
+                throw new BluetoothTimeout("Charge-port readiness timed out", null, { cause: error });
+            }
+            throw error;
+        } finally {
+            over.abort();
+        }
+    }
+
+    private async chargePortReadiness(over: AbortSignal): Promise<boolean> {
+        if (await this.vehicleAsleep()) {
+            if (!this.wake_if_asleep) {
+                throw new BluetoothCommandFailed("Vehicle asleep; wake disabled");
+            }
+            await this.wakeForCommand(new BluetoothTimeout());
+        } else {
+            // A cached session and VCSEC reporting awake do not prove readiness.
+            await this.awaitInfotainment(this.infotainmentBootTimeoutMs, false, over);
+        }
+
+        for (;;) {
+            try {
+                const connected = chargePortConnected(await this.charge_state());
+                if (connected === null) {
+                    throw new BluetoothCommandFailed("Charge-port cable state unknown; no opening command sent");
+                }
+                return connected;
+            } catch (error) {
+                if (error instanceof InvalidResponse) {
+                    throw new BluetoothCommandFailed("Charge-port cable state unknown; no opening command sent", null, { cause: error });
+                }
+                // Infotainment can answer a handshake before it has charge data.
+                if (!(error instanceof BluetoothTimeout) || over.aborted) {
+                    throw error;
+                }
+            }
+            await sleep(this.chargePortVerifyIntervalMs);
+        }
+    }
+
+    /**
+     * Poll for the physical result, holding to the goal set before the opening:
+     * an open flap must never stand in for a latch that did not release. Nothing
+     * here may send the opening again, and no failed read may reach a router as
+     * anything but unconfirmed.
+     */
+    private async verifyChargePortOpened(connected: boolean, opening: unknown): Promise<CommandResponse> {
+        const name = "closureMoveRequest";
+        const log = (message: string) => this.log(message);
+        let cause = opening;
+        const deadline = performance.now() + this.chargePortVerifyTimeoutMs;
+        for (let remaining = this.chargePortVerifyTimeoutMs; remaining > 0; remaining = deadline - performance.now()) {
+            try {
+                const after = await withTimeout(() => this.charge_state(), remaining);
+                const confirmed = connected
+                    ? after.chargePortLatch?.Disengaged !== undefined
+                    : chargePortConnected(after) === false && after.chargePortDoorOpen === true;
+                if (confirmed) {
+                    log(`command=${name} transport=${this._transport_name} physical_confirmation=confirmed`);
+                    logRequestResult(log, name, this._transport_name, success());
+                    return success();
+                }
+            } catch (error) {
+                if (!(error instanceof BleCallTimeout)) {
+                    cause = error;
+                }
+            }
+            await sleep(Math.min(this.chargePortVerifyIntervalMs, Math.max(0, deadline - performance.now())));
+        }
+        const unconfirmed = new BluetoothUnconfirmedCommand("Charge-port opening was not confirmed by physical state", null, { cause });
+        log(`command=${name} transport=${this._transport_name} physical_confirmation=unconfirmed`);
+        logRequestError(log, name, this._transport_name, unconfirmed);
+        throw unconfirmed;
+    }
+
+    /**
      * Send a VCSEC actuation through the confirmation ladder. A plan's check also
      * races the ack, so `options` is ignored: the plan is the only source of it.
      */
@@ -1059,9 +1204,10 @@ export default class VehicleBluetooth extends BroadcastListeners {
     /**
      * Probe infotainment until it answers. With `wake`, the RKE wake is sent
      * first and resent every `wakeResendIntervalMs`.
+     * @param over Stops the probing, for a caller that has stopped waiting.
      * @throws BluetoothTimeout at the deadline.
      */
-    protected async awaitInfotainment(timeoutMs: number, wake: boolean): Promise<void> {
+    protected async awaitInfotainment(timeoutMs: number, wake: boolean, over?: AbortSignal): Promise<void> {
         const deadline = performance.now() + timeoutMs;
         let nextWake = performance.now();
         for (;;) {
@@ -1077,7 +1223,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
                 nextWake = performance.now() + this.wakeResendIntervalMs;
             }
             const remaining = deadline - performance.now();
-            if (remaining <= 0) {
+            if (remaining <= 0 || over?.aborted) {
                 throw new BluetoothTimeout();
             }
             try {
@@ -1106,6 +1252,22 @@ export default class VehicleBluetooth extends BroadcastListeners {
             throw new BluetoothTimeout();
         }
     }
+}
+
+/**
+ * Whether a failed opening may still have run. An unauthenticated, replayed or
+ * undecodable reply says nothing about that, nor does a backend failure, and a
+ * reply too big for the MTU can follow execution. Only a proven pre-submission
+ * failure or an explicit car-side rejection, both `TeslaFleetError`s, rule it out.
+ */
+function leavesOpeningAmbiguous(error: unknown): boolean {
+    return (
+        !(error instanceof TeslaFleetError) ||
+        error instanceof BluetoothTimeout ||
+        error instanceof SessionInfoAuthenticationFault ||
+        error instanceof SignedCommandResponseReplayed ||
+        error instanceof TeslaFleetMessageFaultResponseSizeExceedsMTU
+    );
 }
 
 /** An error's class and message, for a log line. */

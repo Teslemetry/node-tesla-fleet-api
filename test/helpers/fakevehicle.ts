@@ -66,6 +66,8 @@ export class FakeVehicle {
     vehicleStatus: VehicleStatus | null = null;
     /** Called with each accepted VCSEC command, before the reply is built. */
     onVcsecCommand: ((command: UnsignedMessage) => void) | null = null;
+    /** Answers an accepted Infotainment action. `null` leaves it to the usual reply. */
+    onInfotainmentAction: ((action: Action) => Response | null) | null = null;
     /** Counters of every VCSEC command in the order this FakeVehicle actually received them - for concurrency/ordering tests. */
     readonly vcsecCounterArrivals: number[] = [];
     /** Every accepted VCSEC command, decoded on this side of the wire. */
@@ -333,6 +335,19 @@ export class FakeVehicle {
         return Buffer.from(RoutableMessage.encode(reply).finish());
     }
 
+    /**
+     * The VCSEC command inside a request, opened as this vehicle would but with
+     * nothing recorded, so a test can count what a client wrote even for a frame
+     * the vehicle never receives. `null` for anything else.
+     */
+    peekVcsecCommand(msg: RoutableMessage): UnsignedMessage | null {
+        if (msg.toDestination?.domain !== Domain.DOMAIN_VEHICLE_SECURITY || msg.sessionInfoRequest || !msg.signatureData?.AESGCMPersonalizedData) {
+            return null;
+        }
+        const opened = this.openAesRequest(msg, Domain.DOMAIN_VEHICLE_SECURITY, this.stateFor(Domain.DOMAIN_VEHICLE_SECURITY));
+        return opened && UnsignedMessage.decode(opened);
+    }
+
     /** Process one request `RoutableMessage` exactly as a vehicle would, and return its reply bytes, addressed to its sender. */
     handle(requestBytes: Buffer): Buffer {
         const routingAddress = RoutableMessage.decode(requestBytes).fromDestination?.routingAddress;
@@ -460,7 +475,7 @@ export class FakeVehicle {
         } else {
             const action = Action.decode(command);
             this.infotainmentActions.push(action);
-            const scripted = this.nextInfotainmentReplies.shift();
+            const scripted = this.nextInfotainmentReplies.shift() ?? this.onInfotainmentAction?.(action);
             const ping = action.vehicleAction?.ping;
             payload = Response.encode(
                 scripted ??

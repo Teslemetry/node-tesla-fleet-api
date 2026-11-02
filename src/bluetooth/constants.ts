@@ -48,6 +48,10 @@ export const DEFAULT_WAKE_PROBE_TIMEOUT_MS = 1000;
 export const WAKE_RESEND_INTERVAL_MS = 3000;
 /** How long an awake car's infotainment may take to finish booting. */
 export const INFOTAINMENT_BOOT_TIMEOUT_MS = 20_000;
+/** How long a charge-port opening has to show in charge state. It took about 1.4 s in live trials. */
+export const CHARGE_PORT_VERIFY_TIMEOUT_MS = 5000;
+/** Between charge-state polls, while waiting for readiness or for the latch. */
+export const CHARGE_PORT_VERIFY_INTERVAL_MS = 250;
 /** Connect attempts. Each is bounded by `DEFAULT_CONNECT_TIMEOUT_MS`. */
 export const DEFAULT_CONNECT_ATTEMPTS = 3;
 /** One connect attempt. Python takes the same figure from `bleak-retry-connector`. */

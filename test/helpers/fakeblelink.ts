@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { Domain, RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
-import { FromVCSECMessage, VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
+import { FromVCSECMessage, UnsignedMessage, VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
 import type {
     BleCharacteristic,
     BleConnection,
@@ -98,6 +98,12 @@ export class FakeBleLink implements BleTransport {
     readonly calls: GattCall[] = [];
     /** Every frame that reached the vehicle whole. */
     readonly frames: RoutableMessage[] = [];
+    /**
+     * Every VCSEC command the client finished writing, in the clear. A write that
+     * then failed still counts, as it may have reached the car, so this and not
+     * `frames` is what proves "exactly one".
+     */
+    readonly vcsecWrites: UnsignedMessage[] = [];
     readonly connections: FakeConnection[] = [];
     /** Bytes a read of `version` returns. */
     version: Uint8Array = Buffer.from([0x00, 0x01]);
@@ -324,6 +330,10 @@ export class FakeBleLink implements BleTransport {
         this.rx = this.rx.subarray(payload.length + 2);
         const request = RoutableMessage.decode(payload);
 
+        const command = this.vehicle.peekVcsecCommand(request);
+        if (command) {
+            this.vcsecWrites.push(command);
+        }
         const fault = this.takeFirst(this.writeFaults, request);
         if (fault?.when === "before") {
             await this.applyFault(fault);

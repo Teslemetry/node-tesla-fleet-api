@@ -57,6 +57,23 @@ export function withTimeout<T>(operation: () => Promise<T>, timeoutMs: number, s
     });
 }
 
+/** Resolve after `ms`, or as soon as `signal` aborts. */
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve) => {
+        if (signal?.aborted) {
+            resolve();
+            return;
+        }
+        const finish = () => {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", finish);
+            resolve();
+        };
+        const timer = setTimeout(finish, ms);
+        signal?.addEventListener("abort", finish, { once: true });
+    });
+}
+
 /** A queue with one consumer at a time. */
 export class ReplyQueue<T> {
     private items: T[] = [];

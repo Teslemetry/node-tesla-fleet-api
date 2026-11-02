@@ -32,7 +32,13 @@ export class TestVehicle extends VehicleBluetooth {
     }
 
     /** Shorten one of the ladder's timings. */
-    tune(timings: { wakeTimeoutMs?: number; infotainmentBootTimeoutMs?: number; wakeResendIntervalMs?: number }): void {
+    tune(timings: {
+        wakeTimeoutMs?: number;
+        infotainmentBootTimeoutMs?: number;
+        wakeResendIntervalMs?: number;
+        chargePortVerifyTimeoutMs?: number;
+        chargePortVerifyIntervalMs?: number;
+    }): void {
         Object.assign(this, timings);
     }
 }
