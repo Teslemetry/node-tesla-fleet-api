@@ -94,7 +94,7 @@ type MissingReply =
     | "raise"
     /** Accept an empty reply, because some firmware omits the response. Anything else raises. */
     | "empty"
-    /** Accept a reply that lacks the response or does not decode, but still raise on `common.error_response`. */
+    /** Accept a reply that lacks the response, but still raise on `common.error_response`. */
     | "unverified";
 
 function isRecord(value: unknown): value is Record<string, any> {
@@ -1044,16 +1044,7 @@ export class PowerwallClient {
             throw error;
         }
 
-        let response: MessageEnvelope;
-        try {
-            response = decodeEnvelope(inner, request);
-        } catch (error) {
-            if (missing === "unverified") {
-                this.#logger?.debug(`${request}: reply does not decode (${inner.length} bytes)`);
-                return MessageEnvelope.create();
-            }
-            throw error;
-        }
+        const response = decodeEnvelope(inner, request);
         if (answered(response) !== undefined) {
             return response;
         }

@@ -106,9 +106,16 @@ describe("set_island_mode", () => {
         await expect(client.reconnect_grid()).rejects.toBeInstanceOf(PowerwallProtocolError);
     });
 
-    it("returns on a reply that does not decode, as Python does", async () => {
+    it("raises on a reply that does not decode, unlike Python", async () => {
         gateway.reply({ inner: Buffer.from("ffffffff", "hex") });
-        await expect(client.reconnect_grid()).resolves.toBeUndefined();
+        await expect(client.reconnect_grid()).rejects.toBeInstanceOf(PowerwallProtocolError);
+    });
+
+    it("does not fail over or resend on a reply that does not decode", async () => {
+        gateway.reply({ inner: Buffer.from("ffffffff", "hex") });
+        const error = await client.go_off_grid().catch((caught: unknown) => caught);
+        expect((error as { failover_safe?: boolean }).failover_safe).toBeUndefined();
+        expect(gateway.posts).toHaveLength(1);
     });
 
     it("raises on common.error_response", async () => {
@@ -155,10 +162,14 @@ describe("trigger_islanding", () => {
         expect(gateway.posts[0].envelope.teg?.triggerIslandingBlackStartRequest).toEqual({});
     });
 
-    it("returns whatever comes back, as Python does", async () => {
-        gateway.reply({ envelope: { teg: {} } }, { inner: Buffer.from("ffffffff", "hex") });
+    it("returns on a reply without the response", async () => {
+        gateway.reply({ envelope: { teg: {} } });
         await expect(client.trigger_islanding()).resolves.toBeUndefined();
-        await expect(client.trigger_islanding()).resolves.toBeUndefined();
+    });
+
+    it("raises on a reply that does not decode, unlike Python", async () => {
+        gateway.reply({ inner: Buffer.from("ffffffff", "hex") });
+        await expect(client.trigger_islanding()).rejects.toBeInstanceOf(PowerwallProtocolError);
     });
 
     it("raises on common.error_response, unlike Python", async () => {
