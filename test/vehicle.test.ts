@@ -72,7 +72,7 @@ describe("VehicleSpecific REST routes", () => {
     });
 
     it("clear_pin_to_drive_admin leaves the pin out when omitted", async () => {
-        const { vehicle, request } = makeVehicle();
+        const { request, vehicle } = stubRequest();
         await vehicle.clear_pin_to_drive_admin();
         expect(request).toHaveBeenCalledWith("POST", `api/1/vehicles/${VIN}/command/clear_pin_to_drive_admin`, null, { pin: undefined });
     });
