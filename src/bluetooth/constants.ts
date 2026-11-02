@@ -52,6 +52,10 @@ export const INFOTAINMENT_BOOT_TIMEOUT_MS = 20_000;
 export const CHARGE_PORT_VERIFY_TIMEOUT_MS = 5000;
 /** Between charge-state polls, while waiting for readiness or for the latch. */
 export const CHARGE_PORT_VERIFY_INTERVAL_MS = 250;
+/** How long `pair` waits for someone to tap a key card. */
+export const DEFAULT_PAIR_TIMEOUT_MS = 300_000;
+/** Between `pair`'s checks of whether the key was accepted. */
+export const DEFAULT_PAIR_POLL_INTERVAL_MS = 5000;
 /** Connect attempts. Each is bounded by `DEFAULT_CONNECT_TIMEOUT_MS`. */
 export const DEFAULT_CONNECT_ATTEMPTS = 3;
 /** One connect attempt. Python takes the same figure from `bleak-retry-connector`. */

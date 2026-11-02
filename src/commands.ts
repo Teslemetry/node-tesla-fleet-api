@@ -902,7 +902,7 @@ export default abstract class Commands extends VehicleSpecific {
         return ok();
     }
 
-    private raiseWhitelistFault(information: WhitelistOperationInformationE | undefined): void {
+    protected raiseWhitelistFault(information: WhitelistOperationInformationE | undefined): void {
         if (!information) {
             return;
         }

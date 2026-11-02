@@ -12,7 +12,15 @@ import {
     Tag,
     SignatureType,
 } from "@teslemetry/tesla-protocol/command/signatures";
-import { UnsignedMessage, FromVCSECMessage, CommandStatus, OperationStatusE as VcsecOperationStatusE, VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
+import {
+    UnsignedMessage,
+    FromVCSECMessage,
+    CommandStatus,
+    OperationStatusE as VcsecOperationStatusE,
+    VehicleStatus,
+    WhitelistOperation,
+    WhitelistOperationInformationE,
+} from "@teslemetry/tesla-protocol/command/vcsec";
 import { Action, Response, ActionStatus, OperationStatusE as ActionOperationStatusE } from "@teslemetry/tesla-protocol/command/car_server";
 import { deriveSharedKey, publicKeyFor, uint32BE } from "../../src/signing/crypto.js";
 
@@ -64,6 +72,12 @@ export class FakeVehicle {
     private replyFlags = 0;
     /** What a VCSEC status read returns. Unset, it gets the same `commandStatus` OK as any other command. */
     vehicleStatus: VehicleStatus | null = null;
+    /** Whether the client's key is on the whitelist. Until it is, every handshake answers with no public key. */
+    keyEnrolled = true;
+    /** What the next whitelist operation's reply reports. */
+    whitelistInformation = WhitelistOperationInformationE.WHITELISTOPERATION_INFORMATION_NONE;
+    /** Every whitelist operation that reached this vehicle. */
+    readonly whitelistOperations: WhitelistOperation[] = [];
     /** Called with each accepted VCSEC command, before the reply is built. */
     onVcsecCommand: ((command: UnsignedMessage) => void) | null = null;
     /** Answers an accepted Infotainment action. `null` leaves it to the usual reply. */
@@ -341,11 +355,44 @@ export class FakeVehicle {
      * the vehicle never receives. `null` for anything else.
      */
     peekVcsecCommand(msg: RoutableMessage): UnsignedMessage | null {
-        if (msg.toDestination?.domain !== Domain.DOMAIN_VEHICLE_SECURITY || msg.sessionInfoRequest || !msg.signatureData?.AESGCMPersonalizedData) {
+        if (msg.toDestination?.domain !== Domain.DOMAIN_VEHICLE_SECURITY || msg.sessionInfoRequest) {
+            return null;
+        }
+        if (!msg.signatureData) {
+            return UnsignedMessage.decode(msg.protobufMessageAsBytes ?? new Uint8Array());
+        }
+        if (!msg.signatureData.AESGCMPersonalizedData) {
             return null;
         }
         const opened = this.openAesRequest(msg, Domain.DOMAIN_VEHICLE_SECURITY, this.stateFor(Domain.DOMAIN_VEHICLE_SECURITY));
         return opened && UnsignedMessage.decode(opened);
+    }
+
+    /** The only unsigned command a vehicle takes: a request to add a key, for someone to approve at the car. */
+    private handleUnsigned(msg: RoutableMessage, domain: Domain): Buffer {
+        const operation = UnsignedMessage.decode(msg.protobufMessageAsBytes ?? new Uint8Array()).WhitelistOperation;
+        if (domain !== Domain.DOMAIN_VEHICLE_SECURITY || !operation) {
+            throw new Error("FakeVehicle only takes a whitelist operation unsigned.");
+        }
+        this.whitelistOperations.push(operation);
+        return Buffer.from(RoutableMessage.encode(this.whitelistReply(msg.uuid)).finish());
+    }
+
+    /** The reply a whitelist operation gets once the tap is done. */
+    whitelistReply(requestUuid: Uint8Array = new Uint8Array(0)): RoutableMessage {
+        return RoutableMessage.create({
+            fromDestination: { domain: Domain.DOMAIN_VEHICLE_SECURITY },
+            requestUuid,
+            protobufMessageAsBytes: FromVCSECMessage.encode(
+                FromVCSECMessage.fromPartial({
+                    commandStatus: {
+                        operationStatus: VcsecOperationStatusE.OPERATIONSTATUS_OK,
+                        whitelistOperationStatus: { whitelistOperationInformation: this.whitelistInformation },
+                    },
+                }),
+            ).finish(),
+            uuid: crypto.randomBytes(16),
+        });
     }
 
     /** Process one request `RoutableMessage` exactly as a vehicle would, and return its reply bytes, addressed to its sender. */
@@ -366,7 +413,7 @@ export class FakeVehicle {
             state.sharedKey = undefined;
             state.hmacKey = undefined;
             state.sessionInfoKey = undefined;
-            const status = this.emptyKeyHandshakeStatuses.shift();
+            const status = this.keyEnrolled ? this.emptyKeyHandshakeStatuses.shift() : SessionInfoStatus.SESSION_INFO_STATUS_KEY_NOT_ON_WHITELIST;
             if (status !== undefined) {
                 const reply = RoutableMessage.create({
                     fromDestination: { domain },
@@ -378,6 +425,10 @@ export class FakeVehicle {
                 return Buffer.from(RoutableMessage.encode(reply).finish());
             }
             return this.buildSessionInfoReply(domain, msg.uuid, SessionInfoStatus.SESSION_INFO_STATUS_OK, state);
+        }
+
+        if (!msg.signatureData) {
+            return this.handleUnsigned(msg, domain);
         }
 
         if (this.nextOutcome === "not_whitelisted") {

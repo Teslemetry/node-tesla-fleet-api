@@ -1,13 +1,18 @@
+import crypto from "crypto";
 import { Domain, RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
+import { Role } from "@teslemetry/tesla-protocol/command/keys";
 import {
     ClosureMoveRequest,
     ClosureMoveTypeE,
+    FromVCSECMessage,
     InformationRequest,
     InformationRequestType,
+    KeyFormFactor,
     RKEActionE,
     UnsignedMessage,
     VehicleSleepStatusE,
     VehicleStatus,
+    WhitelistOperation,
 } from "@teslemetry/tesla-protocol/command/vcsec";
 import {
     Action,
@@ -84,7 +89,7 @@ import {
     TeslaFleetError,
     TeslaFleetMessageFaultResponseSizeExceedsMTU,
 } from "../exceptions.js";
-import { AsyncLock, BleCallTimeout, ReplyQueue, sleep, withTimeout } from "./async.js";
+import { AsyncLock, BleCallTimeout, ReplyQueue, abortable, sleep, withTimeout } from "./async.js";
 import { BroadcastListeners, ListenerRegistry, Unsubscribe, decodeVcsecStatus } from "./broadcast.js";
 import {
     CHARGE_PORT_VERIFY_INTERVAL_MS,
@@ -93,6 +98,8 @@ import {
     DEFAULT_CONNECT_TIMEOUT_MS,
     DEFAULT_KEEPALIVE_INTERVAL_MS,
     DEFAULT_MAX_WRITE_SIZE,
+    DEFAULT_PAIR_POLL_INTERVAL_MS,
+    DEFAULT_PAIR_TIMEOUT_MS,
     DEFAULT_SCAN_TIMEOUT_MS,
     DEFAULT_WAKE_PROBE_TIMEOUT_MS,
     DEFAULT_WAKE_TIMEOUT_MS,
@@ -148,6 +155,19 @@ export interface FindVehicleOptions {
     /** Match this `BleDeviceRef.id`, instead of a name. */
     address?: string;
     timeoutMs?: number;
+}
+
+export interface PairOptions {
+    /** The role the key gets. Defaults to `ROLE_OWNER`. */
+    role?: Role;
+    /** The form factor the vehicle lists the key under. Defaults to `KEY_FORM_FACTOR_CLOUD_KEY`. */
+    form?: KeyFormFactor;
+    /** How long to wait for the key card tap. Defaults to 300000. */
+    timeoutMs?: number;
+    /** Between checks of whether the key was accepted. Defaults to 5000. */
+    pollIntervalMs?: number;
+    /** Stops the wait, for a user who walked away. Nothing is written after it aborts. */
+    signal?: AbortSignal;
 }
 
 const VCSEC = Domain.DOMAIN_VEHICLE_SECURITY;
@@ -1456,6 +1476,150 @@ export default class VehicleBluetooth extends BroadcastListeners {
     }
 
     /**
+     * Ask the vehicle to add this instance's key, which someone confirms by tapping
+     * a key card on the console. Resolves once the key is on the whitelist.
+     *
+     * The whitelist operation is written exactly once, because a resend prompts
+     * the user again. Its reply is one frame, which a link that cycles during the
+     * walk to the car can lose, so completion is also proved by polling: a VCSEC
+     * handshake only succeeds once this key is whitelisted, and it reconnects, so
+     * the wait survives a dropped link.
+     *
+     * Tesla's Go SDK sends a bare `ToVCSECMessage` here. This wraps the
+     * `UnsignedMessage` in a `RoutableMessage`, as Python does, and that has paired
+     * a real car. If pairing fails on another vehicle, look there first.
+     * @throws RangeError when `pollIntervalMs` is not positive, before anything is sent.
+     * @throws SigningDisabled when this instance has no key, before anything is sent.
+     * @throws BluetoothTimeout when nothing confirmed it by `timeoutMs`, with the link dropped.
+     * @throws WhitelistOperationStatus or a subclass when the vehicle refused the key.
+     * @throws The reason of `signal`, once it aborts. The link is kept.
+     */
+    async pair({
+        role = Role.ROLE_OWNER,
+        form = KeyFormFactor.KEY_FORM_FACTOR_CLOUD_KEY,
+        timeoutMs = DEFAULT_PAIR_TIMEOUT_MS,
+        pollIntervalMs = DEFAULT_PAIR_POLL_INTERVAL_MS,
+        signal,
+    }: PairOptions = {}): Promise<void> {
+        if (pollIntervalMs <= 0) {
+            throw new RangeError("pollIntervalMs must be greater than 0");
+        }
+        // The handshake's own guard is not on this path.
+        if (this.publicKey.length === 0) {
+            throw new SigningDisabled();
+        }
+        signal?.throwIfAborted();
+
+        const request = UnsignedMessage.create({
+            WhitelistOperation: WhitelistOperation.fromPartial({
+                addKeyToWhitelistAndAddPermissions: { key: { PublicKeyRaw: this.publicKey }, keyRole: role },
+                metadataForKey: { keyFormFactor: form },
+            }),
+        });
+        const msg = RoutableMessage.create({
+            toDestination: { domain: VCSEC },
+            fromDestination: { routingAddress: this.fromDestination },
+            protobufMessageAsBytes: UnsignedMessage.encode(request).finish(),
+            uuid: crypto.randomBytes(16),
+        });
+
+        try {
+            await this.confirmPairing(msg, timeoutMs, pollIntervalMs, signal);
+        } catch (error) {
+            if (!signal?.aborted) {
+                await this.dropLinkOnFailure("pairing failed", error);
+            }
+            throw error;
+        }
+    }
+
+    private async confirmPairing(msg: RoutableMessage, timeoutMs: number, pollIntervalMs: number, signal?: AbortSignal): Promise<void> {
+        const deadline = performance.now() + timeoutMs;
+
+        // Write the operation once and give its reply one interval. A lost reply
+        // falls through to polling, never to a resend.
+        try {
+            const send = this._send(msg, "protobuf_message_as_bytes", {
+                timeoutMs: Math.max(0, Math.min(pollIntervalMs, deadline - performance.now())),
+            });
+            this.raiseForWhitelistReply(await abortable(send, signal));
+            return;
+        } catch (error) {
+            if (!(error instanceof BluetoothTimeout)) {
+                throw error;
+            }
+        }
+
+        const confirmed = async () => this.consumeLateWhitelistReply() || (await abortable(this.pairProbe(), signal));
+        while (performance.now() < deadline) {
+            signal?.throwIfAborted();
+            if (await confirmed()) {
+                return;
+            }
+            const remaining = deadline - performance.now();
+            if (remaining <= 0) {
+                break;
+            }
+            await sleep(Math.min(pollIntervalMs, remaining), signal);
+        }
+        signal?.throwIfAborted();
+        if (await confirmed()) {
+            return;
+        }
+        throw new BluetoothTimeout();
+    }
+
+    /**
+     * Whether this key is on the whitelist: a VCSEC handshake only completes once
+     * it is. Any failure means "not yet", so polling carries on across a dropped
+     * link. It sends one request, unlike `handshake`, because the next poll is the
+     * retry, and nothing may be written after a `pair` is aborted.
+     */
+    private async pairProbe(): Promise<boolean> {
+        const session = this.sessionFor(VCSEC);
+        try {
+            return await session.withLock(async () => {
+                await this._send(this.sessionInfoRequest(VCSEC), "session_info");
+                return session.ready;
+            });
+        } catch (error) {
+            if (error instanceof TeslaFleetError) {
+                return false;
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Look for a whitelist reply that arrived after `_send` stopped waiting. This
+     * must run before a probe, whose `_send` discards what is queued. Anything else
+     * in the queue stays there.
+     * @returns Whether one was there and reported success.
+     * @throws WhitelistOperationStatus or a subclass when it reported a refusal.
+     */
+    private consumeLateWhitelistReply(): boolean {
+        const queue = this.queues[VCSEC]!;
+        let reply: RoutableMessage | undefined;
+        for (const queued of queue.drain()) {
+            if (reply === undefined && isWhitelistReply(queued)) {
+                reply = queued;
+            } else {
+                queue.push(queued);
+            }
+        }
+        if (reply === undefined) {
+            return false;
+        }
+        this.raiseForWhitelistReply(reply);
+        return true;
+    }
+
+    private raiseForWhitelistReply(reply: RoutableMessage): void {
+        const message = FromVCSECMessage.decode(reply.protobufMessageAsBytes ?? new Uint8Array());
+        this.raiseWhitelistFault(message.commandStatus?.whitelistOperationStatus?.whitelistOperationInformation);
+    }
+
+    /**
      * Wake the vehicle. Takes `VehicleSpecific`'s options, but resolves to a
      * `CommandResponse`, not the REST `VehicleResponse`.
      *
@@ -1532,6 +1696,14 @@ export default class VehicleBluetooth extends BroadcastListeners {
         if (!this.sessionFor(INFOTAINMENT).ready) {
             throw new BluetoothTimeout();
         }
+    }
+}
+
+function isWhitelistReply(reply: RoutableMessage): boolean {
+    try {
+        return FromVCSECMessage.decode(reply.protobufMessageAsBytes ?? new Uint8Array()).commandStatus?.whitelistOperationStatus !== undefined;
+    } catch {
+        return false;
     }
 }
 

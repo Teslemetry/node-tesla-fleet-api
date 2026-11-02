@@ -9,7 +9,7 @@ export { default as TeslaBluetooth, VehiclesBluetooth } from "./teslabluetooth.j
 export { BleNotSubmittedError } from "./transport.js";
 export type { BluetoothConfirmation } from "./verify.js";
 export { default as VehicleBluetooth } from "./vehiclebluetooth.js";
-export type { FindVehicleOptions, VehicleBluetoothOptions } from "./vehiclebluetooth.js";
+export type { FindVehicleOptions, PairOptions, VehicleBluetoothOptions } from "./vehiclebluetooth.js";
 export type {
     BleCharacteristic,
     BleConnection,
