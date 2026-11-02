@@ -35,7 +35,8 @@
         "changeset": "changeset",
         "ci:publish": "changeset publish",
         "build": "tsdown",
-        "powerwall:check": "tsx scripts/powerwall-readonly-check.ts"
+        "powerwall:check": "tsx scripts/powerwall-readonly-check.ts",
+        "ble:live": "tsx scripts/ble-live/run.ts"
     },
     "publishConfig": {
         "access": "public",

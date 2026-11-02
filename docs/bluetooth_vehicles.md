@@ -209,3 +209,22 @@ A held link receives unsigned `VehicleStatus` broadcasts. Each `listen_*` return
 | Signing, framing and sessions | Fake vehicle only, against golden vectors | Yes |
 
 The adapters' decisions come from reading each backend's code and types, and from what Python measured. Dated results go in [`OBSERVATIONS.md`](../OBSERVATIONS.md), and nothing here should be read as proven until an entry says so.
+
+## Live harness
+
+`scripts/ble-live/` is how a person proves this on a car. It has not been run on one: CI runs it on a fake link. Keep its output out of git.
+
+```bash
+BLE_LIVE_VIN=<vin> BLE_LIVE_KEY_PATH=<file> pnpm ble:live --transport noble
+BLE_LIVE_VIN=<vin> BLE_LIVE_KEY_PATH=<file> BLE_LIVE_PROXY_HOST=<host> \
+  pnpm ble:live --transport esphome --steps charge_limit
+```
+
+`--list` shows the steps. With no `--steps` it runs the plain reads. `BLE_LIVE_PROXY_PORT`, `BLE_LIVE_PROXY_KEY` and `BLE_LIVE_PROXY_PASSWORD` are optional. Homey has no command line, as it needs a test app.
+
+- A setting is snapshotted, changed once, verified by a fresh read, restored by an absolute command, and read again.
+- **A command that times out is never sent again.** The next read decides, and the run stops at the first step that did not end cleanly.
+- Steps with a physical effect, and `pair`, refuse to run without `--captain-present`. Pass it only when someone is at the car.
+- There is no step for an individual door, and no path at all to a destructive command. A run takes step names, never a command name.
+- A run with a sleep or wake step sets `keepalive_interval_ms: null`, as keepalive reads keep a car awake.
+- It prints step names, error classes, write and frame counts, and the value of the setting under test. It never prints a VIN, a key, a BLE name or an address, and reads print only that they worked.
