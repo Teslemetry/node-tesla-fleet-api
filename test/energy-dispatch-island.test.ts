@@ -199,6 +199,23 @@ describe("island mode", () => {
         await expect(site.reconnect_grid()).resolves.toEqual(islandReply(result));
     });
 
+    it.each([0, 2, 3, 5, 7, 99, -1, 1.5, NaN, Infinity, "6", "1", null, undefined, true, false, {}, [6]])("refuses mode %j before signing", async (mode) => {
+        const { site, fetchMock } = makeSite(TEST_KEY);
+        await expect(site.set_island_mode(mode as number)).rejects.toBeInstanceOf(TypeError);
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it.each([1, "true"])("refuses force %j before signing", async (force) => {
+        const { site, fetchMock } = makeSite(TEST_KEY);
+        await expect(site.set_island_mode(6, force as boolean)).rejects.toBeInstanceOf(TypeError);
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("refuses a bad mode without a key too, rather than asking for one", async () => {
+        const { site } = makeSite();
+        await expect(site.set_island_mode(99)).rejects.toBeInstanceOf(TypeError);
+    });
+
     it("signs an explicit mode and force", async () => {
         const { site, fetchMock } = makeSite(TEST_KEY);
 

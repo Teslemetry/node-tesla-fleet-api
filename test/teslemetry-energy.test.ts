@@ -61,6 +61,12 @@ describe("TeslemetryEnergySites", () => {
 });
 
 describe("keyless set_island_mode refusals", () => {
+    it.each([0, 2, 3, 5, 7, 99, -1, 1.5, NaN, Infinity, "6", "1", null, undefined, true, false, {}, [6]])("refuses mode %j before any request", async (mode) => {
+        const { site, fetchMock } = makeSite();
+        await expect(site.set_island_mode(mode as number)).rejects.toBeInstanceOf(TypeError);
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     // Teslemetry's route decodes the envelope and answers with the leaf, as `{ response: { result } }`.
     it.each<[string, number | string, number]>([
         ["a number", 4, 4],

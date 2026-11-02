@@ -7,6 +7,7 @@ import {
     EnergyIslandMode,
 } from "./const.js";
 import Energy from "./energy.js";
+import { validate_island_mode } from "./energyisland.js";
 import { AuthorizedClient, AuthorizedClients, parse_authorized_clients, parse_gateway_address } from "./energyparsers.js";
 import EnergySpecific, {
     backupSchedulingInfo,
@@ -102,6 +103,7 @@ export class TeslemetryEnergySite extends EnergySpecific {
         mode: EnergyIslandMode | number,
         force?: boolean | null,
     ): Promise<Record<string, any>> {
+        validate_island_mode(mode, force);
         if (this.signing) {
             return super.set_island_mode(mode, force);
         }

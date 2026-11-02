@@ -8,7 +8,7 @@ import {
     TeslaEnergyPeriod,
 } from "./const.js";
 import Energy from "./energy.js";
-import { island_mode_rejection } from "./energyisland.js";
+import { island_mode_rejection, validate_island_mode } from "./energyisland.js";
 import { DeviceUnexpectedResponse, InvalidCommand, SignedCommandRequired } from "./exceptions.js";
 import { EnergyDeviceSigner } from "./signing/energy.js";
 import { LiveStatusResponse } from "./types/live_status.js";
@@ -442,10 +442,12 @@ export default class EnergySpecific {
      * with a status read before relying on it.
      * @param mode `EnergyIslandMode.OFF_GRID` (6) or `ON_GRID` (1).
      * @param force Sent when given. Some gateways need `true` to open the contactor.
+     * @throws TypeError on any other mode, before signing.
      * @throws SignedCommandRequired without a signing key, before any request.
      * @throws DeviceUnexpectedResponse when the gateway refuses, as `REJECTED_LOW_ENERGY` and the like.
      */
     async set_island_mode(mode: EnergyIslandMode | number, force?: boolean | null): Promise<Record<string, any>> {
+        validate_island_mode(mode, force);
         const result = await this._signed_command("teg", "set_island_mode_request", force == null ? { mode } : { mode, force });
         raise_on_island_rejection(result);
         return result;

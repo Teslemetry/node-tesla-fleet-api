@@ -34,9 +34,28 @@ describe("set_island_mode", () => {
         expect(sentRequest()).toEqual({ mode: 6, force: true });
     });
 
-    it("lets go_off_grid drop force and override the mode", async () => {
-        await client.go_off_grid({ force: false, mode_override: 7 });
-        expect(sentRequest()).toEqual({ mode: 7, force: false });
+    it("lets go_off_grid drop force and name the mode", async () => {
+        await client.go_off_grid({ force: false, mode_override: 6 });
+        expect(sentRequest()).toEqual({ mode: 6, force: false });
+    });
+
+    it.each([0, 2, 3, 5, 7, 99, -1, 1.5, NaN, Infinity, "6", "1", true, false, {}, [6]])(
+        "refuses mode_override %j before any request",
+        async (mode) => {
+            await expect(client.go_off_grid({ mode_override: mode as number })).rejects.toBeInstanceOf(TypeError);
+            expect(gateway.logins).toHaveLength(0);
+            expect(gateway.posts).toHaveLength(0);
+        },
+    );
+
+    it.each([undefined, null, 1, "true"])("refuses off_grid %j: a missing mode has no default", async (off_grid) => {
+        await expect(client.set_island_mode({ off_grid: off_grid as boolean })).rejects.toBeInstanceOf(TypeError);
+        expect(gateway.posts).toHaveLength(0);
+    });
+
+    it.each([1, "true", {}])("refuses force %j", async (force) => {
+        await expect(client.set_island_mode({ off_grid: true, force: force as boolean })).rejects.toBeInstanceOf(TypeError);
+        expect(gateway.posts).toHaveLength(0);
     });
 
     it("sends mode 1 without force from reconnect_grid", async () => {

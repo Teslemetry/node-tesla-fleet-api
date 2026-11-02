@@ -30,7 +30,7 @@ import {
     PowerwallNotSupportedError,
     PowerwallProtocolError,
 } from "./exceptions.js";
-import { island_mode_rejection } from "../energyisland.js";
+import { island_mode_rejection, validate_island_mode } from "../energyisland.js";
 import { validate_dispatch_battery_power } from "../energyspecific.js";
 import type { Logger } from "../log.js";
 import type {
@@ -882,17 +882,22 @@ export class PowerwallClient {
      * from `get_status` afterwards before relying on it.
      * @param options.off_grid Mode 6 (off grid) when true, mode 1 (on grid) when false.
      * @param options.force Required by some Powerwalls.
-     * @param options.mode_override Send this mode instead.
+     * @param options.mode_override Send this mode instead: 1 or 6.
+     * @throws TypeError on any other mode, or an `off_grid` that is not a boolean.
      * @throws PowerwallCommandError on a `REJECTED_*` result, with `code` the enum value and `status_message` its name, or on `common.error_response`.
      */
     async set_island_mode(options: { off_grid: boolean; force?: boolean; mode_override?: number | null }): Promise<void> {
         const { off_grid, force = false, mode_override } = options;
-        const din = await this.connect();
+        if (typeof off_grid !== "boolean") {
+            throw new TypeError("off_grid must be a boolean");
+        }
         const mode: TEGIslandMode =
             mode_override ??
             (off_grid
                 ? TEGIslandMode.TEG_ISLAND_MODE_INTENTIONAL_WITH_RECONNECT_FAILSAFE
                 : TEGIslandMode.TEG_ISLAND_MODE_AUTO_ACTIVE);
+        validate_island_mode(mode, force);
+        const din = await this.connect();
         const response = await this._send_command_request(
             din,
             { teg: { setIslandModeRequest: { mode, force } } },

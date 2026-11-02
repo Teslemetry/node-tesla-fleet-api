@@ -74,6 +74,12 @@ describe("commands", () => {
         expect(gateway.posts[0].envelope.teg?.setIslandModeRequest).toEqual({ mode: 6, force: false });
     });
 
+    it.each([0, 2, 3, 5, 7, 99, -1, 1.5, NaN, Infinity, "6", "1", null, undefined, true, false, {}, [6]])("refuses mode %j before any request", async (mode) => {
+        await expect(site.set_island_mode(mode as number)).rejects.toBeInstanceOf(TypeError);
+        expect(gateway.logins).toHaveLength(0);
+        expect(gateway.posts).toHaveLength(0);
+    });
+
     it("maps go_off_grid and reconnect_grid", async () => {
         await expect(site.go_off_grid()).resolves.toEqual(OK);
         await expect(site.reconnect_grid()).resolves.toEqual(OK);
