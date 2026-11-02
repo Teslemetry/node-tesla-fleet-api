@@ -25,6 +25,11 @@ const GRID_STATUS: Readonly<Record<string, IslandStatus>> = {
 };
 const GRID_STATUS_UNKNOWN: IslandStatus = { grid_status: "Unknown", island_status: "island_status_unknown" };
 
+/** Grid-connected, the `mode` for `set_island_mode` that reconnects. */
+export const ISLAND_MODE_ON_GRID = EnergyIslandMode.ON_GRID;
+/** Islanded, the `mode` for `set_island_mode` that goes off grid. */
+export const ISLAND_MODE_OFF_GRID = EnergyIslandMode.OFF_GRID;
+
 function ok(): CommandResult {
     return { response: { code: 201, message: "", result: true } };
 }

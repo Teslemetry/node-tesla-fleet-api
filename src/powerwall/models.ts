@@ -2,6 +2,8 @@
 // are deep and carry many more keys, so these name only what the library reads.
 // Keys match Python's, so the router's merge lists apply unchanged.
 
+export type PowerLocation = "BATTERY" | "SITE" | "LOAD" | "SOLAR" | "SOLAR_RGM" | "GENERATOR" | "CONDUCTOR";
+
 export type ConfigPayload = Record<string, any>;
 export type StatusPayload = Record<string, any>;
 export type ControllerPayload = Record<string, any>;

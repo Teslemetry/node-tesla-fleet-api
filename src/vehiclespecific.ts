@@ -791,7 +791,7 @@ export default class VehicleSpecific {
    * Removes driver access from a vehicle. Share users can only remove their own access. Owners can remove share access or their own.
    * @param share_user_id
    */
-  async drivers_remove(share_user_id?: number): Promise<Record<string, any>> {
+  async drivers_remove(share_user_id?: string | number): Promise<Record<string, any>> {
     return this.parent.drivers_remove(this.vin, share_user_id);
   }
 

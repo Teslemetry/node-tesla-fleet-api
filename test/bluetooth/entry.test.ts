@@ -131,6 +131,13 @@ describe("TeslaBluetooth", () => {
         expect(tesla._transport_name).toBe("bluetooth");
     });
 
+    it("creates the same kind of vehicle through both of Python's names", () => {
+        const tesla = new TeslaBluetooth({ privateKey: KEY });
+        const vehicle = tesla.vehicles.create(VIN, { transport, keepalive_interval_ms: null });
+        expect(vehicle).toBeInstanceOf(VehicleBluetooth);
+        expect(tesla.vehicles.byVin.get(VIN)).toBe(vehicle);
+    });
+
     it("refuses every way to the cloud", async () => {
         const tesla = new TeslaBluetooth();
         await expect(tesla._request()).rejects.toBeInstanceOf(BluetoothCloudUnavailableError);

@@ -2,11 +2,11 @@
 // through package.json `exports` (self-reference), so run it after a build.
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { BluetoothUnconfirmedCommand, TeslaFleetApi, InvalidResponse, firmwareAtLeast, getTariffPeriods as rootGetTariffPeriods, Models as rootModels } from "tesla-fleet-api";
+import { BluetoothUnconfirmedCommand, Charging, Partner, TeslaFleetApi, User, InvalidResponse, firmwareAtLeast, getTariffPeriods as rootGetTariffPeriods, Models as rootModels } from "tesla-fleet-api";
 import { getTariffPeriods, unwrapTariffV2 } from "tesla-fleet-api/tariff";
 import { Models, SERVERS } from "tesla-fleet-api/const";
 import * as router from "tesla-fleet-api/router";
-import { BleNotSubmittedError, ReassemblingBuffer, SERVICE_UUID } from "tesla-fleet-api/bluetooth";
+import { BleNotSubmittedError, BroadcastListeners, ReassemblingBuffer, SERVICE_UUID } from "tesla-fleet-api/bluetooth";
 import { HOMEY_MAX_WRITE_SIZE, HomeyBleTransport } from "tesla-fleet-api/bluetooth/homey";
 import { NobleBleTransport } from "tesla-fleet-api/bluetooth/noble";
 import { EsphomeBleTransport } from "tesla-fleet-api/bluetooth/esphome";
@@ -18,6 +18,7 @@ await assert.rejects(new NobleBleTransport().scan({ timeoutMs: 1000 }), /@stopro
 await assert.rejects(new EsphomeBleTransport({ host: "proxy.test" }).scan({ timeoutMs: 1000 }), /@2colors\/esphome-native-api/);
 
 assert.equal(typeof TeslaFleetApi, "function");
+for (const exported of [Charging, Partner, User, BroadcastListeners]) assert.equal(typeof exported, "function");
 // ./bluetooth must load with no GATT backend installed.
 assert.equal(typeof ReassemblingBuffer, "function");
 assert.ok(new BleNotSubmittedError("x") instanceof Error);

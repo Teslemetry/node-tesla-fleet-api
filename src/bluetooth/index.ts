@@ -1,6 +1,7 @@
 // The `tesla-fleet-api/bluetooth` entry. The root entry never loads this code,
 // and it imports no GATT library or native module: a backend comes in through
 // the `BleTransport` a caller passes.
+export { BroadcastListeners } from "./broadcast.js";
 export type { Unsubscribe } from "./broadcast.js";
 export * from "./constants.js";
 export { ReassemblingBuffer, parseFrame, prependLength, splitFrame } from "./framing.js";
@@ -9,7 +10,7 @@ export { default as TeslaBluetooth, VehiclesBluetooth } from "./teslabluetooth.j
 export { BleBroadcastPublisher, BleBroadcastStreamGlue, GEAR_STATES, TONNEAU_POSITION_STATES } from "./streamglue.js";
 export type { StreamSink } from "./streamglue.js";
 export { BleNotSubmittedError } from "./transport.js";
-export type { BluetoothConfirmation } from "./verify.js";
+export type { BluetoothConfirmation, VerifyPlan } from "./verify.js";
 export { default as VehicleBluetooth } from "./vehiclebluetooth.js";
 export type { FindVehicleOptions, PairOptions, VehicleBluetoothOptions } from "./vehiclebluetooth.js";
 export type {

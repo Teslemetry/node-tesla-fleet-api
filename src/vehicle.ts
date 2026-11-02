@@ -726,8 +726,8 @@ export default class Vehicle {
      * @param vehicle_tag VIN or id field of a vehicle
      * @param share_user_id
      */
-    async drivers_remove(vehicle_tag: string | number, share_user_id?: number): Promise<Record<string, any>> {
-        return this.parent._request("DELETE", `api/1/vehicles/${vehicle_tag}/drivers`, null, { share_user_id });
+    async drivers_remove(vehicle_tag: string | number, share_user_id?: string | number): Promise<Record<string, any>> {
+        return this.parent._request("DELETE", `api/1/vehicles/${vehicle_tag}/drivers`, { share_user_id });
     }
 
     /**

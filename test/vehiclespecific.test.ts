@@ -109,6 +109,18 @@ describe("VehicleSpecific REST routes match python-tesla-fleet-api", () => {
     });
 });
 
+describe("drivers_remove", () => {
+    it("sends share_user_id in the query string, as Python does", async () => {
+        const fetchMock = vi.fn(async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }));
+        const api = new TeslaFleetApi({ accessToken: "token", region: "na", fetch: fetchMock as unknown as typeof fetch });
+        await api.vehicles!.createFleet(VIN).drivers_remove(7);
+        const [url, init] = fetchMock.mock.calls[0] as unknown as [URL | string, RequestInit];
+        expect(String(url)).toContain(`api/1/vehicles/${VIN}/drivers?share_user_id=7`);
+        expect(init.method).toBe("DELETE");
+        expect(init.body).toBeNull();
+    });
+});
+
 describe("days_of_week_mask", () => {
     it.each([
         ["Sun", 1],
