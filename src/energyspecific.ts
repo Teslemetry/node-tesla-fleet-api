@@ -1,6 +1,11 @@
 import { KeyObject } from "crypto";
 import { MessageEnvelope } from "@teslemetry/tesla-protocol/energy_device/transport";
-import { EnergyDeviceIdentifierType, TeslaEnergyPeriod } from "./const.js";
+import {
+    AuthorizedClientKeyType,
+    AuthorizedClientType,
+    EnergyDeviceIdentifierType,
+    TeslaEnergyPeriod,
+} from "./const.js";
 import Energy from "./energy.js";
 import { DeviceUnexpectedResponse, InvalidCommand, SignedCommandRequired } from "./exceptions.js";
 import { EnergyDeviceSigner } from "./signing/energy.js";
@@ -59,6 +64,21 @@ function _raise_on_error_response(result: unknown): void {
         throw new InvalidCommand(data);
     }
     throw new DeviceUnexpectedResponse(data);
+}
+
+/** A public key as the gateway reports it: raw DER bytes are base64-encoded, and a string passes as it is. */
+export function publicKeyBase64(public_key: Uint8Array | string): string {
+    return typeof public_key === "string" ? public_key : Buffer.from(public_key).toString("base64");
+}
+
+/** The `scheduling_info` holding only the given fields, or `null` when none was given. */
+export function backupSchedulingInfo(
+    start_time?: string | null,
+    duration_seconds?: number | null,
+    priority?: number | string | null,
+): Record<string, string | number> | null {
+    const given = Object.entries({ start_time, duration_seconds, priority }).filter(([, value]) => value != null);
+    return given.length ? Object.fromEntries(given as [string, string | number][]) : null;
 }
 
 // Energy Class
@@ -188,6 +208,151 @@ export default class EnergySpecific {
         const result = await this._device_command(routable_message, din);
         _raise_on_error_response(result);
         return result;
+    }
+
+    /** Get energy device system information including firmware version, device type, part number, serial number, and DIN. */
+    async get_system_info(): Promise<Record<string, any>> {
+        return this._command("common", "get_system_info_request");
+    }
+
+    /** Get raw energy device networking status including WiFi, Ethernet, and cellular connectivity. */
+    async raw_networking_status(): Promise<Record<string, any>> {
+        return this._command("common", "get_networking_status_request");
+    }
+
+    /** Get energy device networking status including WiFi, Ethernet, and cellular connectivity. */
+    async get_networking_status(): Promise<Record<string, any>> {
+        const result = await this.raw_networking_status();
+        return result.response?.message?.Payload?.Common?.Message?.GetNetworkingStatusResponse ?? {};
+    }
+
+    /** Scan for available WiFi networks from the energy gateway. */
+    async wifi_scan(): Promise<Record<string, any>> {
+        return this._command("common", "wifi_scan_request");
+    }
+
+    /** Get the energy device certificate including subject, issuer, and validity. */
+    async get_device_cert(): Promise<Record<string, any>> {
+        return this._command("common", "device_cert_request");
+    }
+
+    /** Get cellular modem information from the energy gateway including the embedded SIM identifier (EID) and supported cellular profiles. */
+    async get_cellular_info(): Promise<Record<string, any>> {
+        return this._command("common", "get_cellular_info_request");
+    }
+
+    /** Check if a firmware update is available for the energy gateway. */
+    async check_for_update(): Promise<Record<string, any>> {
+        return this._command("common", "check_for_update_request");
+    }
+
+    /** Check the urgency level of any available firmware update for the energy gateway. */
+    async check_for_update_urgency(): Promise<Record<string, any>> {
+        return this._command("common", "check_for_update_urgency_request");
+    }
+
+    /** Test internet connectivity on the energy gateway across all network interfaces (WiFi, Ethernet, GSM). */
+    async check_internet(): Promise<Record<string, any>> {
+        return this._command("common", "check_internet_request");
+    }
+
+    /**
+     * Update local site configuration on the energy gateway. This writes gateway
+     * configuration and is an undocumented energy device gRPC command.
+     * @param params Raw protobuf request fields.
+     */
+    async set_local_site_config(params?: Record<string, any> | null): Promise<Record<string, any>> {
+        return this._command("common", "set_local_site_config_request", params);
+    }
+
+    /** List authorized clients (paired keys) on the energy gateway including their roles and state. */
+    async list_authorized_clients(): Promise<Record<string, any>> {
+        return this._command("authorization", "list_authorized_clients_request");
+    }
+
+    /**
+     * Register an authorized client (public key) with the energy gateway, to
+     * pair a local key with a Powerwall for the LAN TEDapi v1r protocol. The
+     * encoding follows `key_type`: RSA is raw PKCS#1 `RSAPublicKey` DER
+     * (`rsa_public_der_pkcs1`), and ECC is DER SubjectPublicKeyInfo
+     * (`ec_public_der_spki`), not a raw point, which the gateway rejects. A
+     * VERIFIED ECC key still cannot sign v1r: `SignatureData` has no ECDSA member.
+     *
+     * The key stays PENDING_VERIFICATION until a physical breaker toggle confirms
+     * it inside a window of about 9 minutes. A missed window is the terminal
+     * PENDING_VERIFICATION_TIMEOUT; registering the same key again resets it
+     * without a second record.
+     * @param public_key Raw DER bytes, which are base64-encoded, or an already base64-encoded string.
+     * @param description Human-readable description of the client.
+     * @param key_type The type of key being registered.
+     * @param authorized_client_type The authorized client type.
+     */
+    async add_authorized_client(
+        public_key: Uint8Array | string,
+        description: string = "Powerwall LAN Client",
+        key_type: AuthorizedClientKeyType = AuthorizedClientKeyType.RSA,
+        authorized_client_type: AuthorizedClientType = AuthorizedClientType.CUSTOMER_MOBILE_APP,
+    ): Promise<Record<string, any>> {
+        return this._command("authorization", "add_authorized_client_request", {
+            key_type,
+            public_key: publicKeyBase64(public_key),
+            // The signed envelope is parsed against the proto, which names this field `type`.
+            [this.signing ? "type" : "authorized_client_type"]: authorized_client_type,
+            description,
+        });
+    }
+
+    /**
+     * Remove an authorized client (public key) from the energy gateway. Removal
+     * needs no physical presence proof, so any paired key can revoke every other
+     * key, including the owner's. The reply is empty, and some firmware may
+     * return no body at all. This cloud route is inferred from
+     * `add_authorized_client`; removal was only live-verified over local v1r.
+     * @param public_key Raw DER bytes, which are base64-encoded, or an already base64-encoded string as `list_authorized_clients` reports it.
+     */
+    async remove_authorized_client(public_key: Uint8Array | string): Promise<Record<string, any>> {
+        return this._command("authorization", "remove_authorized_client_request", {
+            public_key: publicKeyBase64(public_key),
+        });
+    }
+
+    /** Get the energy gateway's public key for signed commands. */
+    async get_signed_commands_public_key(): Promise<Record<string, any>> {
+        return this._command("authorization", "get_signed_commands_public_key_request");
+    }
+
+    /** Get backup events from the energy gateway. May time out on some firmware versions. */
+    async get_backup_events(): Promise<Record<string, any>> {
+        return this._command("teg", "get_backup_events_request");
+    }
+
+    /**
+     * Schedule a manual backup event on the energy gateway.
+     * @param start_time ISO 8601 timestamp for when the backup event should start.
+     * @param duration_seconds Duration of the backup event in seconds.
+     * @param priority Priority level for the backup event. A string carries values beyond 2^53.
+     */
+    async schedule_backup_event(
+        start_time?: string | null,
+        duration_seconds?: number | null,
+        priority?: number | string | null,
+    ): Promise<Record<string, any>> {
+        const scheduling_info = backupSchedulingInfo(start_time, duration_seconds, priority);
+        return this._command(
+            "teg",
+            "schedule_manual_backup_event_request",
+            scheduling_info ? { scheduling_info } : null,
+        );
+    }
+
+    /** Cancel a scheduled manual backup event on the energy gateway. */
+    async cancel_backup_event(): Promise<Record<string, any>> {
+        return this._command("teg", "cancel_manual_backup_event_request");
+    }
+
+    /** Get Tesla Energy Gateway configuration from the TEG service. */
+    async get_teg_config(): Promise<Record<string, any>> {
+        return this._command("teg", "get_config_request");
     }
 
     /**
