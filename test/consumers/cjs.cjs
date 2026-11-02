@@ -22,5 +22,6 @@ assert.equal(rootModels, Models);
 assert.throws(() => unwrapTariffV2(null), InvalidResponse);
 assert.equal(firmwareAtLeast("2025.10", "2025.9"), true);
 assert.equal(typeof SERVERS.na, "string");
-assert.equal(typeof router, "object");
+assert.equal(typeof router.VehicleRouter, "function");
+assert.equal(typeof router.is_failover_safe, "function");
 console.log("CJS consumer OK");

@@ -297,7 +297,7 @@ export default class Vehicle {
      * @param lon Longitude
      * @param order Order of multiple stops
      */
-    async navigation_gps_request(vehicle_tag: string | number, lat: number, lon: number, order?: number): Promise<CommandResponse> {
+    async navigation_gps_request(vehicle_tag: string | number, lat: number, lon: number, order: number = 0): Promise<CommandResponse> {
         return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/navigation_gps_request`, null, { lat, lon, order });
     }
 
@@ -374,9 +374,9 @@ export default class Vehicle {
      * @param seat_position Seat position
      * @param seat_cooler_level Cooling level
      */
-    async remote_seat_cooler_request(vehicle_tag: string | number, seat_position: Seat | number, seat_cooler_level: Level): Promise<CommandResponse> {
+    async remote_seat_cooler_request(vehicle_tag: string | number, seat_position: keyof typeof AutoSeat | number, seat_cooler_level: Level): Promise<CommandResponse> {
         if (typeof seat_position === "string") {
-            seat_position = Seats[seat_position];
+            seat_position = AutoSeat[seat_position];
         }
         return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/remote_seat_cooler_request`, null, {
             seat_position,
@@ -604,8 +604,8 @@ export default class Vehicle {
      * @param on `true` or `false`
      * @param password Four-digit passcode
      */
-    async set_valet_mode(vehicle_tag: string | number, on: boolean, password: string | number): Promise<CommandResponse> {
-        return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/set_valet_mode`, null, { on, password: String(password) });
+    async set_valet_mode(vehicle_tag: string | number, on: boolean, password?: string | number): Promise<CommandResponse> {
+        return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/set_valet_mode`, null, { on, password: password == null ? undefined : String(password) });
     }
 
     /**
@@ -686,8 +686,9 @@ export default class Vehicle {
      * @param lat Latitude
      * @param lon Longitude
      */
-    async trigger_homelink(vehicle_tag: string | number, lat: number, lon: number, token?: string): Promise<CommandResponse> {
-        return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/trigger_homelink`, null, { token, lat, lon });
+    async trigger_homelink(vehicle_tag: string | number, token?: string, lat?: number, lon?: number): Promise<CommandResponse> {
+        const location = lat != null && lon != null ? { lat, lon } : {};
+        return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/trigger_homelink`, null, { token: token || undefined, ...location });
     }
 
     /**
@@ -706,7 +707,7 @@ export default class Vehicle {
      * @param lat Latitude
      * @param lon Longitude
      */
-    async window_control(vehicle_tag: string | number, command: "vent" | "close", lat: number, lon: number): Promise<CommandResponse> {
+    async window_control(vehicle_tag: string | number, command: "vent" | "close", lat?: number, lon?: number): Promise<CommandResponse> {
         return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/window_control`, null, { command, lat, lon });
     }
 

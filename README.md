@@ -17,9 +17,10 @@ await car.wake_up();
 const signed = api.vehicles!.createSigned(vin, privateKey);
 await signed.door_lock();
 
-// Energy sites; pass an RSA `KeyObject` and the gateway DIN to carry a device-command signing key
-const site = api.energySites!.create(energySiteId);
+// Energy sites; pass an RSA `KeyObject` and the gateway DIN to sign device commands
+const site = api.energySites!.create(energySiteId, rsaPrivateKey, din);
 await site.live_status();
+await site.go_off_grid();
 ```
 
 Each factory remembers what it created: `api.vehicles.byVin` and `api.energySites.byId` are `Map`s. `specific` and `specificSigned` remain as legacy names for `createFleet` and `createSigned`.
