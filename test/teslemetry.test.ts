@@ -25,7 +25,7 @@ describe("Teslemetry", () => {
         const fetchMock = fakeFetch({ response: [] }, { "x-region": "eu" });
         const api = new Teslemetry("test-token");
 
-        await expect(api.products()).resolves.toEqual([]);
+        await expect(api.products()).resolves.toEqual({ response: [] });
         expect(api.server).toBe("https://eu.teslemetry.com");
         expect(requestedUrls(fetchMock)).toEqual([
             "https://api.teslemetry.com/api/1/products",

@@ -73,7 +73,7 @@ describe("VehicleSigned: end-to-end through the cloud /signed_command transport"
         const vehicle = new Vehicle(api);
         const signed = vehicle.signed(VIN, OUR_PRIVATE_KEY);
 
-        await expect(signed.vehicle()).resolves.toEqual({ vin: VIN });
+        await expect(signed.vehicle()).resolves.toEqual({ response: { vin: VIN } });
         void fakeVehicle; // unused in this read-only case, kept for symmetry with the others
     });
 });

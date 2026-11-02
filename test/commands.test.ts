@@ -331,10 +331,10 @@ describe("Commands: protobuf construction for representative commands", () => {
         await expect(commands.charge_standard()).resolves.toMatchObject({ response: { result: true } });
     });
 
-    it("actuate_truck builds a front or rear trunk closure request", async () => {
-        await expect(commands.actuate_truck("front")).resolves.toMatchObject({ response: { result: true } });
-        await expect(commands.actuate_truck("rear")).resolves.toMatchObject({ response: { result: true } });
-        await expect(commands.actuate_truck("side" as any)).rejects.toThrow(/Invalid trunk/);
+    it("actuate_trunk builds a front or rear trunk closure request", async () => {
+        await expect(commands.actuate_trunk("front")).resolves.toMatchObject({ response: { result: true } });
+        await expect(commands.actuate_trunk("rear")).resolves.toMatchObject({ response: { result: true } });
+        await expect(commands.actuate_trunk("side" as any)).rejects.toThrow(/Invalid trunk/);
     });
 
     it("window_control builds vent/close, not a REST-style command string", async () => {
