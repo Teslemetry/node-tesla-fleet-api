@@ -1,5 +1,6 @@
 import { is_valid_region } from "./const.js";
 import TeslaFleetApi, { AccessToken, Logger } from "./teslafleetapi.js";
+import { TeslemetryEnergySites } from "./teslemetryenergy.js";
 import { Scope } from "./types/commands.js";
 
 type Region = "na" | "eu" | "api";
@@ -19,6 +20,9 @@ export type TeslemetryOptions = {
 };
 
 export default class Teslemetry extends TeslaFleetApi {
+  static override EnergySites = TeslemetryEnergySites;
+
+  declare energySites?: TeslemetryEnergySites;
   override readonly _transport_name: string = "teslemetry";
 
   constructor(accessToken: AccessToken, region: Region = "api", options: TeslemetryOptions = {}) {

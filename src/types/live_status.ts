@@ -1,20 +1,22 @@
+// A local gateway has no source for some keys and reports them as `null`, so a
+// reader must not assume every key is set.
 export type LiveStatusResponse = {
-    solar_power?: number;
-    energy_left?: number;
-    total_pack_energy?: number;
-    percentage_charged?: number;
-    backup_capable?: boolean;
-    battery_power?: number;
-    load_power?: number;
-    grid_status?: string;
-    grid_services_active?: boolean;
-    grid_power?: number;
-    grid_services_power?: number;
-    generator_power?: number;
-    island_status?: string;
-    storm_mode_active?: boolean;
-    timestamp: Date;
-    wall_connectors?: WallConnector[];
+    solar_power?: number | null;
+    energy_left?: number | null;
+    total_pack_energy?: number | null;
+    percentage_charged?: number | null;
+    backup_capable?: boolean | null;
+    battery_power?: number | null;
+    load_power?: number | null;
+    grid_status?: string | null;
+    grid_services_active?: boolean | null;
+    grid_power?: number | null;
+    grid_services_power?: number | null;
+    generator_power?: number | null;
+    island_status?: string | null;
+    storm_mode_active?: boolean | null;
+    timestamp?: Date | null;
+    wall_connectors?: WallConnector[] | null;
 };
 
 export type WallConnector = {

@@ -1,0 +1,2 @@
+minimumReleaseAgeExclude:
+  - '@teslemetry/tesla-protocol@6.1.0'
