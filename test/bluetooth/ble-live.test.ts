@@ -179,7 +179,11 @@ describe("the harness's steps", () => {
     it("prints that a read worked, and not what it read", async () => {
         const { run, lines } = harness();
         await run(step("charge_state"));
-        expect(lines.join("\n")).not.toContain("80");
+        // The whole shape of each line: a search for the value would also match a timestamp.
+        const stamp = String.raw`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z \[charge_state\]`;
+        expect(lines).toHaveLength(2);
+        expect(lines[0]).toMatch(new RegExp(String.raw`^${stamp} read ok \d+ms$`));
+        expect(lines[1]).toMatch(new RegExp(String.raw`^${stamp} ok writes=\d+ frames=\d+$`));
     });
 });
 
