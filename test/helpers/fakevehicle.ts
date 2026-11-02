@@ -325,8 +325,15 @@ export class FakeVehicle {
         return Buffer.from(RoutableMessage.encode(reply).finish());
     }
 
-    /** Process one request `RoutableMessage` exactly as a vehicle would, and return its reply bytes. */
+    /** Process one request `RoutableMessage` exactly as a vehicle would, and return its reply bytes, addressed to its sender. */
     handle(requestBytes: Buffer): Buffer {
+        const routingAddress = RoutableMessage.decode(requestBytes).fromDestination?.routingAddress;
+        const reply = RoutableMessage.decode(this.process(requestBytes));
+        reply.toDestination = { routingAddress };
+        return Buffer.from(RoutableMessage.encode(reply).finish());
+    }
+
+    private process(requestBytes: Buffer): Buffer {
         const msg = RoutableMessage.decode(requestBytes);
         const domain = msg.toDestination?.domain ?? Domain.DOMAIN_BROADCAST;
         const state = this.stateFor(domain);
