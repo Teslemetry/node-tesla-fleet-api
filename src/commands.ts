@@ -93,6 +93,14 @@ import {
     SetTirePressureUnitAction,
     DeleteDashcamClipsAction,
     FormatUSBAction,
+    BandwidthTest,
+    BluetoothClassicPairingRequest,
+    FetchKeysInfoAction,
+    GetLocalProfilesForVaultUuidAction,
+    PiiKeyRequest,
+    PseudonymSyncRequest,
+    SetupCloudProfileWithLocalProfileUuidAction,
+    TeslaAuthResponseAction,
     AddManagedChargingSiteRequest,
     BatchRemoveChargeSchedulesAction,
     BatchRemovePreconditionSchedulesAction,
@@ -2032,6 +2040,126 @@ export default abstract class Commands extends VehicleSpecific {
                 ? VehicleControlWindowAction.create({ vent: VOID })
                 : VehicleControlWindowAction.create({ close: VOID });
         return this.vehicleAction(VehicleAction.create({ vehicleControlWindowAction: action }));
+    }
+
+    // Niche: wrapped for full protocol coverage. Each has no known third-party use yet.
+
+    /**
+     * Requests a PII key, for privacy and telemetry pseudonymization.
+     * @param subscriber_public_key Subscriber public key
+     * @param pii_key_expiration Expiry as a Unix timestamp in seconds
+     */
+    async pii_key_request(subscriber_public_key: string, pii_key_expiration: number): Promise<SignedCommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({
+                piiKeyRequest: PiiKeyRequest.create({
+                    subscriberPublicKey: subscriber_public_key,
+                    piiKeyExpiration: new Date(pii_key_expiration * 1000),
+                }),
+            }),
+        );
+    }
+
+    /**
+     * Syncs the vehicle's privacy and telemetry pseudonym with a previously known hashed value.
+     * @param last_known_pseudonym_hashed The hashed pseudonym
+     */
+    async pseudonym_sync_request(last_known_pseudonym_hashed: Uint8Array): Promise<SignedCommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({ pseudonymSyncRequest: PseudonymSyncRequest.create({ lastKnownPseudonymHashed: last_known_pseudonym_hashed }) }),
+        );
+    }
+
+    /**
+     * Passes a completed "Sign in with Tesla" OAuth response to the vehicle
+     * screen. The caller must already hold that response from its own auth flow.
+     * @param client_id OAuth client ID
+     * @param scope OAuth scope
+     * @param access_token Access token
+     * @param refresh_token Refresh token
+     * @param expiry_timestamp Token expiry
+     * @param error OAuth error, if any
+     * @param scoped_token Scoped token
+     */
+    async tesla_auth_response(
+        client_id: string,
+        scope: string,
+        access_token: string,
+        refresh_token: string,
+        expiry_timestamp: number,
+        error: string = "",
+        scoped_token: string = "",
+    ): Promise<CommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({
+                teslaAuthResponseAction: TeslaAuthResponseAction.create({
+                    clientId: client_id,
+                    scope,
+                    accessToken: access_token,
+                    refreshToken: refresh_token,
+                    expiryTimestamp: expiry_timestamp,
+                    error,
+                    scopedToken: scoped_token,
+                }),
+            }),
+        );
+    }
+
+    /**
+     * Links a local Tesla profile to a cloud vault profile.
+     * @param cloud_vault_uuid Cloud vault UUID
+     * @param local_profile_uuid Local profile UUID
+     * @param delete_local_profile_after_setup Whether to delete the local profile afterwards
+     */
+    async setup_cloud_profile_with_local_profile_uuid(
+        cloud_vault_uuid: string,
+        local_profile_uuid: string,
+        delete_local_profile_after_setup: boolean = false,
+    ): Promise<CommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({
+                setupCloudProfileWithLocalProfileUuidAction: SetupCloudProfileWithLocalProfileUuidAction.create({
+                    cloudVaultUuid: cloud_vault_uuid,
+                    localProfileUuid: local_profile_uuid,
+                    deleteLocalProfileAfterSetup: delete_local_profile_after_setup,
+                }),
+            }),
+        );
+    }
+
+    /**
+     * Gets the local Tesla profiles of a cloud vault, under `response.getLocalProfilesResponse`.
+     * @param vault_uuid Cloud vault UUID
+     */
+    async get_local_profiles_for_vault_uuid(vault_uuid: string): Promise<SignedCommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({ getLocalProfilesForVaultUuidAction: GetLocalProfilesForVaultUuidAction.create({ vaultUuid: vault_uuid }) }),
+            { mutating: false },
+        );
+    }
+
+    /**
+     * Requests Bluetooth Classic, not BLE, pairing with a phone for calls and audio.
+     * @param name Device name
+     * @param mac_address Device MAC address
+     */
+    async bluetooth_classic_pairing_request(name: string, mac_address: Uint8Array): Promise<CommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({ bluetoothClassicPairingRequest: BluetoothClassicPairingRequest.create({ utf8Name: name, macAddress: mac_address }) }),
+        );
+    }
+
+    /**
+     * Runs a diagnostic bandwidth test, with its result under `response.bandwidthTestResponse`.
+     * @param requested_size Size in bytes
+     */
+    async bandwidth_test(requested_size: number): Promise<SignedCommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ bandwidthTest: BandwidthTest.create({ requestedSize: requested_size }) }));
+    }
+
+    /** Gets information about keys paired with the vehicle, under `response.keysInfoResponse`. */
+    async fetch_keys_info(): Promise<SignedCommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ fetchKeysInfoAction: FetchKeysInfoAction.create({}) }), { mutating: false });
     }
 
     // Destructive. No confirmation parameter, as with `erase_user_data`: the

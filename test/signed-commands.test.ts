@@ -238,6 +238,47 @@ const infotainment: [name: string, call: Call, expected: DeepPartial<VehicleActi
     // ENG-40 / SGN-11
     ["format_usb", (v) => v.format_usb(), { formatUsbAction: { formatUsb: true } }],
     ["delete_dashcam_clips", (v) => v.delete_dashcam_clips(), { deleteDashcamClipsAction: { deleteClips: true } }],
+
+    // ENG-41 / SGN-12
+    [
+        "pii_key_request",
+        (v) => v.pii_key_request("subscriber-pubkey", 1893456000),
+        { piiKeyRequest: { subscriberPublicKey: "subscriber-pubkey", piiKeyExpiration: new Date(1893456000 * 1000) } },
+    ],
+    ["pseudonym_sync_request", (v) => v.pseudonym_sync_request(Buffer.from([1, 2, 3])), { pseudonymSyncRequest: { lastKnownPseudonymHashed: Buffer.from([1, 2, 3]) } }],
+    [
+        "tesla_auth_response",
+        (v) => v.tesla_auth_response("client", "openid", "access", "refresh", 1893456000, "denied", "scoped"),
+        {
+            teslaAuthResponseAction: {
+                clientId: "client",
+                scope: "openid",
+                accessToken: "access",
+                refreshToken: "refresh",
+                expiryTimestamp: 1893456000,
+                error: "denied",
+                scopedToken: "scoped",
+            },
+        },
+    ],
+    [
+        "tesla_auth_response, no error",
+        (v) => v.tesla_auth_response("client", "openid", "access", "refresh", 1893456000),
+        { teslaAuthResponseAction: { clientId: "client", scope: "openid", accessToken: "access", refreshToken: "refresh", expiryTimestamp: 1893456000 } },
+    ],
+    [
+        "setup_cloud_profile_with_local_profile_uuid",
+        (v) => v.setup_cloud_profile_with_local_profile_uuid("vault", "profile", true),
+        { setupCloudProfileWithLocalProfileUuidAction: { cloudVaultUuid: "vault", localProfileUuid: "profile", deleteLocalProfileAfterSetup: true } },
+    ],
+    ["get_local_profiles_for_vault_uuid", (v) => v.get_local_profiles_for_vault_uuid("vault"), { getLocalProfilesForVaultUuidAction: { vaultUuid: "vault" } }],
+    [
+        "bluetooth_classic_pairing_request",
+        (v) => v.bluetooth_classic_pairing_request("Phone", Buffer.from([1, 2, 3, 4, 5, 6])),
+        { bluetoothClassicPairingRequest: { utf8Name: "Phone", macAddress: Buffer.from([1, 2, 3, 4, 5, 6]) } },
+    ],
+    ["bandwidth_test", (v) => v.bandwidth_test(4096), { bandwidthTest: { requestedSize: 4096 } }],
+    ["fetch_keys_info", (v) => v.fetch_keys_info(), { fetchKeysInfoAction: {} }],
 ];
 
 /** Commands the Vehicle Security computer takes, each with the whole `UnsignedMessage` it must decode to. */
