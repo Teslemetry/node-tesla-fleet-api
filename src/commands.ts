@@ -224,6 +224,8 @@ export interface SendOptions {
      * or failed after entering the backend. A failure before any such call sent nothing.
      */
     onSubmitted?: () => void;
+    /** Once aborted, nothing more is written: the send rejects with the signal's reason instead. */
+    signal?: AbortSignal;
 }
 
 /** What one signed dispatch resolves to: a command outcome, or the data a read asked for. */

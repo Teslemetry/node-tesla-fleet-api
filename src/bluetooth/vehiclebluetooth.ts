@@ -612,10 +612,12 @@ export default class VehicleBluetooth extends BroadcastListeners {
     }
 
     /** Write one frame, with its chunks together, each bounded. */
-    private writeFrame(link: Link, frame: Uint8Array): Promise<void> {
+    private writeFrame(link: Link, frame: Uint8Array, signal?: AbortSignal): Promise<void> {
         const { connection } = link;
         const maxWriteSize = connection.maxWriteSize === undefined ? DEFAULT_MAX_WRITE_SIZE : connection.maxWriteSize;
         return link.gatt.run(async () => {
+            // Here, past the last wait, and never between chunks: a frame goes whole.
+            signal?.throwIfAborted();
             let written = 0;
             for (const chunk of splitFrame(frame, maxWriteSize)) {
                 if (link.lost) {
@@ -667,7 +669,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
     }
 
     protected async _send(msg: RoutableMessage, requires: SendRequires, options: SendOptions = {}): Promise<RoutableMessage> {
-        const { expectsData = true, optimistic = false, confirmBroadcast, onSubmitted } = options;
+        const { expectsData = true, optimistic = false, confirmBroadcast, onSubmitted, signal } = options;
         const timeoutMs = options.timeoutMs ?? (expectsData ? this.defaultTimeoutMs : this.actuationTimeoutMs);
         const domain = msg.toDestination?.domain;
         const lock = domain === undefined ? undefined : this.domainSendLock[domain];
@@ -699,8 +701,11 @@ export default class VehicleBluetooth extends BroadcastListeners {
 
             try {
                 try {
-                    await this.writeFrame(link, frame);
+                    await this.writeFrame(link, frame, signal);
                 } catch (error) {
+                    if (signal?.aborted && error === signal.reason) {
+                        throw error;
+                    }
                     if (error instanceof BleNotSubmittedError) {
                         if (!link.connection.isConnected) {
                             this.loseLink(link, describe(error));
@@ -1625,6 +1630,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
         try {
             const send = this._send(msg, "protobuf_message_as_bytes", {
                 timeoutMs: Math.max(0, Math.min(pollIntervalMs, deadline - performance.now())),
+                signal,
             });
             if (this.whitelistReplyConfirms(await abortable(send, signal))) {
                 return;
@@ -1635,7 +1641,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
             }
         }
 
-        const confirmed = async () => this.consumeLateWhitelistReply() || (await abortable(this.pairProbe(), signal));
+        const confirmed = async () => this.consumeLateWhitelistReply() || (await abortable(this.pairProbe(signal), signal));
         while (performance.now() < deadline) {
             signal?.throwIfAborted();
             if (await confirmed()) {
@@ -1660,14 +1666,14 @@ export default class VehicleBluetooth extends BroadcastListeners {
      * link. It sends one request, unlike `handshake`, because the next poll is the
      * retry, and nothing may be written after a `pair` is aborted.
      */
-    private async pairProbe(): Promise<boolean> {
+    private async pairProbe(signal?: AbortSignal): Promise<boolean> {
         const session = this.sessionFor(VCSEC);
         try {
             return await session.withLock(async () => {
                 // `_send` also returns a bare ack, and a session can be ready from
                 // before, so only a reply that carried session info counts. That
                 // one passed `validate_msg`, so its tag proved this key.
-                const reply = await this._send(this.sessionInfoRequest(VCSEC), "session_info");
+                const reply = await this._send(this.sessionInfoRequest(VCSEC), "session_info", { signal });
                 return session.ready && (reply.sessionInfo?.length ?? 0) > 0;
             });
         } catch (error) {

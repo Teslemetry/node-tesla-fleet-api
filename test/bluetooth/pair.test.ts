@@ -347,6 +347,62 @@ describe("an abort", () => {
         expect(link.calls).toEqual([]);
     });
 
+    it("writes nothing when aborted during the connect", async () => {
+        const harness = unpaired({ connect_timeout_ms: 4000 });
+        const { vehicle, link } = harness;
+        link.hangConnect(1);
+        const controller = new AbortController();
+        const reason = new Error("closed");
+
+        const pairing = finish(vehicle.pair({ signal: controller.signal }).catch((error: unknown) => error));
+        await vi.advanceTimersByTimeAsync(100);
+        controller.abort(reason);
+
+        await expect(pairing).resolves.toBe(reason);
+        await vi.advanceTimersByTimeAsync(40_000);
+
+        expect(link.writes).toEqual([]);
+        expect(harness.whitelistWrites()).toEqual([]);
+    });
+
+    it("writes nothing when aborted while another call holds the GATT queue", async () => {
+        const harness = unpaired();
+        const { vehicle, link } = harness;
+        await finish(vehicle.connect());
+        link.readDelayMs = 1000;
+        const read = vehicle.read("version");
+        const controller = new AbortController();
+
+        const pairing = vehicle.pair({ signal: controller.signal }).catch((error: unknown) => error);
+        await vi.advanceTimersByTimeAsync(100);
+        controller.abort(new Error("closed"));
+        await pairing;
+        await vi.advanceTimersByTimeAsync(40_000);
+        await read;
+
+        expect(link.writes).toEqual([]);
+        expect(link.openConnections).toBe(1);
+    });
+
+    it("writes no probe once aborted behind the session lock", async () => {
+        const harness = unpaired();
+        const { vehicle, link } = harness;
+        link.dropNextReply();
+        const controller = new AbortController();
+        const pairing = vehicle.pair({ signal: controller.signal, pollIntervalMs: 1000 }).catch((error: unknown) => error);
+        await vi.advanceTimersByTimeAsync(990);
+        const held = vehicle.session(VCSEC).withLock(() => new Promise((resolve) => setTimeout(resolve, 500)));
+        await vi.advanceTimersByTimeAsync(100);
+        const writes = link.writes.length;
+        controller.abort(new Error("closed"));
+        await pairing;
+        await vi.advanceTimersByTimeAsync(1000);
+        await held;
+        await vi.advanceTimersByTimeAsync(30_000);
+
+        expect(link.writes).toHaveLength(writes);
+    });
+
     it("ends the wait during polling, with no further write", async () => {
         const harness = unpaired();
         const { vehicle, link } = harness;
