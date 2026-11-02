@@ -1,6 +1,6 @@
 import Commands, { infotainment_command_name, vcsec_command_name } from "./commands.js";
 import Energy from "./energy.js";
-import EnergySpecific from "./energyspecific.js";
+import EnergySpecific, { UNSIGNED_DEVICE_COMMANDS } from "./energyspecific.js";
 import TeslaFleetApi from "./teslafleetapi.js";
 import TeslaFleetOAuth from "./oauth.js";
 import Teslemetry from "./teslemetry.js";
@@ -11,6 +11,8 @@ import VehicleSpecific from "./vehiclespecific.js";
 
 export { Commands, Energy, EnergySpecific, TeslaFleetApi, TeslaFleetOAuth, Teslemetry, Tessie, Vehicle, VehicleSigned, VehicleSpecific };
 export { infotainment_command_name, vcsec_command_name };
+export { UNSIGNED_DEVICE_COMMANDS };
+export { ENERGY_SIGNATURE_TTL_SECONDS, EnergyDeviceSigner } from "./signing/energy.js";
 export type { AccessToken } from "./teslafleetapi.js";
 export type { RefreshedToken, TeslaFleetOAuthOptions } from "./oauth.js";
 export type { Logger } from "./log.js";
