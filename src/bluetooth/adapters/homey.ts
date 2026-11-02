@@ -165,20 +165,25 @@ class HomeyConnection implements BleConnection {
         return target.read();
     }
 
-    /** Homey's stack may hide this service. BLE-00 step 8 says whether it does; a failed read then means no value. */
+    /**
+     * Homey's stack may hide this service, which BLE-00 step 8 settles. A failed
+     * lookup leaves a characteristic unresolved on a healthy link, so it must not
+     * read as a lost one.
+     */
     private discoverGenericAccess(): Promise<HomeyCharacteristicLike[]> {
         const { peripheral } = this;
         if (!peripheral) {
             return Promise.reject(new BleNotSubmittedError("The link is down."));
         }
-        const discovery = (this.genericAccess ??= peripheral
+        this.genericAccess ??= peripheral
             .getService(compactUuid(GENERIC_ACCESS_UUID))
-            .then((service) => service.discoverCharacteristics()));
-        // A failed lookup may do better next time.
-        discovery.catch(() => {
-            this.genericAccess = undefined;
-        });
-        return discovery;
+            .then((service) => service.discoverCharacteristics())
+            .catch((cause: unknown) => {
+                // It may do better next time.
+                this.genericAccess = undefined;
+                throw new BleNotSubmittedError("Generic Access could not be resolved.", { cause });
+            });
+        return this.genericAccess;
     }
 
     disconnect(): Promise<void> {

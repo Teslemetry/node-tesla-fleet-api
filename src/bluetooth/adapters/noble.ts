@@ -167,16 +167,20 @@ class NobleConnection implements BleConnection {
         return target.readAsync();
     }
 
-    /** BlueZ and CoreBluetooth can hide this service. Then the read fails, and the library reports no value. */
+    /**
+     * BlueZ and CoreBluetooth can hide this service. A failed lookup leaves a
+     * characteristic unresolved on a healthy link, so it must not read as a lost one.
+     */
     private discoverGenericAccess(): Promise<NobleCharacteristicLike[]> {
-        const discovery = (this.genericAccess ??= this.peripheral
+        this.genericAccess ??= this.peripheral
             .discoverSomeServicesAndCharacteristicsAsync([compactUuid(GENERIC_ACCESS_UUID)], [compactUuid(NAME_UUID), compactUuid(APPEARANCE_UUID)])
-            .then(({ characteristics }) => characteristics));
-        // A failed lookup may do better next time.
-        discovery.catch(() => {
-            this.genericAccess = undefined;
-        });
-        return discovery;
+            .then(({ characteristics }) => characteristics)
+            .catch((cause: unknown) => {
+                // It may do better next time.
+                this.genericAccess = undefined;
+                throw new BleNotSubmittedError("Generic Access could not be resolved.", { cause });
+            });
+        return this.genericAccess;
     }
 
     disconnect(): Promise<void> {

@@ -144,6 +144,14 @@ describe("HomeyBleTransport", () => {
         await expect(connection.read("appearance")).rejects.toBeInstanceOf(BleNotSubmittedError);
     });
 
+    it("rejects a hidden Generic Access service as unresolved, which the library keeps the link through, and tries again", async () => {
+        const { transport, link, device } = subject();
+        const connection = await transport.connect(device, noHandlers());
+        link.failing.add("discover");
+        await expect(connection.read("deviceName")).rejects.toBeInstanceOf(BleNotSubmittedError);
+        expect(Buffer.from(await connection.read("deviceName")).toString()).toBe("name");
+    });
+
     it("closes an attempt that lands after the attempt that replaced it has gone", async () => {
         const { transport, ble, link, device, peripheral, advertisement } = subject();
         let land!: (value: HomeyPeripheralLike) => void;

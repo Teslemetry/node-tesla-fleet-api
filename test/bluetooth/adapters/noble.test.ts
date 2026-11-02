@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { NobleBleTransport } from "../../../src/bluetooth/adapters/noble.js";
+import { SCAN_END_MARGIN_MS } from "../../../src/bluetooth/adapters/shared.js";
+import { BleNotSubmittedError } from "../../../src/bluetooth/transport.js";
 import { noHandlers, STUB_NAME, stubNoble } from "../../helpers/stubbackends.js";
 
 describe("NobleBleTransport", () => {
@@ -33,11 +35,18 @@ describe("NobleBleTransport", () => {
     });
 
     it("ends a timed scan before the library's own timeout, keeping what it saw", async () => {
-        const { transport } = subject();
-        const started = performance.now();
-        const devices = await transport.scan({ timeoutMs: 300 });
-        expect(performance.now() - started).toBeLessThan(300);
-        expect(devices).toHaveLength(1);
+        vi.useFakeTimers();
+        try {
+            const { transport } = subject();
+            let devices: unknown[] | undefined;
+            void transport.scan({ timeoutMs: 1000 }).then((seen) => {
+                devices = seen;
+            });
+            await vi.advanceTimersByTimeAsync(1000 - SCAN_END_MARGIN_MS);
+            expect(devices).toHaveLength(1);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("stops scanning before it connects", async () => {
@@ -91,6 +100,14 @@ describe("NobleBleTransport", () => {
         await connection.disconnect();
         expect(peripheral.count("disconnect")).toBe(0);
         expect(notify.count("data")).toBe(0);
+    });
+
+    it("rejects a hidden Generic Access service as unresolved, which the library keeps the link through, and tries again", async () => {
+        const { transport, link, device } = subject();
+        const connection = await transport.connect(device, noHandlers());
+        link.failing.add("discover");
+        await expect(connection.read("deviceName")).rejects.toBeInstanceOf(BleNotSubmittedError);
+        expect(Buffer.from(await connection.read("deviceName")).toString()).toBe("name");
     });
 
     it("does not wait on noble to disconnect a dead link", async () => {
