@@ -7,6 +7,7 @@ import {
     PowerwallAuthenticationError,
     PowerwallCommandError,
     PowerwallConnectionError,
+    PowerwallFaultError,
     PowerwallNotSupportedError,
     PowerwallProtocolError,
     PowerwallRateLimitError,
@@ -59,6 +60,12 @@ describe("schedule_max_backup", () => {
         expect(gateway.posts).toHaveLength(2);
     });
 
+    it("does not schedule when the cancel faults", async () => {
+        gateway.reply({ fault: MessageFaultE.MESSAGEFAULT_ERROR_BUSY });
+        await expect(client.schedule_max_backup()).rejects.toBeInstanceOf(PowerwallFaultError);
+        expect(gateway.posts).toHaveLength(1);
+    });
+
     it("does not schedule when the cancel cannot reach the gateway", async () => {
         gateway.reply({ dropConnection: true });
         await expect(client.schedule_max_backup()).rejects.toBeInstanceOf(PowerwallConnectionError);
@@ -74,17 +81,26 @@ describe("schedule_max_backup", () => {
 describe("cancel_max_backup tolerance", () => {
     it.each([
         ["a reply without the response", { envelope: { teg: {} } }],
-        ["a refusal", errorReply(5, "no active event")],
-        ["a fault", { fault: MessageFaultE.MESSAGEFAULT_ERROR_BUSY }],
+        ["the no-active-event refusal", errorReply(5, "no active event")],
         ["an empty inner message", { noInner: true as const }],
     ])("swallows %s", async (_name, reply) => {
         gateway.reply(reply);
         await expect(client.cancel_max_backup()).resolves.toBeUndefined();
     });
 
-    it("swallows a gateway 500", async () => {
+    it.each([
+        ["a BUSY fault", { fault: MessageFaultE.MESSAGEFAULT_ERROR_BUSY }, PowerwallFaultError],
+        ["any other refusal", errorReply(7, "denied"), PowerwallCommandError],
+        ["an unimplemented command", errorReply(12, "no"), PowerwallNotSupportedError],
+        ["a reply of another kind", { envelope: { teg: { dispatchBatteryPowerResponse: {} } } }, PowerwallProtocolError],
+    ])("raises on %s", async (_name, reply, error) => {
+        gateway.reply(reply);
+        await expect(client.cancel_max_backup()).rejects.toBeInstanceOf(error);
+    });
+
+    it("raises on a gateway 500", async () => {
         gateway.forceStatus("/tedapi/v1r", 500);
-        await expect(client.cancel_max_backup()).resolves.toBeUndefined();
+        await expect(client.cancel_max_backup()).rejects.toBeInstanceOf(PowerwallProtocolError);
     });
 
     it("raises on a dead link", async () => {
@@ -215,9 +231,24 @@ describe("remove_authorized_client", () => {
         await expect(client.remove_authorized_client("AQID")).rejects.toBeInstanceOf(PowerwallConnectionError);
     });
 
-    it("swallows a fault, as a tolerated reply", async () => {
-        gateway.reply({ fault: MessageFaultE.MESSAGEFAULT_ERROR_BUSY });
+    it("returns on an empty inner message", async () => {
+        gateway.reply({ noInner: true });
         await expect(client.remove_authorized_client("AQID")).resolves.toBeUndefined();
+    });
+
+    it("raises on a BUSY fault: the key is still paired", async () => {
+        gateway.reply({ fault: MessageFaultE.MESSAGEFAULT_ERROR_BUSY });
+        await expect(client.remove_authorized_client("AQID")).rejects.toBeInstanceOf(PowerwallFaultError);
+    });
+
+    it("raises on a gateway 500", async () => {
+        gateway.forceStatus("/tedapi/v1r", 500);
+        await expect(client.remove_authorized_client("AQID")).rejects.toBeInstanceOf(PowerwallProtocolError);
+    });
+
+    it.each([5, 7, 12])("raises on refusal code %i: only a cancel may ignore code 5", async (code) => {
+        gateway.reply(errorReply(code, "refused"));
+        await expect(client.remove_authorized_client("AQID")).rejects.toBeInstanceOf(PowerwallCommandError);
     });
 });
 
