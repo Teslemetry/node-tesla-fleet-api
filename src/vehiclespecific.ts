@@ -747,11 +747,11 @@ export default class VehicleSpecific {
    * @param lon Longitude
    */
   async trigger_homelink(
+    token?: string,
     lat?: number,
     lon?: number,
-    token?: string,
   ): Promise<CommandResponse> {
-    return this.parent.trigger_homelink(this.vin, lat, lon, token);
+    return this.parent.trigger_homelink(this.vin, token, lat, lon);
   }
 
   /**

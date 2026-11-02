@@ -201,8 +201,8 @@ const CASES: Case[] = [
     ["sun_roof_control", ["close"], { state: "close" }, action({ vehicleControlSunroofOpenCloseAction: { close: VOID } })],
     ["take_drivenote", ["brake noise up front"], { note: "brake noise up front" }, action({ takeDrivenoteAction: { note: "brake noise up front" } })],
     // Zero coordinates are coordinates: the regression Python's parity test guards.
-    ["trigger_homelink", [0, 0, "tok"], { lat: 0, lon: 0, token: "tok" }, action({ vehicleControlTriggerHomelinkAction: { location: { latitude: 0, longitude: 0 }, token: "tok" } })],
-    ["trigger_homelink", [undefined, undefined, "tok"], { token: "tok" }, action({ vehicleControlTriggerHomelinkAction: { token: "tok" } })],
+    ["trigger_homelink", ["tok", 0, 0], { lat: 0, lon: 0, token: "tok" }, action({ vehicleControlTriggerHomelinkAction: { location: { latitude: 0, longitude: 0 }, token: "tok" } })],
+    ["trigger_homelink", ["tok"], { token: "tok" }, action({ vehicleControlTriggerHomelinkAction: { token: "tok" } })],
     ["upcoming_calendar_entries", ["some-ics-payload"], { calendar_data: "some-ics-payload" }, action({ uiSetUpcomingCalendarEntries: { calendarData: "some-ics-payload" } })],
     // Accepted gap: the signed action has no coordinates, which only REST uses to check the user's range when closing.
     ["window_control", ["close", 1.5, 2.5], { command: "close", lat: 1.5, lon: 2.5 }, action({ vehicleControlWindowAction: { close: VOID } })],

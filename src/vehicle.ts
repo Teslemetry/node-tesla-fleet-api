@@ -686,7 +686,7 @@ export default class Vehicle {
      * @param lat Latitude
      * @param lon Longitude
      */
-    async trigger_homelink(vehicle_tag: string | number, lat?: number, lon?: number, token?: string): Promise<CommandResponse> {
+    async trigger_homelink(vehicle_tag: string | number, token?: string, lat?: number, lon?: number): Promise<CommandResponse> {
         const location = lat != null && lon != null ? { lat, lon } : {};
         return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/trigger_homelink`, null, { token: token || undefined, ...location });
     }

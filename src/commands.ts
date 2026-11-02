@@ -2054,11 +2054,11 @@ export default abstract class Commands extends VehicleSpecific {
 
     /**
      * Turns on HomeLink (used to open and close garage doors).
+     * @param token
      * @param lat Latitude. `0` is a coordinate; the location is sent when both are given.
      * @param lon Longitude
-     * @param token
      */
-    async trigger_homelink(lat?: number, lon?: number, token?: string): Promise<CommandResponse> {
+    async trigger_homelink(token?: string, lat?: number, lon?: number): Promise<CommandResponse> {
         return this.vehicleAction(
             VehicleAction.create({
                 vehicleControlTriggerHomelinkAction: VehicleControlTriggerHomelinkAction.create({
