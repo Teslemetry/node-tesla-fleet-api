@@ -176,8 +176,20 @@ function requireNonNegative(value: number, name: string): void {
     if (typeof value !== "number") {
         throw new TypeError(`${name} must be a number`);
     }
-    if (!(value >= 0)) {
-        throw new RangeError(`${name} must be non-negative`);
+    if (!Number.isFinite(value) || value < 0) {
+        throw new RangeError(`${name} must be a finite, non-negative number`);
+    }
+}
+
+/** `JSON.stringify` writes a non-finite number as `null`, so reject one at any depth rather than store it. */
+function requireFiniteNumbers(value: unknown, name: string): void {
+    if (typeof value === "number" && !Number.isFinite(value)) {
+        throw new RangeError(`${name} must be finite`);
+    }
+    if (typeof value === "object" && value !== null) {
+        for (const [key, item] of Object.entries(value)) {
+            requireFiniteNumbers(item, `${name}.${key}`);
+        }
     }
 }
 
@@ -561,9 +573,11 @@ export class PowerwallClient {
      * the read unchanged: it is an optimistic lock held by the gateway, and the
      * client never computes one.
      * @param updates Dotted paths to values, such as `{"site_info.backup_reserve_percent": 24}`.
+     * @throws RangeError on a number that is not finite, before any request.
      * @throws PowerwallProtocolError on bad JSON, or a reply with no `filestore`.
      */
     async write_config(updates: Record<string, unknown>): Promise<void> {
+        requireFiniteNumbers(updates, "updates");
         const din = await this.connect();
         const { blob, hash } = await this._read_config(din);
         const config = decodeConfig(blob);

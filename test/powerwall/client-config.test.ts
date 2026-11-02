@@ -173,6 +173,19 @@ describe("validation happens before any request", () => {
         ["set_export_limit", () => client.set_export_limit(-1), RangeError],
         ["set_export_limit NaN", () => client.set_export_limit(Number.NaN), RangeError],
         ["curtail", () => client.curtail({ reserve_percent: 101 }), RangeError],
+        ["set_import_limit Infinity", () => client.set_import_limit(Number.POSITIVE_INFINITY), RangeError],
+        ["set_export_limit Infinity", () => client.set_export_limit(Number.POSITIVE_INFINITY), RangeError],
+        ["set_import_limit NaN", () => client.set_import_limit(Number.NaN), RangeError],
+        ["set_import_limit string", () => client.set_import_limit("5" as unknown as number), TypeError],
+        ["set_backup_reserve Infinity", () => client.set_backup_reserve(Number.POSITIVE_INFINITY), RangeError],
+        ["set_backup_reserve_raw Infinity", () => client.set_backup_reserve_raw(Number.POSITIVE_INFINITY), RangeError],
+        ["curtail Infinity", () => client.curtail({ reserve_percent: Number.POSITIVE_INFINITY }), RangeError],
+        ["curtail NaN", () => client.curtail({ reserve_percent: Number.NaN }), RangeError],
+        ["schedule_max_backup Infinity", () => client.schedule_max_backup(Number.POSITIVE_INFINITY), RangeError],
+        ["delay_battery_calibration Infinity", () => client.delay_battery_calibration(Number.POSITIVE_INFINITY), RangeError],
+        ["write_config Infinity", () => client.write_config({ "site_info.limit": Number.POSITIVE_INFINITY }), RangeError],
+        ["write_config NaN", () => client.write_config({ limit: Number.NaN }), RangeError],
+        ["write_config nested", () => client.write_config({ a: { b: [1, Number.NEGATIVE_INFINITY] } }), RangeError],
     ])("%s", async (_name, call, error) => {
         await expect(call()).rejects.toBeInstanceOf(error);
         expect(gateway.logins).toHaveLength(0);
