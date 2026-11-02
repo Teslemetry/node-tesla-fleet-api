@@ -33,6 +33,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - Python call sites use keyword arguments, so a Python method with many optional arguments becomes an options object here (with `start`/`end`, sent as `from`/`to`); short ones stay positional, in Python's order. Tessie's `tessie_*` commands take `max_attempts` before `wait_for_completion`, the reverse of every other Tessie command.
 - `_request` log lines go through `redactedJson`/`redactedQuery` in `src/log.ts`, matched by key name: `migrate_to_oauth` sends a token in a body, Tessie sends PINs in the query string, and Fleet's `set_pin_to_drive` and `set_valet_mode` call their PIN `password`. A new secret-bearing key belongs in `SECRET_KEYS`. Error lines log a message only for `TeslaFleetError`, whose message is fixed per class; anything else logs its type alone, and error `data` is never logged.
 
+## Router (`src/router/`)
+
+- Port of Python's `router/`; design in Linear document 02. `./router` imports only `exceptions` at run time (`test/router.test.ts` enforces it): a backend that cannot be imported (Bluetooth, Powerwall) marks its own errors with a boolean `failover_safe`. No `Proxy` and no method list: methods come from the backends' prototypes at construction (`methodNames`), and `Routed<B>` types them. The two must agree on what is skipped (`_` names, `then`).
+- `BluetoothUnconfirmedCommand` is checked before `on_result` and before the policy, by `instanceof` **and** the `unconfirmed` field. `instanceof` alone fails across the dual-package hazard; `test/consumers/esm.mjs` proves this with both real copies. Unlike Python, `is_failover_safe` itself also answers false for it.
+- Backend methods must not use overloads (`infer` reads only the last one). `test/router.types.ts` runs in CI through `tsconfig.test.json`; `test/*.test.ts` is not typechecked at all.
+
 ## Errors (`src/exceptions.ts`)
 
 - A class-for-class port of `python-tesla-fleet-api`'s `exceptions.py`: same names, parents, and `message`/`status`/`key`/`code` (as statics, copied onto instances). Add new errors there under their Python name, with no aliases; don't reintroduce per-module error files. `message` is always the class message; per-instance detail goes in `data`.
