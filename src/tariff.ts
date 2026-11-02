@@ -1,3 +1,4 @@
+import { InvalidResponse } from "./exceptions.js";
 import { EnergyCharges, Season, TariffContentV2, TouPeriods } from "./types/site_info.js";
 
 export interface TariffRate {
@@ -20,6 +21,41 @@ export interface TariffResolution {
     nextChange: Date;
     currency: string | null;
     upcoming: TariffPeriod[] | null;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Extract the `tariff_content_v2` object from a raw API response.
+ *
+ * Accepts the `site_info` read envelope (`{ response: { tariff_content_v2 } }`), the
+ * `time_of_use_settings` write envelope (`{ tou_settings: { tariff_content_v2 } }`), or the bare
+ * `tariff_content_v2` object itself. Throws {@link InvalidResponse} for a null body, an
+ * unrecognized envelope, or an extracted object without the minimal Tariff V2 shape (`seasons`
+ * and `energy_charges`) - checked identically on every path, since a malformed body (including an
+ * empty `{}` nested under a recognized envelope) is not the same as "no tariff configured".
+ */
+export function unwrapTariffV2(response: unknown): TariffContentV2 {
+    if (response == null) throw new InvalidResponse("tariff response body was null");
+    if (!isObject(response)) throw new InvalidResponse(String(response));
+
+    let candidate: unknown;
+    if ("tariff_content_v2" in response) {
+        candidate = response.tariff_content_v2;
+    } else if ("response" in response || "tou_settings" in response) {
+        const inner = "response" in response ? response.response : response.tou_settings;
+        candidate = isObject(inner) ? inner.tariff_content_v2 : undefined;
+    } else {
+        // No recognized envelope key - treat the input as the bare `tariff_content_v2` object.
+        candidate = response;
+    }
+
+    if (isObject(candidate) && "seasons" in candidate && "energy_charges" in candidate) {
+        return candidate as TariffContentV2;
+    }
+    throw new InvalidResponse(response);
 }
 
 const MINUTES_PER_DAY = 1440;
