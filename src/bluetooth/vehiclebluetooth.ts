@@ -611,19 +611,33 @@ export default class VehicleBluetooth extends BroadcastListeners {
         const { connection } = link;
         const maxWriteSize = connection.maxWriteSize === undefined ? DEFAULT_MAX_WRITE_SIZE : connection.maxWriteSize;
         return link.gatt.run(async () => {
+            let written = 0;
             for (const chunk of splitFrame(frame, maxWriteSize)) {
                 if (link.lost) {
                     throw new BleNotSubmittedError("The link was lost before the frame was fully written.");
                 }
-                await withTimeout(() => connection.write(chunk), GATT_WRITE_TIMEOUT_MS, link.closed.signal);
+                try {
+                    await withTimeout(() => connection.write(chunk), GATT_WRITE_TIMEOUT_MS, link.closed.signal);
+                } catch (error) {
+                    // The car never gets a whole frame, but it is holding part of one,
+                    // which would corrupt the next frame on this link.
+                    if (error instanceof BleNotSubmittedError && written > 0) {
+                        this.loseLink(link, "a frame stopped part way");
+                    }
+                    throw error;
+                }
+                written++;
                 this.lastActivity = performance.now();
             }
         });
     }
 
     /**
-     * Read a characteristic, bounded. A timeout is what finds a silently dead
-     * link, so it marks the link lost, as a failure does once the backend agrees.
+     * Read a characteristic, bounded. A rejected or timed-out read marks the link
+     * lost, whatever `isConnected` says, as that is how a dead link is found on a
+     * backend that misreports it. The exception is `BleNotSubmittedError` with the
+     * link reported up: no radio I/O happened, and a stack that hides Generic
+     * Access rejects those reads that way on a healthy link.
      * @throws BluetoothTransportError when there is no link.
      */
     protected async gattRead(characteristic: BleCharacteristic, timeoutMs: number = GATT_READ_TIMEOUT_MS): Promise<Uint8Array> {
@@ -639,7 +653,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
             try {
                 return await withTimeout(() => connection.read(characteristic), timeoutMs, link.closed.signal);
             } catch (error) {
-                if (error instanceof BleCallTimeout || !connection.isConnected) {
+                if (!(error instanceof BleNotSubmittedError) || !connection.isConnected) {
                     this.loseLink(link, `read failed: ${describe(error)}`);
                 }
                 throw error;
@@ -683,7 +697,9 @@ export default class VehicleBluetooth extends BroadcastListeners {
                     await this.writeFrame(link, frame);
                 } catch (error) {
                     if (error instanceof BleNotSubmittedError) {
-                        this.loseLink(link, describe(error));
+                        if (!link.connection.isConnected) {
+                            this.loseLink(link, describe(error));
+                        }
                         throw new BluetoothTransportError(null, null, { cause: error });
                     }
                     onSubmitted?.();

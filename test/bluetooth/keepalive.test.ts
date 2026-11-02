@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { BleNotSubmittedError } from "../../src/bluetooth/transport.js";
 import { bleHarness, finish, timed } from "../helpers/blevehicle.js";
 import { FakeBleLink } from "../helpers/fakeblelink.js";
 
@@ -82,15 +83,46 @@ describe("keepalive", () => {
         expect(keepaliveReads(link)).toBe(0);
     });
 
-    it("swallows a failed read and keeps going, with no reconnect", async () => {
+    it("swallows a read that never reached the radio and keeps going, with no reconnect", async () => {
         const { vehicle, link } = bleHarness({ keepalive_interval_ms: INTERVAL });
         await finish(vehicle.connect());
-        link.failNextRead();
+        link.failNextRead(new BleNotSubmittedError("characteristic not resolved"));
 
         await vi.advanceTimersByTimeAsync(INTERVAL * 2);
 
         expect(keepaliveReads(link)).toBe(2);
         expect(link.connections).toHaveLength(1);
+        expect(link.openConnections).toBe(1);
+        await vehicle.disconnect();
+    });
+
+    it("swallows a rejected read, which loses the link, with no reconnect", async () => {
+        const { vehicle, link } = bleHarness({ keepalive_interval_ms: INTERVAL });
+        const events: boolean[] = [];
+        await finish(vehicle.connect());
+        vehicle.listen_connection_status((connected) => events.push(connected));
+        link.failNextRead(new Error("not connected"));
+
+        await vi.advanceTimersByTimeAsync(INTERVAL * 3);
+
+        expect(events).toEqual([false]);
+        expect(keepaliveReads(link)).toBe(1);
+        expect(link.connections).toHaveLength(1);
+        expect(link.openConnections).toBe(0);
+    });
+
+    it("recovers on the next command when a backend rejects a read but still claims the link, as Homey can", async () => {
+        const { vehicle, link, fakeVehicle } = bleHarness({ keepalive_interval_ms: INTERVAL });
+        await finish(vehicle.handshakeVehicleSecurity());
+        link.dropLinkSilently();
+        link.failNextRead(new Error("not connected"));
+        expect(link.connection?.isConnected).toBe(true);
+
+        await vi.advanceTimersByTimeAsync(INTERVAL + 1);
+        await expect(finish(vehicle.door_lock())).resolves.toMatchObject({ response: { result: true } });
+
+        expect(fakeVehicle.vcsecCommands).toHaveLength(1);
+        expect(link.connections).toHaveLength(2);
         await vehicle.disconnect();
     });
 

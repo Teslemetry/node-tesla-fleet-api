@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageFaultE, OperationStatusE, RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
 import { FromVCSECMessage, OperationStatusE as VcsecOperationStatusE, VehicleLockStateE, VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
 import { VehicleRouter } from "../../src/router/index.js";
+import { BleNotSubmittedError } from "../../src/bluetooth/transport.js";
 import { BluetoothTimeout, BluetoothTransportError, BluetoothUnconfirmedCommand, SessionInfoAuthenticationFault, TeslaFleetMessageFaultResponseSizeExceedsMTU } from "../../src/exceptions.js";
 import { BleHarnessOptions, INFOTAINMENT, VCSEC, VIN, bareAck, bleHarness, finish, timed } from "../helpers/blevehicle.js";
 
@@ -282,5 +283,64 @@ describe("real VCSEC, which leaves request_uuid empty", () => {
         fakeVehicle.omitRequestUuidLikeRealVcsec();
 
         await expect(finish(vehicle.handshakeVehicleSecurity())).resolves.toBeUndefined();
+    });
+});
+
+describe("a rejected GATT call", () => {
+    it("loses the link on a read, however the backend reports it", async () => {
+        const { vehicle, link } = bleHarness();
+        await finish(vehicle.connect());
+        const events: boolean[] = [];
+        vehicle.listen_connection_status((connected) => events.push(connected));
+        link.failNextRead(new Error("not connected"));
+
+        await expect(finish(vehicle.read("version"))).rejects.toThrow("not connected");
+
+        expect(link.connection?.reported).toBe(false);
+        expect(events).toEqual([false]);
+    });
+
+    it("keeps the link on a read that never reached the radio", async () => {
+        const { vehicle, link } = bleHarness();
+        await finish(vehicle.connect());
+        const events: boolean[] = [];
+        vehicle.listen_connection_status((connected) => events.push(connected));
+        link.failNextRead(new BleNotSubmittedError("characteristic not resolved"));
+
+        await expect(finish(vehicle.read("deviceName"))).rejects.toBeInstanceOf(BleNotSubmittedError);
+
+        expect(link.openConnections).toBe(1);
+        expect(events).toEqual([]);
+    });
+
+    it("loses the link on a not-submitted read if the backend also reports it down", async () => {
+        const { vehicle, link } = bleHarness();
+        await finish(vehicle.connect());
+        link.connection!.reported = false;
+        link.failNextRead(new BleNotSubmittedError("link down"));
+
+        await expect(finish(vehicle.read("version"))).rejects.toBeInstanceOf(BleNotSubmittedError);
+
+        expect(link.openConnections).toBe(0);
+    });
+
+    it("keeps the link on a whole-frame write that never reached the radio, and reports it as not delivered", async () => {
+        const { vehicle, link } = await ready({ raise_unconfirmed: true, maxWriteSize: null });
+        link.rejectNextWriteAsNotSubmitted();
+
+        await expect(finish(vehicle.door_lock())).rejects.toBeInstanceOf(BluetoothTransportError);
+
+        expect(link.openConnections).toBe(1);
+        await expect(finish(vehicle.door_lock())).resolves.toEqual(OK);
+        expect(link.connections).toHaveLength(1);
+    });
+
+    it("drops the link when a frame stopped part way, as the car holds half of it, and still reports it as not delivered", async () => {
+        const { vehicle, link } = await ready({ raise_unconfirmed: true, maxWriteSize: "unreported" });
+        link.rejectNextWriteAsNotSubmitted();
+
+        await expect(finish(vehicle.door_lock())).rejects.toBeInstanceOf(BluetoothTransportError);
+
+        expect(link.openConnections).toBe(0);
     });
 });

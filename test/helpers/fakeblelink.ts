@@ -358,11 +358,11 @@ export class FakeBleLink implements BleTransport {
     async onRead(connection: FakeConnection, characteristic: BleCharacteristic): Promise<Uint8Array> {
         this.calls.push({ kind: "read", characteristic });
         const fault = this.readFaults.shift();
+        if (fault instanceof Error) {
+            throw fault;
+        }
         if (fault === "hang" || !connection.live) {
             await new Promise(() => undefined);
-        }
-        if (fault) {
-            throw fault;
         }
         return characteristic === "version" ? this.version : this.genericAccess[characteristic];
     }
