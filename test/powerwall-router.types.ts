@@ -1,7 +1,8 @@
 // Compile-time checks, run by `npx tsc -p tsconfig.test.json --noEmit`. Never
 // executed. They place the real `PowerwallEnergySite` in the real
 // `EnergySiteRouter`, in front of the real cloud site.
-import type { CommandResult, LocalConfig, PowerwallEnergySite } from "../src/powerwall/index.js";
+import { connect_gateway } from "../src/powerwall/index.js";
+import type { CommandResult, LocalConfig, PowerwallClient, PowerwallEnergySite } from "../src/powerwall/index.js";
 import { EnergySiteRouter } from "../src/router/index.js";
 import type { TeslemetryEnergySite } from "../src/teslemetryenergy.js";
 import type { LiveStatusResponse } from "../src/types/live_status.js";
@@ -61,6 +62,8 @@ export async function routed(local: PowerwallEnergySite, cloud: TeslemetryEnergy
 
     // Discovery never routes: it is the cloud backend's alone.
     await router.secondary.find_gateway_address();
+    const _healed = await connect_gateway({ client: { gatewayPassword: "", rsaPrivateKeyPem: "" }, cloud });
+    assertType<Equal<typeof _healed.client, PowerwallClient>>();
 
     // @ts-expect-error A misspelt method.
     await router.opration("self_consumption");

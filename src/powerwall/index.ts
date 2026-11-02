@@ -41,6 +41,8 @@ export {
     PowerwallProtocolError,
     PowerwallRateLimitError,
 } from "./exceptions.js";
+export { connect_gateway, verify_local_gateway } from "./gateway.js";
+export type { ConnectGatewayOptions, ConnectGatewayResult, GatewayOutcome } from "./gateway.js";
 export {
     ENERGY_CONFIG_INTERVAL_MS,
     ENERGY_LIVE_INTERVAL_MS,
