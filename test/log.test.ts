@@ -118,7 +118,7 @@ describe("the Fleet commands that carry a PIN", () => {
         const fetch = fakeFetch();
         const { api, lines } = fleet(fetch);
 
-        await api.vehicles!.trigger_homelink(VIN, 1, 2, "homelink-token-value");
+        await api.vehicles!.trigger_homelink(VIN, "homelink-token-value", 1, 2);
 
         expectClean(lines, "homelink-token-value");
         expect(bodySent(fetch).token).toBe("homelink-token-value");

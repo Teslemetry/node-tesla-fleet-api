@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import {
     Domain,
+    Flags,
     MessageFaultE,
     RoutableMessage,
     OperationStatusE as MessageOperationStatusE,
@@ -17,8 +18,12 @@ import { deriveSharedKey, publicKeyFor, uint32BE } from "../../src/signing/crypt
 
 const VIN = "5YJXCAE43LF123456";
 
+/** The vehicle clock a `FakeVehicle` reports in a ping reply. */
+export const FAKE_PING_TIMESTAMP = new Date("2026-01-02T03:04:05.000Z");
+
 type SessionInfoAttack =
     | { kind: "corrupt-tag" }
+    | { kind: "empty-tag" }
     | { kind: "wrong-challenge" }
     | { kind: "stale"; counter: number; clockTime: number };
 
@@ -26,7 +31,9 @@ interface DomainState {
     epoch: Buffer;
     counter: number;
     clockTime: number;
+    responseCounter: number;
     clientPublicKey?: Buffer;
+    sharedKey?: Buffer;
     hmacKey?: Buffer;
     sessionInfoKey?: Buffer;
 }
@@ -45,11 +52,22 @@ export class FakeVehicle {
     private readonly domainState = new Map<Domain, DomainState>();
     private nextOutcome: "ok" | "not_whitelisted" | "bad_signature" = "ok";
     private waitCountRemaining = 0;
-    private nextSessionInfoAttack: SessionInfoAttack | null = null;
+    private sessionInfoAttacks: SessionInfoAttack[] = [];
     private attachSessionInfoOnNextReply = false;
     private omitRequestUuidEcho = false;
+    private emptyKeyHandshakeStatuses: SessionInfoStatus[] = [];
+    private nextVcsecReply: FromVCSECMessage | null = null;
+    private nextInfotainmentReplies: Response[] = [];
+    private plaintextReplies = false;
+    private encryptHmacReplies = false;
+    private corruptNextReply = false;
+    private replyFlags = 0;
     /** Counters of every VCSEC command in the order this FakeVehicle actually received them - for concurrency/ordering tests. */
     readonly vcsecCounterArrivals: number[] = [];
+    /** Every accepted VCSEC command, decoded on this side of the wire. */
+    readonly vcsecCommands: UnsignedMessage[] = [];
+    /** Every accepted Infotainment command, decoded on this side of the wire. */
+    readonly infotainmentActions: Action[] = [];
 
     constructor(privateKey?: Buffer) {
         this.privateKey = privateKey ?? crypto.randomBytes(32);
@@ -71,19 +89,66 @@ export class FakeVehicle {
         this.nextOutcome = "bad_signature";
     }
 
-    /** Simulate a MITM flipping a bit in `session_info_tag` (or the session info it covers). */
-    corruptNextSessionInfoTag(): void {
-        this.nextSessionInfoAttack = { kind: "corrupt-tag" };
+    /** Simulate a MITM flipping a bit in `session_info_tag` (or the session info it covers) on the next `replies`. */
+    corruptNextSessionInfoTag(replies: number = 1): void {
+        this.sessionInfoAttacks.push(...Array<SessionInfoAttack>(replies).fill({ kind: "corrupt-tag" }));
     }
 
-    /** Simulate a captured old session-info reply replayed against a request it wasn't tagged for. */
-    spoofNextSessionInfoChallenge(): void {
-        this.nextSessionInfoAttack = { kind: "wrong-challenge" };
+    /**
+     * Simulate the reply VCSEC was seen to send right after a key was added:
+     * a `session_info_tag` that is present but zero-length.
+     */
+    emptyNextSessionInfoTag(replies: number = 1): void {
+        this.sessionInfoAttacks.push(...Array<SessionInfoAttack>(replies).fill({ kind: "empty-tag" }));
+    }
+
+    /**
+     * Reply to the next `replies` session-info requests with no public key, as
+     * a vehicle does for a key it has no session with. Such a reply carries no
+     * usable tag.
+     */
+    replyToNextHandshakeWithoutPublicKey(status: SessionInfoStatus, replies: number = 1): void {
+        this.emptyKeyHandshakeStatuses.push(...Array<SessionInfoStatus>(replies).fill(status));
+    }
+
+    /** Answer the next accepted VCSEC command with this message instead of `commandStatus` OK. */
+    replyToNextVcsecCommandWith(message: FromVCSECMessage): void {
+        this.nextVcsecReply = message;
+    }
+
+    /** Answer the next accepted Infotainment command with this message instead of `actionStatus` OK. Calls queue up. */
+    replyToNextInfotainmentCommandWith(message: Response): void {
+        this.nextInfotainmentReplies.push(message);
+    }
+
+    /** Ignore `FLAG_ENCRYPT_RESPONSE`, as firmware before 2024.38 does. */
+    replyInPlaintextLikeOldFirmware(): void {
+        this.plaintextReplies = true;
+    }
+
+    /** Encrypt replies to HMAC-personalized requests too, which needs no flag on a reply's side of the spec. */
+    encryptRepliesToHmacRequests(): void {
+        this.encryptHmacReplies = true;
+    }
+
+    /** Simulate a MITM flipping one ciphertext byte of the next encrypted reply. */
+    corruptNextReplyCiphertext(): void {
+        this.corruptNextReply = true;
+    }
+
+    /** The flags field of every later reply, which an encrypted reply binds into its metadata. */
+    setReplyFlags(flags: number): void {
+        this.replyFlags = flags;
+    }
+
+    /** Simulate a captured old session-info reply replayed against a request it wasn't tagged for, on the next `replies`. */
+    spoofNextSessionInfoChallenge(replies: number = 1): void {
+        this.sessionInfoAttacks.push(...Array<SessionInfoAttack>(replies).fill({ kind: "wrong-challenge" }));
     }
 
     /** Simulate a validly-*signed* but stale (rolled-back counter/clock, same epoch) session-info replay. */
     replayStaleSessionInfo(counter: number, clockTime: number): void {
-        this.nextSessionInfoAttack = { kind: "stale", counter, clockTime };
+        this.sessionInfoAttacks.push({ kind: "stale", counter, clockTime });
     }
 
     /**
@@ -110,22 +175,93 @@ export class FakeVehicle {
     private stateFor(domain: Domain): DomainState {
         let state = this.domainState.get(domain);
         if (!state) {
-            state = { epoch: crypto.randomBytes(16), counter: 0, clockTime: Math.floor(Date.now() / 1000) };
+            state = { epoch: crypto.randomBytes(16), counter: 0, clockTime: Math.floor(Date.now() / 1000), responseCounter: 0 };
             this.domainState.set(domain, state);
         }
         return state;
     }
 
-    private keysFor(state: DomainState): { hmacKey: Buffer; sessionInfoKey: Buffer } {
+    private keysFor(state: DomainState): { sharedKey: Buffer; hmacKey: Buffer; sessionInfoKey: Buffer } {
         if (!state.clientPublicKey) {
             throw new Error("FakeVehicle received a command before a handshake.");
         }
-        if (!state.hmacKey || !state.sessionInfoKey) {
-            const sharedKey = deriveSharedKey(this.privateKey, state.clientPublicKey);
-            state.hmacKey = crypto.createHmac("sha256", sharedKey).update("authenticated command").digest();
-            state.sessionInfoKey = crypto.createHmac("sha256", sharedKey).update("session info").digest();
+        if (!state.sharedKey || !state.hmacKey || !state.sessionInfoKey) {
+            state.sharedKey = deriveSharedKey(this.privateKey, state.clientPublicKey);
+            state.hmacKey = crypto.createHmac("sha256", state.sharedKey).update("authenticated command").digest();
+            state.sessionInfoKey = crypto.createHmac("sha256", state.sharedKey).update("session info").digest();
         }
-        return { hmacKey: state.hmacKey, sessionInfoKey: state.sessionInfoKey };
+        return { sharedKey: state.sharedKey, hmacKey: state.hmacKey, sessionInfoKey: state.sessionInfoKey };
+    }
+
+    /** Open an AES-GCM-personalized request, as a vehicle would, or return `null` if it fails to authenticate. */
+    private openAesRequest(msg: RoutableMessage, domain: Domain, state: DomainState): Buffer | null {
+        const data = msg.signatureData!.AESGCMPersonalizedData!;
+        const parts = [
+            Buffer.from([Tag.TAG_SIGNATURE_TYPE, 1, SignatureType.SIGNATURE_TYPE_AES_GCM_PERSONALIZED]),
+            Buffer.from([Tag.TAG_DOMAIN, 1, domain]),
+            Buffer.from([Tag.TAG_PERSONALIZATION, 17]),
+            Buffer.from(VIN, "ascii"),
+            Buffer.from([Tag.TAG_EPOCH, data.epoch.length]),
+            Buffer.from(data.epoch),
+            Buffer.from([Tag.TAG_EXPIRES_AT, 4]),
+            uint32BE(data.expiresAt),
+            Buffer.from([Tag.TAG_COUNTER, 4]),
+            uint32BE(data.counter),
+        ];
+        // Unlike a response, a request only carries TAG_FLAGS when it has flags.
+        if (msg.flags !== 0) {
+            parts.push(Buffer.from([Tag.TAG_FLAGS, 4]), uint32BE(msg.flags));
+        }
+        parts.push(Buffer.from([Tag.TAG_END]));
+
+        const decipher = crypto.createDecipheriv("aes-128-gcm", this.keysFor(state).sharedKey, data.nonce, { authTagLength: 16 });
+        decipher.setAAD(crypto.createHash("sha256").update(Buffer.concat(parts)).digest());
+        decipher.setAuthTag(data.tag);
+        try {
+            return Buffer.concat([decipher.update(msg.protobufMessageAsBytes ?? new Uint8Array()), decipher.final()]);
+        } catch {
+            return null;
+        }
+    }
+
+    /** Encrypt a reply payload as a vehicle does for a request that asked for it. */
+    private sealResponse(request: RoutableMessage, domain: Domain, state: DomainState, payload: Uint8Array) {
+        const aes = request.signatureData?.AESGCMPersonalizedData;
+        const hmac = request.signatureData?.HMACPersonalizedData;
+        let requestHash = aes
+            ? Buffer.concat([Buffer.from([SignatureType.SIGNATURE_TYPE_AES_GCM_PERSONALIZED]), aes.tag])
+            : Buffer.concat([Buffer.from([SignatureType.SIGNATURE_TYPE_HMAC_PERSONALIZED]), hmac!.tag]);
+        if (domain === Domain.DOMAIN_VEHICLE_SECURITY) {
+            requestHash = requestHash.subarray(0, 17);
+        }
+
+        state.responseCounter++;
+        const counter = state.responseCounter;
+        const metadata = Buffer.concat([
+            Buffer.from([Tag.TAG_SIGNATURE_TYPE, 1, SignatureType.SIGNATURE_TYPE_AES_GCM_RESPONSE]),
+            Buffer.from([Tag.TAG_DOMAIN, 1, domain]),
+            Buffer.from([Tag.TAG_PERSONALIZATION, 17]),
+            Buffer.from(VIN, "ascii"),
+            Buffer.from([Tag.TAG_COUNTER, 4]),
+            uint32BE(counter),
+            Buffer.from([Tag.TAG_FLAGS, 4]),
+            uint32BE(this.replyFlags),
+            Buffer.from([Tag.TAG_REQUEST_HASH, requestHash.length]),
+            requestHash,
+            Buffer.from([Tag.TAG_FAULT, 4]),
+            uint32BE(MessageFaultE.MESSAGEFAULT_ERROR_NONE),
+            Buffer.from([Tag.TAG_END]),
+        ]);
+
+        const nonce = crypto.randomBytes(12);
+        const cipher = crypto.createCipheriv("aes-128-gcm", this.keysFor(state).sharedKey, nonce, { authTagLength: 16 });
+        cipher.setAAD(crypto.createHash("sha256").update(metadata).digest());
+        const ciphertext = Buffer.concat([cipher.update(payload), cipher.final()]);
+        if (this.corruptNextReply) {
+            this.corruptNextReply = false;
+            ciphertext[0] ^= 0xff;
+        }
+        return { ciphertext, signature: { AESGCMResponseData: { nonce, counter, tag: cipher.getAuthTag() } } };
     }
 
     /**
@@ -141,8 +277,7 @@ export class FakeVehicle {
         status: SessionInfoStatus,
         state: DomainState,
     ): { sessionInfo: Uint8Array; tag: Uint8Array; requestUuid: Uint8Array } {
-        const attack = this.nextSessionInfoAttack;
-        this.nextSessionInfoAttack = null;
+        const attack = this.sessionInfoAttacks.shift();
 
         const counter = attack?.kind === "stale" ? attack.counter : state.counter;
         const clockTime = attack?.kind === "stale" ? attack.clockTime : state.clockTime;
@@ -170,6 +305,8 @@ export class FakeVehicle {
         if (attack?.kind === "corrupt-tag") {
             tag = Buffer.from(tag);
             tag[0] ^= 0xff;
+        } else if (attack?.kind === "empty-tag") {
+            tag = Buffer.alloc(0);
         }
 
         // The tag always binds the real challenge (`effectiveRequestUuid`);
@@ -200,8 +337,20 @@ export class FakeVehicle {
 
         if (msg.sessionInfoRequest) {
             state.clientPublicKey = Buffer.from(msg.sessionInfoRequest.publicKey);
+            state.sharedKey = undefined;
             state.hmacKey = undefined;
             state.sessionInfoKey = undefined;
+            const status = this.emptyKeyHandshakeStatuses.shift();
+            if (status !== undefined) {
+                const reply = RoutableMessage.create({
+                    fromDestination: { domain },
+                    requestUuid: msg.uuid,
+                    sessionInfo: SessionInfo.encode(SessionInfo.create({ status, epoch: state.epoch, clockTime: state.clockTime })).finish(),
+                    signatureData: { sessionInfoTag: { tag: Buffer.alloc(32) } },
+                    uuid: crypto.randomBytes(16),
+                });
+                return Buffer.from(RoutableMessage.encode(reply).finish());
+            }
             return this.buildSessionInfoReply(domain, msg.uuid, SessionInfoStatus.SESSION_INFO_STATUS_OK, state);
         }
 
@@ -220,41 +369,57 @@ export class FakeVehicle {
             return Buffer.from(RoutableMessage.encode(reply).finish());
         }
 
-        // A real command: verify the HMAC tag ourselves, independently of the
+        // A real command: authenticate it ourselves, independently of the
         // client's own construction, before accepting it.
+        const aesData = msg.signatureData?.AESGCMPersonalizedData;
         const hmacData = msg.signatureData?.HMACPersonalizedData;
-        if (!hmacData) {
-            throw new Error("FakeVehicle only supports HMAC-personalized requests.");
+        if (!aesData && !hmacData) {
+            throw new Error("FakeVehicle only supports personalized requests.");
         }
         if (domain === Domain.DOMAIN_VEHICLE_SECURITY) {
-            this.vcsecCounterArrivals.push(hmacData.counter);
+            this.vcsecCounterArrivals.push((aesData ?? hmacData)!.counter);
         }
-        const { hmacKey } = this.keysFor(state);
 
-        const command = Buffer.from(msg.protobufMessageAsBytes ?? new Uint8Array());
-        const metadata = Buffer.concat([
-            Buffer.from([Tag.TAG_SIGNATURE_TYPE, 1, SignatureType.SIGNATURE_TYPE_HMAC_PERSONALIZED]),
-            Buffer.from([Tag.TAG_DOMAIN, 1, domain]),
-            Buffer.from([Tag.TAG_PERSONALIZATION, 17]),
-            Buffer.from(VIN, "ascii"),
-            Buffer.from([Tag.TAG_EPOCH, hmacData.epoch.length]),
-            Buffer.from(hmacData.epoch),
-            Buffer.from([Tag.TAG_EXPIRES_AT, 4]),
-            uint32BE(hmacData.expiresAt),
-            Buffer.from([Tag.TAG_COUNTER, 4]),
-            uint32BE(hmacData.counter),
-            Buffer.from([Tag.TAG_END]),
-        ]);
-        const expectedTag = crypto.createHmac("sha256", hmacKey).update(Buffer.concat([metadata, command])).digest();
-        if (!expectedTag.equals(Buffer.from(hmacData.tag))) {
-            const reply = RoutableMessage.create({
-                fromDestination: { domain },
-                signedMessageStatus: { operationStatus: MessageOperationStatusE.OPERATIONSTATUS_OK, signedMessageFault: MessageFaultE.MESSAGEFAULT_ERROR_INVALID_SIGNATURE },
-                uuid: crypto.randomBytes(16),
-            });
-            return Buffer.from(RoutableMessage.encode(reply).finish());
+        let command: Buffer;
+        if (aesData) {
+            const opened = this.openAesRequest(msg, domain, state);
+            if (opened === null) {
+                const reply = RoutableMessage.create({
+                    fromDestination: { domain },
+                    signedMessageStatus: { operationStatus: MessageOperationStatusE.OPERATIONSTATUS_OK, signedMessageFault: MessageFaultE.MESSAGEFAULT_ERROR_INVALID_SIGNATURE },
+                    uuid: crypto.randomBytes(16),
+                });
+                return Buffer.from(RoutableMessage.encode(reply).finish());
+            }
+            command = opened;
+            state.counter = aesData.counter;
+        } else {
+            const { hmacKey } = this.keysFor(state);
+            command = Buffer.from(msg.protobufMessageAsBytes ?? new Uint8Array());
+            const metadata = Buffer.concat([
+                Buffer.from([Tag.TAG_SIGNATURE_TYPE, 1, SignatureType.SIGNATURE_TYPE_HMAC_PERSONALIZED]),
+                Buffer.from([Tag.TAG_DOMAIN, 1, domain]),
+                Buffer.from([Tag.TAG_PERSONALIZATION, 17]),
+                Buffer.from(VIN, "ascii"),
+                Buffer.from([Tag.TAG_EPOCH, hmacData!.epoch.length]),
+                Buffer.from(hmacData!.epoch),
+                Buffer.from([Tag.TAG_EXPIRES_AT, 4]),
+                uint32BE(hmacData!.expiresAt),
+                Buffer.from([Tag.TAG_COUNTER, 4]),
+                uint32BE(hmacData!.counter),
+                Buffer.from([Tag.TAG_END]),
+            ]);
+            const expectedTag = crypto.createHmac("sha256", hmacKey).update(Buffer.concat([metadata, command])).digest();
+            if (!expectedTag.equals(Buffer.from(hmacData!.tag))) {
+                const reply = RoutableMessage.create({
+                    fromDestination: { domain },
+                    signedMessageStatus: { operationStatus: MessageOperationStatusE.OPERATIONSTATUS_OK, signedMessageFault: MessageFaultE.MESSAGEFAULT_ERROR_INVALID_SIGNATURE },
+                    uuid: crypto.randomBytes(16),
+                });
+                return Buffer.from(RoutableMessage.encode(reply).finish());
+            }
+            state.counter = hmacData!.counter;
         }
-        state.counter = hmacData.counter;
 
         if (this.waitCountRemaining > 0) {
             this.waitCountRemaining--;
@@ -268,16 +433,25 @@ export class FakeVehicle {
 
         let payload: Uint8Array;
         if (domain === Domain.DOMAIN_VEHICLE_SECURITY) {
-            UnsignedMessage.decode(command); // exercised for shape validation
+            this.vcsecCommands.push(UnsignedMessage.decode(command));
+            const scripted = this.nextVcsecReply;
+            this.nextVcsecReply = null;
             payload = FromVCSECMessage.encode(
-                FromVCSECMessage.create({
-                    commandStatus: CommandStatus.create({ operationStatus: VcsecOperationStatusE.OPERATIONSTATUS_OK }),
-                }),
+                scripted ??
+                    FromVCSECMessage.create({
+                        commandStatus: CommandStatus.create({ operationStatus: VcsecOperationStatusE.OPERATIONSTATUS_OK }),
+                    }),
             ).finish();
         } else {
-            Action.decode(command); // exercised for shape validation
+            const action = Action.decode(command);
+            this.infotainmentActions.push(action);
+            const scripted = this.nextInfotainmentReplies.shift();
+            const ping = action.vehicleAction?.ping;
             payload = Response.encode(
-                Response.create({ actionStatus: ActionStatus.create({ result: ActionOperationStatusE.OPERATIONSTATUS_OK }) }),
+                scripted ??
+                    (ping
+                        ? Response.create({ ping: { pingId: ping.pingId, localTimestamp: FAKE_PING_TIMESTAMP } })
+                        : Response.create({ actionStatus: ActionStatus.create({ result: ActionOperationStatusE.OPERATIONSTATUS_OK }) })),
             ).finish();
         }
 
@@ -287,12 +461,17 @@ export class FakeVehicle {
             resync = this.buildSessionInfoFields(msg.uuid, SessionInfoStatus.SESSION_INFO_STATUS_OK, state);
         }
 
+        // session_info_tag and AES_GCM_Response_data share a oneof, so a resync goes out in the clear.
+        const encryptionRequested = (msg.flags & (1 << Flags.FLAG_ENCRYPT_RESPONSE)) !== 0 || this.encryptHmacReplies;
+        const sealed = encryptionRequested && !this.plaintextReplies && !resync ? this.sealResponse(msg, domain, state, payload) : undefined;
+
         const reply = RoutableMessage.create({
             fromDestination: { domain },
             requestUuid: msg.uuid,
-            protobufMessageAsBytes: payload,
+            protobufMessageAsBytes: sealed?.ciphertext ?? payload,
+            flags: this.replyFlags,
             sessionInfo: resync?.sessionInfo,
-            signatureData: resync ? { sessionInfoTag: { tag: resync.tag } } : undefined,
+            signatureData: resync ? { sessionInfoTag: { tag: resync.tag } } : sealed?.signature,
             signedMessageStatus: { operationStatus: MessageOperationStatusE.OPERATIONSTATUS_OK, signedMessageFault: MessageFaultE.MESSAGEFAULT_ERROR_NONE },
             uuid: crypto.randomBytes(16),
         });

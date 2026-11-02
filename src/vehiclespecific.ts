@@ -295,11 +295,11 @@ export default class VehicleSpecific {
 
   /**
    * Sets seat cooling.
-   * @param seat_position Seat position
+   * @param seat_position `AutoSeat` position (1-indexed: front left is 1, front right is 2), unlike seat heating
    * @param seat_cooler_level Cooling level
    */
   async remote_seat_cooler_request(
-    seat_position: Seat | number,
+    seat_position: keyof typeof AutoSeat | number,
     seat_cooler_level: Level,
   ): Promise<CommandResponse> {
     return this.parent.remote_seat_cooler_request(
@@ -515,6 +515,7 @@ export default class VehicleSpecific {
    * @param end_time Minutes after midnight to stop charging
    * @param one_time Run the schedule only once
    * @param id Schedule ID to modify an existing schedule
+   * @param _name Only the signed path carries a schedule name; REST accepts it for parity and does not send it
    */
   async add_charge_schedule(
     days_of_week: string | number,
@@ -525,6 +526,7 @@ export default class VehicleSpecific {
     end_time?: number,
     one_time?: boolean,
     id?: number,
+    _name?: string,
   ): Promise<CommandResponse> {
     if (start_time == null && end_time == null) {
       throw new Error("Either start_time or end_time or both must be provided");
@@ -557,6 +559,7 @@ export default class VehicleSpecific {
    * @param precondition_time Minutes after midnight to be preconditioned by
    * @param id Schedule ID to modify an existing schedule
    * @param one_time Run the schedule only once
+   * @param _name Only the signed path carries a schedule name; REST accepts it for parity and does not send it
    */
   async add_precondition_schedule(
     days_of_week: string | number,
@@ -566,6 +569,7 @@ export default class VehicleSpecific {
     precondition_time: number,
     id?: number,
     one_time?: boolean,
+    _name?: string,
   ): Promise<CommandResponse> {
     return this.parent.parent._request(
       "POST",
@@ -666,7 +670,7 @@ export default class VehicleSpecific {
    */
   async set_valet_mode(
     on: boolean,
-    password: string | number,
+    password?: string | number,
   ): Promise<CommandResponse> {
     return this.parent.set_valet_mode(this.vin, on, password);
   }
@@ -743,11 +747,11 @@ export default class VehicleSpecific {
    * @param lon Longitude
    */
   async trigger_homelink(
-    lat: number,
-    lon: number,
     token?: string,
+    lat?: number,
+    lon?: number,
   ): Promise<CommandResponse> {
-    return this.parent.trigger_homelink(this.vin, lat, lon, token);
+    return this.parent.trigger_homelink(this.vin, token, lat, lon);
   }
 
   /**
@@ -768,8 +772,8 @@ export default class VehicleSpecific {
    */
   async window_control(
     command: "vent" | "close",
-    lat: number,
-    lon: number,
+    lat?: number,
+    lon?: number,
   ): Promise<CommandResponse> {
     return this.parent.window_control(this.vin, command, lat, lon);
   }
