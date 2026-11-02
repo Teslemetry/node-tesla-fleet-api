@@ -53,6 +53,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `PowerwallEnergySite` omits what has no local mapping instead of stubbing it, so a router skips it. `priority` is a decimal string, because `2^64 - 1` does not fit a number.
 - Golden envelopes (`test/fixtures/powerwall-envelopes.json`, from the real Python client; never regenerate them here) differ from Node in two expected ways, both asserted in `test/powerwall/golden.test.ts`: `reconnect_grid` omits `force = false`, and a `config.json` write has `JSON.stringify` spacing. `src/powerwall/queries.ts` is pinned by SHA-256: a client cannot sign a new query.
 - An empty `MessageEnvelope` encodes to zero bytes, which `post_v1r` rejects, so a fake reply meaning "no response field" must still carry a category, as `{ envelope: { teg: {} } }` does.
+- `LiveStatusMerge` and `SiteInfoMerge` own no timer, and `test/powerwall/merge.test.ts` fails if they start one: the caller drives `poll()`. A `SiteInfoMerge` read that a command landed in is discarded by `generation`, because it predates the command's value, but it still updates `healthy`.
+- `connect_gateway` persists nothing: `moved` hands the caller a `host` to save. Every outcome returns a client, so a stale one fails over to the cloud rather than breaking the site. Registration and discovery use the cloud backend directly, never the router.
+- `scripts/powerwall-readonly-check.ts` runs on a real home's gateway, so it must stay unable to write and must print only key names, types and pass or fail. `test/powerwall/readonly-check.test.ts` checks this on its source, at run time and on the wire, from an allowlist: a new client or site method counts as a write until added to `READS` there, and a new write must join the table in `docs/powerwall.md`. `tsconfig.test.json` also compiles `scripts/*.ts`, so the script's `Pick` types make a write a compile error.
 
 ## Cloud clients (`src/teslemetry.ts`, `src/tessie.ts`)
 

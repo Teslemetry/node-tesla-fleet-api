@@ -78,6 +78,8 @@ export class FakeGateway {
         ComponentsQuery: '{"components":{}}',
     };
     systemInfo: Json = {};
+    /** Answer a v1r request by its content: a body for the envelope, or nothing for the default. */
+    respond?: (envelope: MessageEnvelope) => Json | undefined;
     /** `config.json` as stored. Its hash is SHA-256, which is opaque to a client. */
     config: Buffer = Buffer.from('{"default_real_mode":"self_consumption","site_info":{"backup_reserve_percent":24}}');
     /** The `hash` of each accepted `config.json` update. */
@@ -281,7 +283,8 @@ export class FakeGateway {
         if (fault !== MessageFaultE.MESSAGEFAULT_ERROR_NONE) {
             this.#sendRoutable(response, { fault });
         } else if (reply === undefined) {
-            this.#sendRoutable(response, { envelope: this.#act(post.envelope) });
+            const envelope = this.respond?.(post.envelope) ?? this.#act(post.envelope);
+            this.#sendRoutable(response, { envelope });
         } else if ("dropConnection" in reply) {
             response.destroy();
         } else if ("raw" in reply) {

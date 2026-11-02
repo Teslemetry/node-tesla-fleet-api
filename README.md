@@ -36,6 +36,10 @@ class MyApi extends Teslemetry {
 }
 ```
 
+## Local Powerwall
+
+A client for a Powerwall gateway on your LAN, with routing to the cloud and merge helpers, is built but not published: `tesla-fleet-api/powerwall` is not importable yet. It ships once a read-only check has passed on a real gateway. Its writes are not yet verified from Node on hardware. See [docs/powerwall.md](docs/powerwall.md).
+
 ## OAuth
 
 ```ts
