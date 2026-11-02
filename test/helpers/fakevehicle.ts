@@ -557,7 +557,7 @@ export class FakeVehicle {
 
         const reply = RoutableMessage.create({
             fromDestination: { domain },
-            requestUuid: msg.uuid,
+            requestUuid: this.echoOf(msg),
             protobufMessageAsBytes: sealed?.ciphertext ?? payload,
             flags: this.replyFlags,
             sessionInfo: resync?.sessionInfo,

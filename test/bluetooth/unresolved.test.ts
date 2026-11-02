@@ -4,6 +4,7 @@
 import crypto from "crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageFaultE, OperationStatusE, RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
+import { FromVCSECMessage, OperationStatusE as VcsecOperationStatusE, VehicleLockStateE, VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
 import { VehicleRouter } from "../../src/router/index.js";
 import { BluetoothTimeout, BluetoothTransportError, BluetoothUnconfirmedCommand, SessionInfoAuthenticationFault, TeslaFleetMessageFaultResponseSizeExceedsMTU } from "../../src/exceptions.js";
 import { BleHarnessOptions, INFOTAINMENT, VCSEC, VIN, bareAck, bleHarness, finish, timed } from "../helpers/blevehicle.js";
@@ -142,5 +143,144 @@ describe("a stale session reply", () => {
 
         expect(fakeVehicle.infotainmentActions).toHaveLength(1);
         expect(fallback.flash_lights).not.toHaveBeenCalled();
+    });
+});
+
+describe("a reply that is not for this request", () => {
+    const otherUuid = () => crypto.randomBytes(16);
+    const epochFault = (reply: RoutableMessage, request: RoutableMessage, requestUuid: Uint8Array): RoutableMessage => ({
+        ...bareAck(reply, request),
+        requestUuid,
+        signedMessageStatus: { operationStatus: OperationStatusE.OPERATIONSTATUS_ERROR, signedMessageFault: MessageFaultE.MESSAGEFAULT_ERROR_INCORRECT_EPOCH },
+    });
+    const wait = (reply: RoutableMessage, request: RoutableMessage, requestUuid: Uint8Array): RoutableMessage => ({
+        ...bareAck(reply, request),
+        requestUuid,
+        signedMessageStatus: { operationStatus: OperationStatusE.OPERATIONSTATUS_WAIT, signedMessageFault: MessageFaultE.MESSAGEFAULT_ERROR_NONE },
+    });
+    const addressedVcsec = (vehicle: { routingAddress: Buffer }, message: object, requestUuid: Uint8Array = new Uint8Array(0)) =>
+        RoutableMessage.fromPartial({
+            fromDestination: { domain: VCSEC },
+            toDestination: { routingAddress: vehicle.routingAddress },
+            requestUuid,
+            protobufMessageAsBytes: FromVCSECMessage.encode(FromVCSECMessage.fromPartial(message)).finish(),
+        });
+
+    it.each([
+        ["an epoch fault", epochFault],
+        ["a WAIT", wait],
+    ])("does not resend on %s carrying another request's uuid", async (_name, stale) => {
+        const { vehicle, link } = await ready({ raise_unconfirmed: true });
+        link.rewriteNextReply((reply, request) => [{ message: stale(reply, request, otherUuid()) }, { message: reply, delayMs: 100 }]);
+
+        await expect(finish(vehicle.flash_lights())).resolves.toMatchObject({ response: { result: true } });
+
+        expect(link.commands(INFOTAINMENT)).toHaveLength(1);
+    });
+
+    it.each([
+        ["an epoch fault", epochFault],
+        ["a WAIT", wait],
+    ])("does not resend on %s with no uuid, as nothing ties it to this request", async (_name, stale) => {
+        const { vehicle, link } = await ready({ raise_unconfirmed: true });
+        link.rewriteNextReply((reply, request) => [{ message: stale(reply, request, new Uint8Array(0)) }]);
+
+        await expect(finish(vehicle.door_lock())).rejects.toBeInstanceOf(BluetoothUnconfirmedCommand);
+
+        expect(link.commands(VCSEC)).toHaveLength(1);
+    });
+
+    it("does not take a plaintext WAIT with no uuid as a reason to resend", async () => {
+        const { vehicle, link } = await ready({ raise_unconfirmed: true });
+        link.rewriteNextReply((_reply, request) => [{ message: { ...addressedVcsec(vehicle, { commandStatus: { operationStatus: VcsecOperationStatusE.OPERATIONSTATUS_WAIT } }), uuid: request.uuid } }]);
+
+        await expect(finish(vehicle.door_lock())).rejects.toBeInstanceOf(BluetoothUnconfirmedCommand);
+
+        expect(link.commands(VCSEC)).toHaveLength(1);
+    });
+
+    it("still resends on an epoch fault that echoes this request", async () => {
+        const { vehicle, link } = await ready();
+        link.rewriteNextReply((reply, request) => [{ message: epochFault(reply, request, request.uuid) }]);
+
+        await expect(finish(vehicle.flash_lights())).resolves.toMatchObject({ response: { result: true } });
+
+        expect(link.commands(INFOTAINMENT)).toHaveLength(2);
+    });
+
+    it("still resends on a WAIT that echoes this request", async () => {
+        const { vehicle, link, fakeVehicle } = await ready();
+        fakeVehicle.queueWaits(1);
+
+        await expect(finish(vehicle.flash_lights())).resolves.toMatchObject({ response: { result: true } });
+
+        expect(link.commands(INFOTAINMENT)).toHaveLength(2);
+    });
+
+    it.each([
+        ["no uuid", () => new Uint8Array(0)],
+        ["another request's uuid", otherUuid],
+    ])("does not let an addressed status with %s stand in for an actuation's ack", async (_name, requestUuid) => {
+        const { vehicle, link } = await ready({ raise_unconfirmed: true });
+        link.rewriteNextReply(() => [{ message: addressedVcsec(vehicle, { vehicleStatus: { vehicleLockState: VehicleLockStateE.VEHICLELOCKSTATE_LOCKED } }, requestUuid()) }]);
+
+        await expect(finish(vehicle.door_unlock())).rejects.toBeInstanceOf(BluetoothUnconfirmedCommand);
+    });
+
+    it("drops a foreign reply that follows a bare ack", async () => {
+        const { vehicle, link } = await ready({ raise_unconfirmed: true });
+        link.rewriteNextReply((reply, request) => [
+            { message: bareAck(reply, request) },
+            { message: epochFault(reply, request, otherUuid()), delayMs: 10 },
+            { message: reply, delayMs: 10 },
+        ]);
+
+        await expect(finish(vehicle.flash_lights())).resolves.toMatchObject({ response: { result: true } });
+
+        expect(link.commands(INFOTAINMENT)).toHaveLength(1);
+    });
+
+    it("drops a late session-info reply and completes the handshake on the real one", async () => {
+        const { vehicle, link } = bleHarness();
+        link.rewriteNextReply((reply) => [{ message: { ...reply, requestUuid: otherUuid() } }, { message: reply, delayMs: 10 }], "session_info");
+
+        await expect(finish(vehicle.handshakeVehicleSecurity())).resolves.toBeUndefined();
+
+        expect(link.handshakes(VCSEC)).toHaveLength(1);
+    });
+});
+
+describe("real VCSEC, which leaves request_uuid empty", () => {
+    it("still accepts an encrypted ack", async () => {
+        const { vehicle, link, fakeVehicle } = await ready({ raise_unconfirmed: true });
+        fakeVehicle.omitRequestUuidLikeRealVcsec();
+
+        await expect(finish(vehicle.door_lock())).resolves.toEqual(OK);
+
+        expect(link.commands(VCSEC)).toHaveLength(1);
+    });
+
+    it("still accepts a plaintext ack from old firmware", async () => {
+        const { vehicle, fakeVehicle } = await ready({ raise_unconfirmed: true });
+        fakeVehicle.omitRequestUuidLikeRealVcsec();
+        fakeVehicle.replyInPlaintextLikeOldFirmware();
+
+        await expect(finish(vehicle.door_lock())).resolves.toEqual(OK);
+    });
+
+    it("still reads a status", async () => {
+        const { vehicle, fakeVehicle } = await ready({ raise_unconfirmed: true });
+        fakeVehicle.omitRequestUuidLikeRealVcsec();
+        fakeVehicle.replyInPlaintextLikeOldFirmware();
+        fakeVehicle.vehicleStatus = VehicleStatus.create({ vehicleLockState: VehicleLockStateE.VEHICLELOCKSTATE_LOCKED });
+
+        await expect(finish(vehicle.vehicle_state())).resolves.toMatchObject({ vehicleLockState: VehicleLockStateE.VEHICLELOCKSTATE_LOCKED });
+    });
+
+    it("still completes a handshake", async () => {
+        const { vehicle, fakeVehicle } = bleHarness();
+        fakeVehicle.omitRequestUuidLikeRealVcsec();
+
+        await expect(finish(vehicle.handshakeVehicleSecurity())).resolves.toBeUndefined();
     });
 });

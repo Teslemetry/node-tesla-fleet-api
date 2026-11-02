@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { Domain, RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
+import { Domain, MessageFaultE, OperationStatusE as MessageOperationStatusE, RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
 import { Role } from "@teslemetry/tesla-protocol/command/keys";
 import {
     ClosureMoveRequest,
@@ -8,6 +8,7 @@ import {
     InformationRequest,
     InformationRequestType,
     KeyFormFactor,
+    OperationStatusE as VcsecOperationStatusE,
     RKEActionE,
     UnsignedMessage,
     VehicleSleepStatusE,
@@ -817,6 +818,10 @@ export default class VehicleBluetooth extends BroadcastListeners {
             if (resp === null) {
                 throw new BluetoothTimeout();
             }
+            if (this.isForeignReply(resp, msg, expectsData)) {
+                this.log(`BLE ignored a reply that is not for this request, domain ${resp.fromDestination?.domain}`);
+                continue;
+            }
             this.validate_msg(resp, uuid, domain);
             if (hasRequired(resp)) {
                 return resp;
@@ -839,11 +844,49 @@ export default class VehicleBluetooth extends BroadcastListeners {
                     }
                     return resp;
                 }
+                if (this.isForeignReply(followup, msg, expectsData)) {
+                    this.log(`BLE ignored a reply that is not for this request, domain ${followup.fromDestination?.domain}`);
+                    continue;
+                }
                 this.validate_msg(followup, uuid, domain);
                 if (hasRequired(followup)) {
                     return followup;
                 }
             }
+        }
+    }
+
+    /**
+     * Whether a reply must be ignored rather than acted on. The link is shared, so
+     * an addressed reply can be a late answer to an earlier request, and acting on
+     * one can resend a command or report one that never ran.
+     *
+     * A reply naming another request is never ours. One naming no request must
+     * still be heard, because real VCSEC leaves `request_uuid` empty, but nothing
+     * ties it to this request unless its session-info tag or its encryption does,
+     * and both of those are checked later. So it may ack a command or answer a
+     * read, and it may not make anything happen: not a resend or a fault, and a
+     * status does not stand in for an actuation's ack.
+     */
+    private isForeignReply(resp: RoutableMessage, msg: RoutableMessage, expectsData: boolean): boolean {
+        if (resp.requestUuid.length > 0) {
+            return !Buffer.from(msg.uuid).equals(resp.requestUuid);
+        }
+        if (msg.sessionInfoRequest || (resp.sessionInfo && resp.sessionInfo.length > 0)) {
+            return false;
+        }
+        const status = resp.signedMessageStatus;
+        if (status?.operationStatus === MessageOperationStatusE.OPERATIONSTATUS_WAIT || (status && status.signedMessageFault !== MessageFaultE.MESSAGEFAULT_ERROR_NONE)) {
+            return true;
+        }
+        if (msg.toDestination?.domain !== VCSEC || !resp.protobufMessageAsBytes || resp.signatureData?.AESGCMResponseData) {
+            return false;
+        }
+        try {
+            const reply = FromVCSECMessage.decode(resp.protobufMessageAsBytes);
+            return reply.commandStatus?.operationStatus === VcsecOperationStatusE.OPERATIONSTATUS_WAIT || (!expectsData && reply.vehicleStatus !== undefined);
+        } catch {
+            return false;
         }
     }
 
