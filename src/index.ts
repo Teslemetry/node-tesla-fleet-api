@@ -10,6 +10,7 @@ import VehicleSpecific from "./vehiclespecific.js";
 
 export { Commands, Energy, EnergySpecific, TeslaFleetApi, Teslemetry, Tessie, Vehicle, VehicleSigned, VehicleSpecific };
 export { Session } from "./signing/session.js";
+export { DAY_OF_WEEK_BITS, days_of_week_mask } from "./commands.js";
 export * from "./exceptions.js";
 export { getTariffPeriods } from "./tariff.js";
 export * from "./const.js";

@@ -182,6 +182,45 @@ function fail(reason: string): CommandResponse {
 }
 
 /**
+ * Day names Tesla's vehicle-command proxy accepts for `days_of_week`, which the
+ * REST route takes as a comma-joined string rather than the proto bitmask.
+ */
+export const DAY_OF_WEEK_BITS: Readonly<Record<string, number>> = {
+    SUN: 1,
+    SUNDAY: 1,
+    MON: 2,
+    MONDAY: 2,
+    TUES: 4,
+    TUESDAY: 4,
+    WED: 8,
+    WEDNESDAY: 8,
+    THURS: 16,
+    THURSDAY: 16,
+    FRI: 32,
+    FRIDAY: 32,
+    SAT: 64,
+    SATURDAY: 64,
+    ALL: 127,
+    WEEKDAYS: 62,
+};
+
+/**
+ * Convert a bitmask or comma-joined day names (e.g. `"Mon,Wed"`, `"All"`) to the proto bitmask.
+ * @throws Error for an unknown day name.
+ */
+export function days_of_week_mask(days_of_week: string | number): number {
+    if (typeof days_of_week === "number") return Math.trunc(days_of_week);
+    if (/^\d+$/.test(days_of_week.trim())) return parseInt(days_of_week.trim(), 10);
+    let mask = 0;
+    for (const day of days_of_week.split(",")) {
+        const bit = DAY_OF_WEEK_BITS[day.trim().toUpperCase()];
+        if (bit === undefined) throw new Error(`Invalid day of week: ${day}`);
+        mask |= bit;
+    }
+    return mask;
+}
+
+/**
  * Transport-agnostic signed-command builder for the Tesla Vehicle Command
  * Protocol: mirrors `python-tesla-fleet-api`'s `Commands` ABC. Every method
  * here builds a `RoutableMessage`, signs it (HMAC-personalized), and

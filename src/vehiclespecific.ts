@@ -241,6 +241,21 @@ export default class VehicleSpecific {
   }
 
   /**
+   * Sends a list of waypoints to the vehicle's navigation system.
+   * @param waypoints Comma-separated Google Maps place IDs, e.g. `"refId:ChIJ...,refId:ChIJ..."`
+   */
+  async navigation_waypoints_request(
+    waypoints: string,
+  ): Promise<CommandResponse> {
+    return this.parent.parent._request(
+      "POST",
+      `api/1/vehicles/${this.vin}/command/navigation_waypoints_request`,
+      null,
+      { waypoints },
+    );
+  }
+
+  /**
    * Sets automatic seat heating and cooling.
    * @param auto_seat_position `AutoSeat` position (1-indexed: front left is 1, front right is 2)
    * @param auto_climate_on `true` or `false`
@@ -490,6 +505,140 @@ export default class VehicleSpecific {
   }
 
   /**
+   * Add or modify a charging schedule. At least one of `start_time` or `end_time` is required.
+   * @param days_of_week Comma-joined day names (e.g. `"Mon,Wed"`, `"All"`, `"Weekdays"`) or a day bitmask
+   * @param enabled `true` or `false`
+   * @param lat Latitude of the schedule's location
+   * @param lon Longitude of the schedule's location
+   * @param start_time Minutes after midnight to start charging
+   * @param end_time Minutes after midnight to stop charging
+   * @param one_time Run the schedule only once
+   * @param id Schedule ID to modify an existing schedule
+   */
+  async add_charge_schedule(
+    days_of_week: string | number,
+    enabled: boolean,
+    lat: number,
+    lon: number,
+    start_time?: number,
+    end_time?: number,
+    one_time?: boolean,
+    id?: number,
+  ): Promise<CommandResponse> {
+    if (start_time == null && end_time == null) {
+      throw new Error("Either start_time or end_time or both must be provided");
+    }
+    return this.parent.parent._request(
+      "POST",
+      `api/1/vehicles/${this.vin}/command/add_charge_schedule`,
+      null,
+      {
+        days_of_week,
+        enabled,
+        end_enabled: end_time != null,
+        lat,
+        lon,
+        start_enabled: start_time != null,
+        start_time,
+        end_time,
+        id,
+        one_time,
+      },
+    );
+  }
+
+  /**
+   * Add or modify a preconditioning schedule.
+   * @param days_of_week Comma-joined day names (e.g. `"Mon,Wed"`, `"All"`, `"Weekdays"`) or a day bitmask
+   * @param enabled `true` or `false`
+   * @param lat Latitude of the schedule's location
+   * @param lon Longitude of the schedule's location
+   * @param precondition_time Minutes after midnight to be preconditioned by
+   * @param id Schedule ID to modify an existing schedule
+   * @param one_time Run the schedule only once
+   */
+  async add_precondition_schedule(
+    days_of_week: string | number,
+    enabled: boolean,
+    lat: number,
+    lon: number,
+    precondition_time: number,
+    id?: number,
+    one_time?: boolean,
+  ): Promise<CommandResponse> {
+    return this.parent.parent._request(
+      "POST",
+      `api/1/vehicles/${this.vin}/command/add_precondition_schedule`,
+      null,
+      { days_of_week, enabled, lat, lon, precondition_time, id, one_time },
+    );
+  }
+
+  /**
+   * Removes a charging schedule.
+   * @param id Schedule ID
+   */
+  async remove_charge_schedule(id: number): Promise<CommandResponse> {
+    return this.parent.parent._request(
+      "POST",
+      `api/1/vehicles/${this.vin}/command/remove_charge_schedule`,
+      null,
+      { id },
+    );
+  }
+
+  /**
+   * Removes a preconditioning schedule.
+   * @param id Schedule ID
+   */
+  async remove_precondition_schedule(id: number): Promise<CommandResponse> {
+    return this.parent.parent._request(
+      "POST",
+      `api/1/vehicles/${this.vin}/command/remove_precondition_schedule`,
+      null,
+      { id },
+    );
+  }
+
+  /**
+   * Removes charging schedules by location type.
+   * @param home Remove schedules at home
+   * @param work Remove schedules at work
+   * @param other Remove schedules at other locations
+   */
+  async batch_remove_charge_schedules(
+    home: boolean,
+    work: boolean,
+    other: boolean,
+  ): Promise<CommandResponse> {
+    return this.parent.parent._request(
+      "POST",
+      `api/1/vehicles/${this.vin}/command/batch_remove_charge_schedules`,
+      null,
+      { home, work, other },
+    );
+  }
+
+  /**
+   * Removes preconditioning schedules by location type.
+   * @param home Remove schedules at home
+   * @param work Remove schedules at work
+   * @param other Remove schedules at other locations
+   */
+  async batch_remove_precondition_schedules(
+    home: boolean,
+    work: boolean,
+    other: boolean,
+  ): Promise<CommandResponse> {
+    return this.parent.parent._request(
+      "POST",
+      `api/1/vehicles/${this.vin}/command/batch_remove_precondition_schedules`,
+      null,
+      { home, work, other },
+    );
+  }
+
+  /**
    * Enables and disables Sentry Mode. Sentry Mode allows customers to watch the vehicle cameras live from the mobile app, as well as record sentry events.
    * @param on `true` or `false`
    */
@@ -678,6 +827,23 @@ export default class VehicleSpecific {
       vins: [this.vin],
       config,
     });
+  }
+
+  /**
+   * Configures fleet telemetry with a Tesla.SS256-signed JWS token, signed by the partner's registered command key.
+   * @param vins Vehicle Identification Numbers to configure
+   * @param token JWS token wrapping the fleet telemetry configuration
+   */
+  async fleet_telemetry_config_jws(
+    vins: string[],
+    token: string,
+  ): Promise<Record<string, any>> {
+    return this.parent.parent._request(
+      "POST",
+      "api/1/vehicles/fleet_telemetry_config_jws",
+      null,
+      { vins, token },
+    );
   }
 
   /**
