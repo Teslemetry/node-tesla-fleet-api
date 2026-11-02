@@ -45,7 +45,7 @@ export function bleHarness({ mtu, maxWriteSize, logger, ...options }: BleHarness
     const link = new FakeBleLink(fakeVehicle, { mtu, maxWriteSize });
     const transport: BleTransport = options.transport ?? link;
     const tesla = new TeslaBluetooth({ privateKey: OUR_PRIVATE_KEY, logger });
-    const vehicle = new TestVehicle(tesla.vehicles, VIN, { ...options, transport });
+    const vehicle = new TestVehicle(tesla.vehicles, VIN, { keepalive_interval_ms: null, ...options, transport });
     return { tesla, vehicle, link, fakeVehicle };
 }
 

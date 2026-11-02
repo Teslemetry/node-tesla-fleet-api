@@ -20,9 +20,11 @@ import {
     TeslaFleetError,
 } from "../exceptions.js";
 import { AsyncLock, BleCallTimeout, ReplyQueue, withTimeout } from "./async.js";
+import { ListenerRegistry, Unsubscribe } from "./broadcast.js";
 import {
     DEFAULT_CONNECT_ATTEMPTS,
     DEFAULT_CONNECT_TIMEOUT_MS,
+    DEFAULT_KEEPALIVE_INTERVAL_MS,
     DEFAULT_MAX_WRITE_SIZE,
     DEFAULT_SCAN_TIMEOUT_MS,
     DEFAULT_WAKE_TIMEOUT_MS,
@@ -40,6 +42,12 @@ export interface VehicleBluetoothOptions {
     privateKey?: Buffer | false;
     /** Skip the scan and connect to this device. */
     device?: BleDeviceRef;
+    /**
+     * After this long with no GATT traffic, read a characteristic to hold the
+     * link open. Defaults to 20000. `null` or `0` disables it. The reads delay
+     * an awake car's sleep, so a consumer that wants it to sleep disables them.
+     */
+    keepalive_interval_ms?: number | null;
     /** Wakes a sleeping vehicle for an infotainment command, instead of raising. Defaults to `true`. */
     wake_if_asleep?: boolean;
     /** Connect attempts per connect. Defaults to 3. */
@@ -113,10 +121,13 @@ export default class VehicleBluetooth extends Commands {
     protected ackFollowupTimeoutMs = 2000;
     /** How long a command woken by `wake_if_asleep` waits for infotainment. */
     protected wakeTimeoutMs = DEFAULT_WAKE_TIMEOUT_MS;
+    /** Bound on one keepalive read. */
+    protected keepaliveTimeoutMs = 2000;
 
     /** The vehicle's BLE name, with the usual `C` suffix. */
     readonly ble_name: string;
     wake_if_asleep: boolean;
+    readonly keepalive_interval_ms: number | null;
     protected readonly transport: BleTransport;
     protected readonly queues: Partial<Record<Domain, ReplyQueue<RoutableMessage>>> = {
         [VCSEC]: new ReplyQueue(),
@@ -134,11 +145,18 @@ export default class VehicleBluetooth extends Commands {
     private link: Link | null = null;
     /** Closing a lost link. A new connect waits for it: a late disconnect could end the new link. */
     private teardown: Promise<unknown> = Promise.resolve();
+    private keepaliveTimer: ReturnType<typeof setTimeout> | null = null;
+    /** When GATT traffic last moved, on the monotonic clock. */
+    private lastActivity = 0;
+    private connected = false;
+    private readonly connectionListeners = new ListenerRegistry<boolean>((message) => this.log(message));
 
     constructor(parent: Vehicle, vin: string, options: VehicleBluetoothOptions) {
         super(parent, vin, options.privateKey);
         this.transport = options.transport;
         this.device = options.device;
+        this.keepalive_interval_ms =
+            options.keepalive_interval_ms === undefined ? DEFAULT_KEEPALIVE_INTERVAL_MS : options.keepalive_interval_ms;
         this.wake_if_asleep = options.wake_if_asleep ?? true;
         this.maxConnectAttempts = options.max_connect_attempts ?? DEFAULT_CONNECT_ATTEMPTS;
         this.connectTimeoutMs = options.connect_timeout_ms ?? DEFAULT_CONNECT_TIMEOUT_MS;
@@ -261,6 +279,8 @@ export default class VehicleBluetooth extends Commands {
         }
         link.connection = connection;
         this.link = link;
+        this.startKeepalive();
+        this.setConnected(true);
     }
 
     /** Close a connection, bounded and never throwing: the failure behind it is what gets reported. */
@@ -283,7 +303,9 @@ export default class VehicleBluetooth extends Commands {
         }
         this.link = null;
         this.log(`BLE link lost: ${reason}`);
+        this.stopKeepalive();
         this.teardown = Promise.all([this.teardown, this.closeConnection(link.connection)]);
+        this.setConnected(false);
     }
 
     /** Tear down the link and wait for it. The next send reconnects. */
@@ -313,11 +335,85 @@ export default class VehicleBluetooth extends Commands {
         });
     }
 
+    /**
+     * Listen for the link coming up and going down. `true` fires once
+     * notifications are live, and `false` once the link is lost, for any reason
+     * and however it was noticed. Only real changes fire. A backend that drops
+     * silently makes `false` as late as the next operation to time out.
+     */
+    listen_connection_status(callback: (connected: boolean) => void): Unsubscribe {
+        return this.connectionListeners.add(callback);
+    }
+
+    private setConnected(connected: boolean): void {
+        if (this.connected !== connected) {
+            this.connected = connected;
+            this.connectionListeners.emit(connected);
+        }
+    }
+
+    private startKeepalive(): void {
+        this.stopKeepalive();
+        if (this.keepalive_interval_ms) {
+            this.lastActivity = performance.now();
+            this.scheduleKeepalive(this.keepalive_interval_ms);
+        }
+    }
+
+    private stopKeepalive(): void {
+        if (this.keepaliveTimer !== null) {
+            clearTimeout(this.keepaliveTimer);
+            this.keepaliveTimer = null;
+        }
+    }
+
+    private scheduleKeepalive(intervalMs: number): void {
+        const idleMs = performance.now() - this.lastActivity;
+        this.keepaliveTimer = setTimeout(() => void this.keepaliveTick(intervalMs), Math.max(0, intervalMs - idleMs));
+        // A keepalive is no reason to hold a process open.
+        this.keepaliveTimer.unref?.();
+    }
+
+    /** Idle-triggered, so an active link pays nothing. It never raises, never reconnects and never wakes the car. */
+    private async keepaliveTick(intervalMs: number): Promise<void> {
+        this.keepaliveTimer = null;
+        const link = this.link;
+        if (!link) {
+            return;
+        }
+        if (performance.now() - this.lastActivity >= intervalMs) {
+            await this.keepaliveRead(link);
+            this.lastActivity = performance.now();
+        }
+        if (this.link === link) {
+            this.scheduleKeepalive(intervalMs);
+        }
+    }
+
+    /**
+     * One bounded read, with every failure swallowed. A read that times out
+     * still marks the link lost, as any read does here: on a backend that
+     * misreports its link, that is how a dead idle link is found before the next
+     * command writes to it. Python only drops the read.
+     */
+    private async keepaliveRead(link: Link): Promise<void> {
+        if (!link.connection.isConnected) {
+            this.loseLink(link, "backend reports it down");
+            return;
+        }
+        try {
+            await this.gattRead("version", this.keepaliveTimeoutMs);
+        } catch (error) {
+            this.log(`BLE keepalive read failed: ${describe(error)}`);
+        }
+    }
+
     /** A backend calls this, so it must never throw. */
     private onNotify(link: Link, chunk: Uint8Array): void {
         if (link.lost) {
             return;
         }
+        this.lastActivity = performance.now();
         try {
             link.buffer.receive(chunk);
         } catch (error) {
@@ -350,6 +446,7 @@ export default class VehicleBluetooth extends Commands {
                     throw new BleNotSubmittedError("The link was lost before the frame was fully written.");
                 }
                 await withTimeout(() => connection.write(chunk), GATT_WRITE_TIMEOUT_MS, link.closed.signal);
+                this.lastActivity = performance.now();
             }
         });
     }
