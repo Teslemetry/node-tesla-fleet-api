@@ -1,48 +1,197 @@
 # Tesla Fleet API
-A library for the [Tesla Fleet API](https://developer.tesla.com/docs/fleet-api), and the third parties services [Teslemetry](https://teslemetry.com/docs/getting-started/api) and [Tessie](https://developer.tessie.com/docs/tesla-api-comparison), which provide access to the Fleet API for their customers.
 
+A TypeScript library for Tesla vehicles and energy sites. It reaches them through the [Tesla Fleet API](https://developer.tesla.com/docs/fleet-api), [Teslemetry](https://teslemetry.com/docs/getting-started/api), [Tessie](https://developer.tessie.com/docs/tesla-api-comparison), or directly over Bluetooth. It is the Node counterpart of [`python-tesla-fleet-api`](https://github.com/Teslemetry/python-tesla-fleet-api), with the same method names in `snake_case`, so docs and router code line up across the two.
 
-## Usage
+```sh
+npm install tesla-fleet-api
+```
+
+It needs Node 22 or later, ships ESM and CommonJS, and has one runtime dependency, which is pure JavaScript. Nothing native is installed.
+
+> **Not yet proven on hardware.** Vehicle Bluetooth and local Powerwall are tested against independent fakes in this repository, and no Node code has run them on a real car, Homey, proxy or gateway. [OBSERVATIONS.md](OBSERVATIONS.md) records what has been measured.
+
+## What is in the package
+
+| Client | Reaches | Vehicles | Energy sites |
+| -- | -- | -- | -- |
+| `TeslaFleetApi` | Tesla Fleet API | `vehicles.createFleet(vin)`, `vehicles.createSigned(vin, key?)` | `energySites.create(id, key?, din?)` |
+| `TeslaFleetOAuth` | Fleet API, with its own token refresh | As `TeslaFleetApi` | As `TeslaFleetApi` |
+| `Teslemetry` | Teslemetry | `vehicles.create(vin)` | `energySites.create(id, key?, din?)` |
+| `Tessie` | Tessie | `vehicles.create(vin)` | None |
+| `TeslaBluetooth` | The vehicle, over Bluetooth | `vehicles.createBluetooth(vin, options)` | None |
+
+| Import | Contents |
+| -- | -- |
+| `tesla-fleet-api` | The cloud clients, errors, constants, tariff, firmware helpers, funnel, `jws` |
+| `tesla-fleet-api/router` | `VehicleRouter`, `EnergySiteRouter`, merge helpers, `is_failover_safe` |
+| `tesla-fleet-api/bluetooth` | `TeslaBluetooth`, `VehicleBluetooth`, the `BleTransport` contract, stream glue |
+| `tesla-fleet-api/bluetooth/homey` | Bluetooth through a Homey app |
+| `tesla-fleet-api/bluetooth/noble` | Bluetooth through `@stoprocent/noble` |
+| `tesla-fleet-api/bluetooth/esphome` | Bluetooth through an ESPHome proxy |
+| `tesla-fleet-api/tariff` | `getTariffPeriods`, `unwrapTariffV2`, with no protobuf code |
+| `tesla-fleet-api/const` | Enums, `Models`, `Region`, `SERVERS` |
+| `tesla-fleet-api/types` | Response types |
+
+Deep imports such as `tesla-fleet-api/dist/...` are blocked by the `exports` map.
+
+## Quick start
 
 ```ts
 import { TeslaFleetApi } from "tesla-fleet-api";
 
 const api = new TeslaFleetApi({ accessToken, region: "na" });
 
-// Plaintext REST commands (`VehicleSpecific`)
+const { response } = await api.products();
 const car = api.vehicles!.createFleet(vin);
-await car.wake_up();
+await car.wake_up({ wait: true });
+await car.vehicle_data();
 
-// Vehicle Command Protocol, signed with your raw P-256 private key (`VehicleSigned`)
+const site = api.energySites!.create(energySiteId);
+await site.live_status();
+```
+
+Replies keep the service's `{ response }` envelope. `api.vehicles.byVin` and `api.energySites.byId` are `Map`s of what each factory created. More: [vehicles](docs/fleet_api_vehicles.md), [energy sites](docs/fleet_api_energy_sites.md).
+
+`accessToken` may be a function returning `Promise<string | null>`, which is called for every request. Other options are `fetch`, `logger`, `debug` and `timeout` (milliseconds).
+
+## Signed commands
+
+A vehicle that requires the Vehicle Command Protocol refuses plaintext commands. `createSigned` builds each one locally and sends it through `signed_command`. The key is the raw 32-byte P-256 private key registered with the car.
+
+```ts
+import { TeslaFleetApi } from "tesla-fleet-api";
+
+const api = new TeslaFleetApi({ accessToken, region: "na" });
+const privateKey = await api.get_private_key("private_key.pem");
+
 const signed = api.vehicles!.createSigned(vin, privateKey);
 await signed.door_lock();
+await signed.set_charge_limit(80);
+```
 
-// Energy sites; pass an RSA `KeyObject` and the gateway DIN to sign device commands
-const site = api.energySites!.create(energySiteId, rsaPrivateKey, din);
-await site.live_status();
+A refusal by the vehicle resolves as `{ response: { result: false, reason } }`. It is not an error. Passing `false` as the key disables signing, and leaving it out falls back to the client's `private_key`. See [signed commands](docs/fleet_api_signed_commands.md).
+
+## Energy sites
+
+Device commands are signed with an RSA key, so create the site with the key and the gateway DIN to send them. A site created without a key sends the unsigned form, except the commands that must never go unsigned: `set_island_mode`, `go_off_grid` and `reconnect_grid` raise `SignedCommandRequired`, because gateways acknowledge the unsigned command without moving the contactor.
+
+```ts
+import { TeslaFleetApi } from "tesla-fleet-api";
+
+const api = new TeslaFleetApi({ accessToken, region: "na" });
+const rsaKey = await api.get_rsa_private_key("tedapi_rsa_private.pem");
+
+const site = api.energySites!.create(energySiteId, rsaKey, din);
+await site.get_system_info();
 await site.go_off_grid();
 ```
 
-Each factory remembers what it created: `api.vehicles.byVin` and `api.energySites.byId` are `Map`s. `specific` and `specificSigned` remain as legacy names for `createFleet` and `createSigned`.
+`add_authorized_client` registers a key with a gateway, and `TeslemetryEnergySite.wait_until_paired` waits for the owner's breaker toggle. A signed send is never retried, because the same bytes would execute again.
 
-The classes a factory instantiates are static fields, so a subclass swaps them without redefining a constructor:
+## Teslemetry and Tessie
 
 ```ts
-class MyVehicles extends Vehicle {
-  static override Fleet = MyVehicleSpecific;
-}
-class MyApi extends Teslemetry {
-  static override Vehicles = MyVehicles;
-}
+import { ClosureState, Teslemetry, Tessie } from "tesla-fleet-api";
+
+const teslemetry = new Teslemetry(accessToken);
+await teslemetry.ping();
+const car = teslemetry.vehicles.create(vin);
+await car.closure({ front_trunk: ClosureState.OPEN });
+const site = teslemetry.energySites!.create(energySiteId);
+await site.find_authorized_clients();
+
+const tessie = new Tessie(accessToken, { wait_for_completion: true, max_attempts: 3 });
+const tessieCar = tessie.vehicles.create(vin);
+await tessieCar.lock();
+await tessieCar.drives({ limit: 10 });
 ```
+
+Both clients expose `vehicles.create` only: `createFleet` and `createSigned` are compile errors, because these services do not take Fleet API credentials. See [Teslemetry](docs/teslemetry.md) and [Tessie](docs/tessie.md).
+
+## Routers
+
+A router tries one backend after another, per command. It falls over only on a failure that proves the command did not reach the car or gateway. A refusal by the device is returned, and a Bluetooth command with an unresolved outcome is never replayed.
+
+```ts
+import { TeslaFleetApi } from "tesla-fleet-api";
+import { TeslaBluetooth } from "tesla-fleet-api/bluetooth";
+import { NobleBleTransport } from "tesla-fleet-api/bluetooth/noble";
+import { VehicleRouter } from "tesla-fleet-api/router";
+
+const ble = new TeslaBluetooth({ privateKey }).vehicles.createBluetooth(vin, { transport: new NobleBleTransport() });
+const cloud = new TeslaFleetApi({ accessToken, region: "na" }).vehicles!.createSigned(vin, privateKey);
+
+const router = new VehicleRouter([ble, cloud]);
+await router.door_lock();
+```
+
+Methods and their types come from the backends. A misspelt method is a compile error, and a method only one backend has goes to that backend. `EnergySiteRouter` does the same for sites, and `merge_live_status` and `merge_site_info` overlay local readings on cloud documents. See [routers](docs/routers.md).
 
 ## Bluetooth
 
-Control a vehicle directly over Bluetooth, through `tesla-fleet-api/bluetooth` and a backend adapter: `./bluetooth/homey` for a Homey app, `./bluetooth/noble`, or `./bluetooth/esphome` for an ESPHome proxy. Backends are optional, so installing this package adds nothing native. None of this has run on a real car from Node yet. See [docs/bluetooth_vehicles.md](docs/bluetooth_vehicles.md).
+Install the backend you want, and pass its transport to `createBluetooth`. Each adapter is its own entry point, and importing one loads no backend.
+
+| Adapter | Class | Install | Runs on |
+| -- | -- | -- | -- |
+| `./bluetooth/homey` | `HomeyBleTransport` | Nothing. It takes `this.homey.ble`. | A Homey app |
+| `./bluetooth/noble` | `NobleBleTransport` | `@stoprocent/noble`, which is native | Linux, macOS, Windows |
+| `./bluetooth/esphome` | `EsphomeBleTransport` | `@2colors/esphome-native-api` | Anything with a TCP route to a dedicated proxy |
+
+On a computer:
+
+```ts
+import { TeslaBluetooth } from "tesla-fleet-api/bluetooth";
+import { NobleBleTransport } from "tesla-fleet-api/bluetooth/noble";
+
+const tesla = new TeslaBluetooth({ privateKey });
+const vehicle = tesla.vehicles.createBluetooth(vin, { transport: new NobleBleTransport() });
+
+await vehicle.wake_up({ wait: true });
+await vehicle.door_lock();
+await vehicle.charge_state();
+await vehicle.disconnect();
+```
+
+Through an ESPHome proxy:
+
+```ts
+import { TeslaBluetooth } from "tesla-fleet-api/bluetooth";
+import { EsphomeBleTransport } from "tesla-fleet-api/bluetooth/esphome";
+
+const transport = new EsphomeBleTransport({ host: proxyHost, encryptionKey });
+const vehicle = new TeslaBluetooth({ privateKey }).vehicles.createBluetooth(vin, { transport });
+await vehicle.door_lock();
+await vehicle.disconnect();
+transport.close();
+```
+
+In a Homey app, which needs the `homey:wireless:ble` permission:
+
+```ts
+import Homey from "homey";
+import { TeslaBluetooth } from "tesla-fleet-api/bluetooth";
+import { HOMEY_VEHICLE_OPTIONS, HomeyBleTransport } from "tesla-fleet-api/bluetooth/homey";
+
+class TeslaApp extends Homey.App {
+    async lock(vin: string, privateKey: Buffer): Promise<void> {
+        const transport = new HomeyBleTransport(this.homey.ble);
+        const vehicle = new TeslaBluetooth({ privateKey }).vehicles.createBluetooth(vin, {
+            transport,
+            ...HOMEY_VEHICLE_OPTIONS, // one 4 s attempt, for a Flow action's 9 s window
+        });
+        await vehicle.door_lock();
+        await vehicle.disconnect();
+    }
+}
+
+export default TeslaApp;
+```
+
+The Homey adapter's defaults are conservative guesses until the BLE-00 probe has run on a Homey. `confirmation` sets how much proof a command needs: `"optimistic"`, `"ack"` (the default) or `"verify"`. New keys are enrolled with `vehicle.pair()`. [docs/bluetooth_vehicles.md](docs/bluetooth_vehicles.md) has every option and each adapter's limits.
 
 ## Local Powerwall
 
-A client for a Powerwall gateway on your LAN, with routing to the cloud and merge helpers, is built but not published: `tesla-fleet-api/powerwall` is not importable yet. It ships once a read-only check has passed on a real gateway. Its writes are not yet verified from Node on hardware. See [docs/powerwall.md](docs/powerwall.md).
+**Not exported yet.** A client for a Powerwall gateway on your LAN is built and tested in this repository, but `tesla-fleet-api/powerwall` is not in the `exports` map, so it cannot be imported from npm. It ships after a read-only check has passed on a real gateway, and no write has run from Node on real hardware. [docs/powerwall.md](docs/powerwall.md) describes the planned API.
 
 ## OAuth
 
@@ -61,22 +210,77 @@ An expired token refreshes before the next request. Tesla's refresh tokens are s
 `get_private_key` and `get_rsa_private_key` load a PEM file, or create it at mode 0600. Python's library reads the same files.
 
 ```ts
-const privateKey = await api.get_private_key("private_key.pem"); // raw 32-byte Buffer
+import { TeslaFleetApi } from "tesla-fleet-api";
+
+const api = new TeslaFleetApi({ accessToken, region: "na" });
+
+await api.get_private_key("private_key.pem"); // raw 32-byte Buffer
 api.vehicles!.createSigned(vin); // falls back to it
-api.public_pem;
+console.log(api.public_pem);
 
 await api.get_rsa_private_key("tedapi_rsa_private.pem"); // RSA KeyObject
-api.rsa_public_der_pkcs1_b64;
+console.log(api.rsa_public_der_pkcs1_b64);
 ```
 
 To keep keys somewhere other than a file, as Homey does:
 
 ```ts
+import {
+    TeslaFleetApi,
+    ec_private_key_from_pem,
+    generate_ec_private_key_pem,
+    generate_rsa_private_key_pem,
+    rsa_public_der_pkcs1,
+} from "tesla-fleet-api";
+
+const api = new TeslaFleetApi({ accessToken, region: "na" });
 const pem = await generate_ec_private_key_pem();
 api.private_key = ec_private_key_from_pem(pem);
 
 const rsaPem = await generate_rsa_private_key_pem();
-rsa_public_der_pkcs1(rsaPem);
+console.log(rsa_public_der_pkcs1(rsaPem));
 ```
 
 An existing file or PEM that cannot be used raises `PrivateKeyError`, whose `reason` is `unreadable`, `encrypted`, `malformed` or `wrong_type`.
+
+## Errors
+
+Every failure rejects with a real `Error` subclass, named as in Python's `exceptions.py`, so `except X` there is `instanceof X` here.
+
+```ts
+import { RateLimited, TeslaFleetApi, TeslaFleetError } from "tesla-fleet-api";
+
+const api = new TeslaFleetApi({ accessToken, region: "na" });
+try {
+    await api.products();
+} catch (error) {
+    if (error instanceof RateLimited) console.log(error.data);
+    else if (error instanceof TeslaFleetError) console.log(error.status, error.key);
+    else throw error;
+}
+```
+
+## Everything else
+
+- `getTariffPeriods(tariff, now, { timeZone })` resolves Tariff V2 rates, and `unwrapTariffV2` finds the tariff in a `site_info` reply. A tariff carries no time zone, so `timeZone` is required.
+- `firmwareCompare` and `firmwareAtLeast` compare firmware versions numerically, because `"2025.10" < "2025.9"` as strings.
+- `ObservationFunnel` feeds one listener per field from many sources, so a value survives the loss of any one of them. `VehicleDataResultPublisher` and `TeslemetryStreamPublisher` publish into it, and `BleBroadcastPublisher` does from `./bluetooth`.
+- `jws` holds the Tesla.SS256 signatures behind signed Fleet Telemetry configuration.
+
+The classes a factory creates are static fields, so a subclass swaps them without redefining a constructor:
+
+```ts
+import { Teslemetry, Vehicle, VehicleSpecific } from "tesla-fleet-api";
+
+class MyVehicleSpecific extends VehicleSpecific {}
+class MyVehicles extends Vehicle {
+    static override Fleet = MyVehicleSpecific;
+}
+class MyApi extends Teslemetry {
+    static override Vehicles = MyVehicles;
+}
+
+export { MyApi };
+```
+
+Behaviour that differs from Python on purpose is listed by `pnpm parity --python <clone>`, which compares this package with Python's public surface.
