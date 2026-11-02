@@ -4,6 +4,7 @@ import {
     AuthorizedClientKeyType,
     AuthorizedClientType,
     EnergyDeviceIdentifierType,
+    EnergyIslandMode,
     TeslaEnergyPeriod,
 } from "./const.js";
 import Energy from "./energy.js";
@@ -26,6 +27,29 @@ export const UNSIGNED_DEVICE_COMMANDS: ReadonlySet<string> = new Set([
     "authorization.get_signed_commands_public_key_request",
     "authorization.list_authorized_clients_request",
 ]);
+
+/** Upper bound on a `dispatch_battery_power` setpoint duration (one day). */
+export const MAX_DISPATCH_DURATION_SECONDS = 86400;
+
+/**
+ * Check `dispatch_battery_power` arguments before any request.
+ * @throws TypeError unless both are numbers.
+ * @throws RangeError on a non-finite power or a duration that is not a whole number from 1 to `MAX_DISPATCH_DURATION_SECONDS`.
+ */
+export function validate_dispatch_battery_power(power_watts: number, duration_seconds: number): void {
+    if (typeof power_watts !== "number") {
+        throw new TypeError("power_watts must be a number");
+    }
+    if (!Number.isFinite(power_watts)) {
+        throw new RangeError("power_watts must be a finite number");
+    }
+    if (typeof duration_seconds !== "number") {
+        throw new TypeError("duration_seconds must be a number");
+    }
+    if (!Number.isInteger(duration_seconds) || duration_seconds < 1 || duration_seconds > MAX_DISPATCH_DURATION_SECONDS) {
+        throw new RangeError(`duration_seconds must be an integer from 1 to ${MAX_DISPATCH_DURATION_SECONDS}`);
+    }
+}
 
 /** `google.rpc.Code` UNIMPLEMENTED: the gateway firmware has no handler. */
 const UNIMPLEMENTED = 12;
@@ -353,6 +377,67 @@ export default class EnergySpecific {
     /** Get Tesla Energy Gateway configuration from the TEG service. */
     async get_teg_config(): Promise<Record<string, any>> {
         return this._command("teg", "get_config_request");
+    }
+
+    /**
+     * Request a timed battery power setpoint on the energy gateway.
+     *
+     * The gateway holds the setpoint for `duration_seconds`, then returns to its
+     * configured operating mode by itself. A new call replaces an active
+     * setpoint. Keep durations short and re-send to renew, so a caller that stops
+     * cannot leave the battery on a stale setpoint.
+     *
+     * The reply is an empty acknowledgement, not readback. A setpoint was seen to
+     * discharge below the backup reserve and to export with export set to
+     * `pv_only` or `never`. The gateway refuses a request above its power limit
+     * rather than clamping it: the signed path raises `DeviceUnexpectedResponse`
+     * with code 11.
+     *
+     * Tesla's cloud refuses this command unsigned (HTTP 400), so it acts only on
+     * a site with a signing key.
+     * @param power_watts Battery power in watts: positive discharges, negative charges.
+     * @param duration_seconds Whole seconds from 1 to 86400.
+     * @throws RangeError or TypeError before any request on invalid arguments.
+     */
+    async dispatch_battery_power(power_watts: number, duration_seconds: number): Promise<Record<string, any>> {
+        validate_dispatch_battery_power(power_watts, duration_seconds);
+        return this._command("teg", "dispatch_battery_power_request", {
+            real_power: { power_watts, duration_seconds },
+        });
+    }
+
+    /**
+     * Release a `dispatch_battery_power` setpoint, returning the gateway to its
+     * configured operating mode. The gateway also acknowledges this when no
+     * setpoint is active. It acts only on a site with a signing key.
+     */
+    async resume_battery_operation(): Promise<Record<string, any>> {
+        return this._command("teg", "dispatch_battery_power_request", { resume_device_mode: {} });
+    }
+
+    /**
+     * Set the island mode on the energy gateway.
+     *
+     * Signed only: gateways acknowledge the unsigned `grpc_command` without
+     * operating the grid contactor, so this never sends one. A success-shaped
+     * reply still does not prove the contactor moved: confirm `island_status`
+     * with a status read before relying on it.
+     * @param mode `EnergyIslandMode.OFF_GRID` (6) or `ON_GRID` (1).
+     * @param force Sent when given. Some gateways need `true` to open the contactor.
+     * @throws SignedCommandRequired without a signing key, before any request.
+     */
+    async set_island_mode(mode: EnergyIslandMode | number, force?: boolean | null): Promise<Record<string, any>> {
+        return this._signed_command("teg", "set_island_mode_request", force == null ? { mode } : { mode, force });
+    }
+
+    /** Request off-grid mode, with `force`. Signed only: see `set_island_mode`. */
+    async go_off_grid(): Promise<Record<string, any>> {
+        return this.set_island_mode(EnergyIslandMode.OFF_GRID, true);
+    }
+
+    /** Request on-grid mode. Signed only: see `set_island_mode`. */
+    async reconnect_grid(): Promise<Record<string, any>> {
+        return this.set_island_mode(EnergyIslandMode.ON_GRID);
     }
 
     /**
