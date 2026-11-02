@@ -79,6 +79,18 @@ import {
     SetTruckBedLightAutoStateAction,
     SetTruckBedLightBrightnessAction,
     SetZoneLightRequestAction,
+    ParentalControlsAction,
+    ParentalControlsClearPinAction,
+    ParentalControlsClearPinAdminAction,
+    ParentalControlsEnableSettingsAction,
+    ParentalControlsSetSpeedLimitAction,
+    PhoneUnitPreferences,
+    SetDistanceUnitAction,
+    SetEnergyDisplayFormatAction,
+    SetPhoneSettingPreferencesAction,
+    SetTemperatureUnitAction,
+    SetTimeDisplayFormatAction,
+    SetTirePressureUnitAction,
     AddManagedChargingSiteRequest,
     BatchRemoveChargeSchedulesAction,
     BatchRemovePreconditionSchedulesAction,
@@ -147,7 +159,7 @@ import {
 } from "@teslemetry/tesla-protocol/command/common";
 import { VehicleData, VehicleState_GuestMode, ClimateState_CopActivationTemp } from "@teslemetry/tesla-protocol/command/vehicle";
 import { ClimateMode, ClimateModes, CommandResponse, Level, Seat, Seats, Trunk } from "./types/commands.js";
-import { AutoSeat } from "./const.js";
+import { AutoSeat, DistanceUnit, EnergyDisplayFormat, PhoneFontSize, TemperatureUnit, TimeDisplayFormat, TirePressureUnit } from "./const.js";
 import Vehicle from "./vehicle.js";
 import VehicleSpecific from "./vehiclespecific.js";
 import { sign_fleet_telemetry_config } from "./signing/jws.js";
@@ -2018,6 +2030,110 @@ export default abstract class Commands extends VehicleSpecific {
                 ? VehicleControlWindowAction.create({ vent: VOID })
                 : VehicleControlWindowAction.create({ close: VOID });
         return this.vehicleAction(VehicleAction.create({ vehicleControlWindowAction: action }));
+    }
+
+    // Parental controls and display units
+
+    /**
+     * Activates or deactivates parental controls.
+     * @param activate `true` or `false`
+     * @param pin Four-digit PIN
+     */
+    async parental_controls(activate: boolean, pin: string | number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ parentalControlsAction: ParentalControlsAction.create({ activate, pin: String(pin) }) }));
+    }
+
+    /**
+     * Clears the parental controls PIN.
+     * @param pin Four-digit PIN
+     */
+    async parental_controls_clear_pin(pin: string | number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ parentalControlsClearPinAction: ParentalControlsClearPinAction.create({ pin: String(pin) }) }));
+    }
+
+    /** Clears the parental controls PIN, for fleet managers and owners. */
+    async parental_controls_clear_pin_admin(): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ parentalControlsClearPinAdminAction: ParentalControlsClearPinAdminAction.create({}) }));
+    }
+
+    /**
+     * Enables or disables a parental controls setting.
+     * @param setting `0` speed limit, `1` acceleration, `2` safety features, `3` curfew, `4` browser blocked, `5` theater blocked, `6` arcade blocked
+     * @param enable `true` or `false`
+     */
+    async parental_controls_enable_setting(setting: number, enable: boolean): Promise<CommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({ parentalControlsEnableSettingsAction: ParentalControlsEnableSettingsAction.create({ setting, enable }) }),
+        );
+    }
+
+    /**
+     * Sets the parental controls speed limit.
+     * @param limit_mph Maximum speed in MPH
+     */
+    async parental_controls_set_speed_limit(limit_mph: number): Promise<CommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({ parentalControlsSetSpeedLimitAction: ParentalControlsSetSpeedLimitAction.create({ limitMph: limit_mph }) }),
+        );
+    }
+
+    /**
+     * Sets the displayed temperature unit.
+     * @param unit `TemperatureUnit`
+     */
+    async set_temperature_unit(unit: TemperatureUnit | number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setTemperatureUnitAction: SetTemperatureUnitAction.create({ unit }) }));
+    }
+
+    /**
+     * Sets the displayed distance unit.
+     * @param unit `DistanceUnit`
+     */
+    async set_distance_unit(unit: DistanceUnit | number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setDistanceUnitAction: SetDistanceUnitAction.create({ unit }) }));
+    }
+
+    /**
+     * Sets the displayed clock format.
+     * @param format `TimeDisplayFormat`
+     */
+    async set_time_display_format(format: TimeDisplayFormat | number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setTimeDisplayFormatAction: SetTimeDisplayFormatAction.create({ format }) }));
+    }
+
+    /**
+     * Sets the displayed tire pressure unit.
+     * @param unit `TirePressureUnit`
+     */
+    async set_tire_pressure_unit(unit: TirePressureUnit | number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setTirePressureUnitAction: SetTirePressureUnitAction.create({ unit }) }));
+    }
+
+    /**
+     * Sets the displayed energy or range unit.
+     * @param format `EnergyDisplayFormat`
+     */
+    async set_energy_display_format(format: EnergyDisplayFormat | number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setEnergyDisplayFormatAction: SetEnergyDisplayFormatAction.create({ format }) }));
+    }
+
+    /**
+     * Sets paired-phone display preferences.
+     * @param font_size `PhoneFontSize`
+     * @param options.distance_unit `DistanceUnit`
+     * @param options.temperature_unit `TemperatureUnit`
+     */
+    async set_phone_setting_preferences(
+        font_size: PhoneFontSize | number = PhoneFontSize.STANDARD,
+        { distance_unit, temperature_unit }: { distance_unit?: DistanceUnit | number; temperature_unit?: TemperatureUnit | number } = {},
+    ): Promise<CommandResponse> {
+        const unitPreferences =
+            distance_unit != null || temperature_unit != null
+                ? PhoneUnitPreferences.create({ distanceUnit: distance_unit, temperatureUnit: temperature_unit })
+                : undefined;
+        return this.vehicleAction(
+            VehicleAction.create({ setPhoneSettingPreferencesAction: SetPhoneSettingPreferencesAction.create({ fontSize: font_size, unitPreferences }) }),
+        );
     }
 
     // Cybertruck and power

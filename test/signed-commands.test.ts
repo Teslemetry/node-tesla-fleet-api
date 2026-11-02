@@ -6,6 +6,13 @@ import {
     SetPowershareFeatureAction_PowershareFeatureRequest,
     SetPowershareRequestAction_PowershareRequest,
     SetZoneLightRequestAction_ZoneLightRequest,
+    ParentalControlsEnableSettingsAction_ParentalControlsSettingE,
+    SetDistanceUnitAction_Unit,
+    SetEnergyDisplayFormatAction_Format,
+    SetPhoneSettingPreferencesAction_FontSize,
+    SetTemperatureUnitAction_Unit,
+    SetTimeDisplayFormatAction_Format,
+    SetTirePressureUnitAction_Unit,
     ActionStatus,
     ChargeOnSolarFeature,
     GetManagedChargingSitesResponse,
@@ -18,6 +25,7 @@ import {
     SetSuspensionLevelAction_SuspensionLevel,
     VehicleAction,
 } from "@teslemetry/tesla-protocol/command/car_server";
+import { DistanceUnit, EnergyDisplayFormat, PhoneFontSize, TemperatureUnit, TimeDisplayFormat, TirePressureUnit } from "../src/const.js";
 import { FakeVehicleCommands } from "./helpers/testcommands.js";
 
 const SEASONS = SetRateTariffRequest_Seasons.create({ Winter: { fromDay: 1, fromMonth: 5, toDay: 31, toMonth: 8 } });
@@ -191,6 +199,41 @@ const infotainment: [name: string, call: Call, expected: DeepPartial<VehicleActi
     ["set_trailer_light_test", (v) => v.set_trailer_light_test(true), { setTrailerLightTestStartStopAction: { startStop: true } }],
     ["set_truck_bed_light_auto", (v) => v.set_truck_bed_light_auto(true), { setTruckBedLightAutoStateAction: { powerState: true } }],
     ["set_truck_bed_light_brightness", (v) => v.set_truck_bed_light_brightness(40), { setTruckBedLightBrightnessAction: { brightness: 40 } }],
+
+    // ENG-39 / SGN-10
+    ["parental_controls", (v) => v.parental_controls(true, 1234), { parentalControlsAction: { activate: true, pin: "1234" } }],
+    ["parental_controls_clear_pin", (v) => v.parental_controls_clear_pin("1234"), { parentalControlsClearPinAction: { pin: "1234" } }],
+    ["parental_controls_clear_pin_admin", (v) => v.parental_controls_clear_pin_admin(), { parentalControlsClearPinAdminAction: {} }],
+    [
+        "parental_controls_enable_setting",
+        (v) => v.parental_controls_enable_setting(3, true),
+        { parentalControlsEnableSettingsAction: { setting: ParentalControlsEnableSettingsAction_ParentalControlsSettingE.Curfew, enable: true } },
+    ],
+    ["parental_controls_set_speed_limit", (v) => v.parental_controls_set_speed_limit(62.5), { parentalControlsSetSpeedLimitAction: { limitMph: 62.5 } }],
+    ["set_temperature_unit", (v) => v.set_temperature_unit(TemperatureUnit.CELSIUS), { setTemperatureUnitAction: { unit: SetTemperatureUnitAction_Unit.UNIT_CELSIUS } }],
+    ["set_distance_unit", (v) => v.set_distance_unit(DistanceUnit.KILOMETERS), { setDistanceUnitAction: { unit: SetDistanceUnitAction_Unit.UNIT_KILOMETERS } }],
+    ["set_time_display_format", (v) => v.set_time_display_format(TimeDisplayFormat.HOUR_24), { setTimeDisplayFormatAction: { format: SetTimeDisplayFormatAction_Format.FORMAT_24_HOUR } }],
+    ["set_tire_pressure_unit", (v) => v.set_tire_pressure_unit(TirePressureUnit.BAR), { setTirePressureUnitAction: { unit: SetTirePressureUnitAction_Unit.UNIT_BAR } }],
+    ["set_energy_display_format", (v) => v.set_energy_display_format(EnergyDisplayFormat.DISTANCE), { setEnergyDisplayFormatAction: { format: SetEnergyDisplayFormatAction_Format.FORMAT_DISTANCE } }],
+    [
+        "set_phone_setting_preferences, font size only leaves unit preferences unset",
+        (v) => v.set_phone_setting_preferences(PhoneFontSize.LARGE),
+        { setPhoneSettingPreferencesAction: { fontSize: SetPhoneSettingPreferencesAction_FontSize.FONT_SIZE_LARGE } },
+    ],
+    [
+        "set_phone_setting_preferences, units nest under unit preferences",
+        (v) => v.set_phone_setting_preferences(PhoneFontSize.STANDARD, { distance_unit: DistanceUnit.KILOMETERS, temperature_unit: TemperatureUnit.CELSIUS }),
+        {
+            setPhoneSettingPreferencesAction: {
+                unitPreferences: { distanceUnit: SetDistanceUnitAction_Unit.UNIT_KILOMETERS, temperatureUnit: SetTemperatureUnitAction_Unit.UNIT_CELSIUS },
+            },
+        },
+    ],
+    [
+        "set_phone_setting_preferences, a zero unit is still a unit",
+        (v) => v.set_phone_setting_preferences(undefined, { distance_unit: DistanceUnit.MILES }),
+        { setPhoneSettingPreferencesAction: { unitPreferences: {} } },
+    ],
 ];
 
 /** Commands the Vehicle Security computer takes, each with the whole `UnsignedMessage` it must decode to. */
