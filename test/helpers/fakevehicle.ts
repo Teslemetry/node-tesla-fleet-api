@@ -49,10 +49,10 @@ export class FakeVehicle {
     private readonly domainState = new Map<Domain, DomainState>();
     private nextOutcome: "ok" | "not_whitelisted" | "bad_signature" = "ok";
     private waitCountRemaining = 0;
-    private nextSessionInfoAttack: SessionInfoAttack | null = null;
+    private sessionInfoAttacks: SessionInfoAttack[] = [];
     private attachSessionInfoOnNextReply = false;
     private omitRequestUuidEcho = false;
-    private nextHandshakeEmptyKeyStatus: SessionInfoStatus | null = null;
+    private emptyKeyHandshakeStatuses: SessionInfoStatus[] = [];
     private nextVcsecReply: FromVCSECMessage | null = null;
     private nextInfotainmentReply: Response | null = null;
     /** Counters of every VCSEC command in the order this FakeVehicle actually received them - for concurrency/ordering tests. */
@@ -78,25 +78,26 @@ export class FakeVehicle {
         this.nextOutcome = "bad_signature";
     }
 
-    /** Simulate a MITM flipping a bit in `session_info_tag` (or the session info it covers). */
-    corruptNextSessionInfoTag(): void {
-        this.nextSessionInfoAttack = { kind: "corrupt-tag" };
+    /** Simulate a MITM flipping a bit in `session_info_tag` (or the session info it covers) on the next `replies`. */
+    corruptNextSessionInfoTag(replies: number = 1): void {
+        this.sessionInfoAttacks.push(...Array<SessionInfoAttack>(replies).fill({ kind: "corrupt-tag" }));
     }
 
     /**
      * Simulate the reply VCSEC was seen to send right after a key was added:
      * a `session_info_tag` that is present but zero-length.
      */
-    emptyNextSessionInfoTag(): void {
-        this.nextSessionInfoAttack = { kind: "empty-tag" };
+    emptyNextSessionInfoTag(replies: number = 1): void {
+        this.sessionInfoAttacks.push(...Array<SessionInfoAttack>(replies).fill({ kind: "empty-tag" }));
     }
 
     /**
-     * Reply to the next session-info request with no public key, as a vehicle
-     * does for a key it has no session with. Such a reply carries no usable tag.
+     * Reply to the next `replies` session-info requests with no public key, as
+     * a vehicle does for a key it has no session with. Such a reply carries no
+     * usable tag.
      */
-    replyToNextHandshakeWithoutPublicKey(status: SessionInfoStatus): void {
-        this.nextHandshakeEmptyKeyStatus = status;
+    replyToNextHandshakeWithoutPublicKey(status: SessionInfoStatus, replies: number = 1): void {
+        this.emptyKeyHandshakeStatuses.push(...Array<SessionInfoStatus>(replies).fill(status));
     }
 
     /** Answer the next accepted VCSEC command with this message instead of `commandStatus` OK. */
@@ -109,14 +110,14 @@ export class FakeVehicle {
         this.nextInfotainmentReply = message;
     }
 
-    /** Simulate a captured old session-info reply replayed against a request it wasn't tagged for. */
-    spoofNextSessionInfoChallenge(): void {
-        this.nextSessionInfoAttack = { kind: "wrong-challenge" };
+    /** Simulate a captured old session-info reply replayed against a request it wasn't tagged for, on the next `replies`. */
+    spoofNextSessionInfoChallenge(replies: number = 1): void {
+        this.sessionInfoAttacks.push(...Array<SessionInfoAttack>(replies).fill({ kind: "wrong-challenge" }));
     }
 
     /** Simulate a validly-*signed* but stale (rolled-back counter/clock, same epoch) session-info replay. */
     replayStaleSessionInfo(counter: number, clockTime: number): void {
-        this.nextSessionInfoAttack = { kind: "stale", counter, clockTime };
+        this.sessionInfoAttacks.push({ kind: "stale", counter, clockTime });
     }
 
     /**
@@ -174,8 +175,7 @@ export class FakeVehicle {
         status: SessionInfoStatus,
         state: DomainState,
     ): { sessionInfo: Uint8Array; tag: Uint8Array; requestUuid: Uint8Array } {
-        const attack = this.nextSessionInfoAttack;
-        this.nextSessionInfoAttack = null;
+        const attack = this.sessionInfoAttacks.shift();
 
         const counter = attack?.kind === "stale" ? attack.counter : state.counter;
         const clockTime = attack?.kind === "stale" ? attack.clockTime : state.clockTime;
@@ -237,9 +237,8 @@ export class FakeVehicle {
             state.clientPublicKey = Buffer.from(msg.sessionInfoRequest.publicKey);
             state.hmacKey = undefined;
             state.sessionInfoKey = undefined;
-            if (this.nextHandshakeEmptyKeyStatus !== null) {
-                const status = this.nextHandshakeEmptyKeyStatus;
-                this.nextHandshakeEmptyKeyStatus = null;
+            const status = this.emptyKeyHandshakeStatuses.shift();
+            if (status !== undefined) {
                 const reply = RoutableMessage.create({
                     fromDestination: { domain },
                     requestUuid: msg.uuid,

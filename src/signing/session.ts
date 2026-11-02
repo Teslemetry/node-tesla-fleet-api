@@ -26,16 +26,19 @@ export interface SessionKeys {
  * A `Session` is not itself thread-safe; `withLock` serializes the
  * message-build step (which mutates `counter`) so concurrent commands on the
  * same domain cannot race on the same counter value.
+ *
+ * The derived keys are native private fields, read through accessors, so a
+ * `JSON.stringify` or structured log of a session cannot reach them.
  */
 export class Session {
     readonly domain: Domain;
     counter: number = 0;
     epoch?: Buffer;
     delta?: number;
-    sharedKey?: Buffer;
-    hmacKey?: Buffer;
-    sessionInfoKey?: Buffer;
     publicKey?: Buffer;
+    #sharedKey?: Buffer;
+    #hmacKey?: Buffer;
+    #sessionInfoKey?: Buffer;
 
     /** Clock time of the last *authenticated* SessionInfo committed for the current epoch, guarding against replay/rollback. */
     private lastAuthenticatedClockTime?: number;
@@ -48,9 +51,21 @@ export class Session {
         this.domain = domain;
     }
 
+    get sharedKey(): Buffer | undefined {
+        return this.#sharedKey;
+    }
+
+    get hmacKey(): Buffer | undefined {
+        return this.#hmacKey;
+    }
+
+    get sessionInfoKey(): Buffer | undefined {
+        return this.#sessionInfoKey;
+    }
+
     /** Whether the handshake has completed and commands can be signed. */
     get ready(): boolean {
-        return this.epoch !== undefined && this.hmacKey !== undefined && this.delta !== undefined;
+        return this.epoch !== undefined && this.#hmacKey !== undefined && this.delta !== undefined;
     }
 
     /**
@@ -87,9 +102,9 @@ export class Session {
         this.delta = Math.floor(Date.now() / 1000) - sessionInfo.clockTime;
         this.lastAuthenticatedClockTime = sessionInfo.clockTime;
         this.publicKey = Buffer.from(sessionInfo.publicKey);
-        this.sharedKey = keys.sharedKey;
-        this.hmacKey = keys.hmacKey;
-        this.sessionInfoKey = keys.sessionInfoKey;
+        this.#sharedKey = keys.sharedKey;
+        this.#hmacKey = keys.hmacKey;
+        this.#sessionInfoKey = keys.sessionInfoKey;
         return true;
     }
 
@@ -112,9 +127,9 @@ export class Session {
 
     /**
      * Run `fn` with exclusive access to this session, queuing behind any
-     * in-flight caller. Held only for as long as `fn` takes - callers should
-     * keep it scoped to the synchronous message-build step, not a full
-     * network round trip.
+     * in-flight caller. Not reentrant: `fn` must not call `withLock` on this
+     * session. Infotainment holds it for the message build only, and VCSEC for
+     * the whole dispatch (see `Commands.dispatch`).
      */
     async withLock<T>(fn: () => T | Promise<T>): Promise<T> {
         const previous = this.queue;

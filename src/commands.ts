@@ -99,6 +99,7 @@ import {
     NotOnWhitelistFault,
     SIGNED_MESSAGE_INFORMATION_FAULTS,
     SessionInfoAuthenticationFault,
+    SigningDisabled,
     TeslaFleetMessageFault,
     TeslaFleetMessageFaultIncorrectEpoch,
     TeslaFleetMessageFaultInvalidTokenOrCounter,
@@ -111,6 +112,24 @@ const VOID: Void = {};
 /** A signed command's outcome, with any other `Response` payload under its field name. */
 export interface SignedCommandResponse extends CommandResponse {
     response: CommandResponse["response"] & Partial<Omit<Response, "actionStatus" | "vehicleData" | "ping">>;
+}
+
+/** Which field of a reply `_send` waits for: a command's payload, or a handshake's session info. */
+export type SendRequires = "protobuf_message_as_bytes" | "session_info";
+
+/**
+ * How `_send` waits for a reply. Each option only applies to a transport that
+ * frames its own replies: `VehicleSigned` ignores them all.
+ */
+export interface SendOptions {
+    /** `false` for a VCSEC actuation, whose reply is one terminal ack with no data after it. Defaults to `true`. */
+    expectsData?: boolean;
+    /** The whole reply wait. Defaults to the transport's own timeout. */
+    timeoutMs?: number;
+    /** Return as soon as the message is written, without a reply. */
+    optimistic?: boolean;
+    /** Lets an unsolicited state broadcast confirm the command alongside the addressed ack. */
+    confirmBroadcast?: (status: VehicleStatus) => boolean;
 }
 
 /** What one signed dispatch resolves to: a command outcome, or the data a read asked for. */
@@ -263,8 +282,9 @@ export function days_of_week_mask(days_of_week: string | number): number {
  * Protocol: mirrors `python-tesla-fleet-api`'s `Commands` ABC. Every method
  * here builds a `RoutableMessage`, signs it (HMAC-personalized), and
  * dispatches it through the single abstract seam `_send`. A concrete
- * subclass fills that seam for one transport - the cloud `/signed_command`
- * HTTP endpoint (`VehicleSigned`) today, a BLE GATT link in a future story.
+ * subclass fills that seam for one transport: the cloud `/signed_command`
+ * HTTP endpoint (`VehicleSigned`) today, a BLE GATT link next. The protected
+ * members are what such a transport builds on.
  *
  * AES-GCM personalized signing (the BLE-only auth mode) is intentionally out
  * of scope here; see AGENTS.md.
@@ -274,28 +294,47 @@ export default abstract class Commands extends VehicleSpecific {
     // must not be reachable off the instance, e.g. via a naive
     // JSON.stringify/structured log, not just inaccessible to outside code
     // at compile time.
-    #privateKey: Buffer;
+    #privateKey: Buffer | null;
     #publicKey: Buffer;
     /** Delay between WAIT-retries; overridable so tests don't have to wait for real timers. */
     protected retryDelayMs = 2000;
-    private readonly fromDestination: Buffer;
+    /** Session-info requests sent before a handshake gives up on replies that fail authentication. */
+    protected handshakeAttempts = 3;
+    /** Delay between those requests. */
+    protected handshakeRetryDelayMs = 1000;
+    /** How `buildMessage` signs a command. */
+    protected authMethod: "hmac" | "aes" = "hmac";
+    /** One random routing address per instance: replies addressed to it are ours. */
+    protected readonly fromDestination: Buffer;
     private readonly sessions: Partial<Record<Domain, Session>>;
     /** Transport identity for debug logging; set per concrete subclass. */
     abstract readonly _transport_name: string;
 
-    constructor(parent: Vehicle, vin: string, privateKey?: Buffer, publicKey?: Buffer) {
+    /**
+     * @param parent
+     * @param vin
+     * @param privateKey Raw 32-byte P-256 scalar. `undefined` falls back to the parent's key, and throws if there is none. `false` disables signing, for a passive listener that never sends a command: any handshake then raises `SigningDisabled`.
+     * @param publicKey Uncompressed P-256 point. Derived from `privateKey` if omitted.
+     */
+    constructor(parent: Vehicle, vin: string, privateKey?: Buffer | false, publicKey?: Buffer) {
         super(parent, vin);
 
         if (vin.length !== 17) {
             throw new Error(`Signed commands require a 17-character VIN, got ${vin.length} characters.`);
         }
 
-        const resolvedPrivateKey = privateKey ?? parent.private_key ?? parent.parent.private_key;
-        if (!resolvedPrivateKey) {
-            throw new Error("No private key provided for signed commands.");
+        // An identity check, not truthiness: `undefined` must keep falling back
+        // to the parent's key rather than silently disabling signing.
+        if (privateKey === false) {
+            this.#privateKey = null;
+        } else {
+            const resolvedPrivateKey = privateKey ?? parent.private_key ?? parent.parent.private_key;
+            if (!resolvedPrivateKey) {
+                throw new Error("No private key provided for signed commands.");
+            }
+            this.#privateKey = resolvedPrivateKey;
         }
-        this.#privateKey = resolvedPrivateKey;
-        this.#publicKey = publicKey ?? publicKeyFor(this.#privateKey);
+        this.#publicKey = publicKey ?? (this.#privateKey ? publicKeyFor(this.#privateKey) : Buffer.alloc(0));
 
         this.fromDestination = crypto.randomBytes(16);
         const deriveKey = (vehiclePublicKey: Buffer) => this.shared_key(vehiclePublicKey);
@@ -305,25 +344,29 @@ export default abstract class Commands extends VehicleSpecific {
         };
     }
 
+    /** The uncompressed public key this instance signs with. Empty when signing is disabled. */
+    protected get publicKey(): Buffer {
+        return this.#publicKey;
+    }
+
     /** Derive the 16-byte shared key used for signed-command session encryption. */
     shared_key(vehicleKey: Buffer): Buffer {
+        if (this.#privateKey === null) {
+            throw new SigningDisabled();
+        }
         return deriveSharedKey(this.#privateKey, vehicleKey);
     }
 
     /**
      * Transmit a signed (or session-handshake) `RoutableMessage` to the
      * vehicle and return its reply. Implementations must call
-     * `validate_msg(resp, msg.uuid)` on the reply before
-     * returning it.
+     * `validate_msg(resp, msg.uuid)` on the reply before returning it, and
+     * must not take `Session.withLock`: `dispatch` already holds that lock
+     * across `_send` for VCSEC, and it is not reentrant.
      */
-    protected abstract _send(
-        msg: RoutableMessage,
-        requires: string,
-        expectsData?: boolean,
-        confirmBroadcast?: (status: VehicleStatus) => boolean,
-    ): Promise<RoutableMessage>;
+    protected abstract _send(msg: RoutableMessage, requires: SendRequires, options?: SendOptions): Promise<RoutableMessage>;
 
-    private sessionFor(domain: Domain): Session {
+    protected sessionFor(domain: Domain): Session {
         const session = this.sessions[domain];
         if (!session) {
             throw new Error(`No signed-command session configured for domain ${domain}.`);
@@ -427,14 +470,61 @@ export default abstract class Commands extends VehicleSpecific {
         }
     }
 
-    private async handshake(domain: Domain): Promise<void> {
-        const msg = RoutableMessage.create({
+    /** The unsigned session-info request that opens a domain session. */
+    protected sessionInfoRequest(domain: Domain): RoutableMessage {
+        return RoutableMessage.create({
             toDestination: { domain },
             fromDestination: { routingAddress: this.fromDestination },
             sessionInfoRequest: { publicKey: this.#publicKey },
             uuid: crypto.randomBytes(16),
         });
-        await this._send(msg, "session_info");
+    }
+
+    /**
+     * Open or refresh a domain session. A reply that fails authentication is
+     * discarded and the unsigned, idempotent request sent again, rather than
+     * failing the handshake on one bad reply. Never trusted either way.
+     *
+     * For VCSEC the caller must hold the session lock; `ensureHandshake` and
+     * `handshakeVehicleSecurity` do.
+     * @returns Whether the session can now sign.
+     * @throws SigningDisabled before anything is sent, when this instance has no key.
+     */
+    protected async handshake(domain: Domain, options?: SendOptions): Promise<boolean> {
+        if (this.#privateKey === null) {
+            throw new SigningDisabled();
+        }
+        for (let attempt = 1; ; attempt++) {
+            try {
+                await this._send(this.sessionInfoRequest(domain), "session_info", options);
+                return this.sessionFor(domain).ready;
+            } catch (error) {
+                if (!(error instanceof SessionInfoAuthenticationFault) || attempt >= this.handshakeAttempts) {
+                    throw error;
+                }
+                await sleep(this.handshakeRetryDelayMs);
+            }
+        }
+    }
+
+    /**
+     * Open a domain session unless one is ready, for a subclass that must know
+     * it can sign before it dispatches. Do not call this from inside the VCSEC
+     * session lock, which it takes.
+     */
+    protected async ensureHandshake(domain: Domain): Promise<void> {
+        const session = this.sessionFor(domain);
+        if (domain !== Domain.DOMAIN_VEHICLE_SECURITY) {
+            if (!session.ready) {
+                await this.handshake(domain);
+            }
+            return;
+        }
+        await session.withLock(async () => {
+            if (!session.ready) {
+                await this.handshake(domain);
+            }
+        });
     }
 
     /** Perform a handshake with the vehicle security domain, even if a session is already established. */
@@ -446,6 +536,11 @@ export default abstract class Commands extends VehicleSpecific {
     /** Perform a handshake with the infotainment domain, even if a session is already established. */
     async handshakeInfotainment(): Promise<void> {
         await this.handshake(Domain.DOMAIN_INFOTAINMENT);
+    }
+
+    /** Sign `command` for `session` by `authMethod`. Assigns a counter, so run it under the session lock. */
+    protected buildMessage(session: Session, command: Buffer): RoutableMessage {
+        return this.buildHmacMessage(session, command);
     }
 
     private buildHmacMessage(session: Session, command: Buffer): RoutableMessage {
@@ -494,7 +589,7 @@ export default abstract class Commands extends VehicleSpecific {
      * most one VCSEC message is ever in flight. Infotainment keeps the
      * narrower build-only lock, serializing only counter assignment.
      */
-    private async dispatch(domain: Domain, command: Buffer, expectsData: boolean): Promise<SignedReply> {
+    protected async dispatch(domain: Domain, command: Buffer, options: Omit<SendOptions, "optimistic"> = {}): Promise<SignedReply> {
         const session = this.sessionFor(domain);
         const serializeWholeDispatch = domain === Domain.DOMAIN_VEHICLE_SECURITY;
 
@@ -505,12 +600,12 @@ export default abstract class Commands extends VehicleSpecific {
 
             for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
                 const msg = serializeWholeDispatch
-                    ? this.buildHmacMessage(session, command)
-                    : await session.withLock(() => this.buildHmacMessage(session, command));
+                    ? this.buildMessage(session, command)
+                    : await session.withLock(() => this.buildMessage(session, command));
 
                 let resp: RoutableMessage;
                 try {
-                    resp = await this._send(msg, "protobuf_message_as_bytes", expectsData);
+                    resp = await this._send(msg, "protobuf_message_as_bytes", options);
                 } catch (error) {
                     // Epoch/counter drift: the reply carried fresh session info, so re-sign and resend.
                     const retryable =
@@ -530,7 +625,7 @@ export default abstract class Commands extends VehicleSpecific {
                     continue;
                 }
 
-                const result = this.interpretResponse(resp, expectsData);
+                const result = this.interpretResponse(resp, options.expectsData ?? true);
                 if (result === "wait") {
                     if (attempt >= MAX_ATTEMPTS - 1) {
                         return fail("Too many retries");
@@ -640,11 +735,11 @@ export default abstract class Commands extends VehicleSpecific {
     }
 
     /** Dispatch one signed command, logging its name, transport and outcome. */
-    private async dispatchLogged(name: string, domain: Domain, command: Buffer, expectsData: boolean): Promise<SignedReply> {
+    private async dispatchLogged(name: string, domain: Domain, command: Buffer, options?: Omit<SendOptions, "optimistic">): Promise<SignedReply> {
         const log = (message: string) => this.parent.parent._log(message);
         let result: SignedReply;
         try {
-            result = await this.dispatch(domain, command, expectsData);
+            result = await this.dispatch(domain, command, options);
         } catch (error) {
             logRequestError(log, name, this._transport_name, error);
             throw error;
@@ -662,12 +757,15 @@ export default abstract class Commands extends VehicleSpecific {
     }
 
     /** Sign and send an actuation: its reply is a bare terminal ack, so `expectsData` is false. */
-    private async sendVehicleSecurity(command: UnsignedMessage): Promise<CommandResponse> {
+    protected async sendVehicleSecurity(
+        command: UnsignedMessage,
+        options: Pick<SendOptions, "confirmBroadcast"> = {},
+    ): Promise<CommandResponse> {
         const reply = await this.dispatchLogged(
             vcsec_command_name(command),
             Domain.DOMAIN_VEHICLE_SECURITY,
             Buffer.from(UnsignedMessage.encode(command).finish()),
-            false,
+            { ...options, expectsData: false },
         );
         return reply as CommandResponse;
     }
@@ -681,18 +779,21 @@ export default abstract class Commands extends VehicleSpecific {
             vcsec_command_name(command),
             Domain.DOMAIN_VEHICLE_SECURITY,
             Buffer.from(UnsignedMessage.encode(command).finish()),
-            true,
         );
         return this.readData<VehicleStatus>(reply);
     }
 
-    /** Sign and send a command to the Infotainment computer. Reads go through `_getInfotainment`. */
-    private async sendInfotainment(action: Action): Promise<SignedCommandResponse> {
+    /**
+     * Sign and send a command to the Infotainment computer. Reads go through
+     * `_getInfotainment`. `mutating` is false for a command that cannot change
+     * the vehicle, so a transport can give up on it rather than ask whether it
+     * ran; `ping` is the only one. The cloud transport has no use for it.
+     */
+    protected async sendInfotainment(action: Action, _options: { mutating?: boolean } = {}): Promise<SignedCommandResponse> {
         const reply = await this.dispatchLogged(
             infotainment_command_name(action),
             Domain.DOMAIN_INFOTAINMENT,
             Buffer.from(Action.encode(action).finish()),
-            true,
         );
         return reply as SignedCommandResponse;
     }
@@ -706,13 +807,12 @@ export default abstract class Commands extends VehicleSpecific {
             infotainment_command_name(action),
             Domain.DOMAIN_INFOTAINMENT,
             Buffer.from(Action.encode(action).finish()),
-            true,
         );
         return this.readData<VehicleData>(reply);
     }
 
-    protected vehicleAction(action: VehicleAction): Promise<SignedCommandResponse> {
-        return this.sendInfotainment(Action.create({ vehicleAction: action }));
+    protected vehicleAction(action: VehicleAction, options?: { mutating?: boolean }): Promise<SignedCommandResponse> {
+        return this.sendInfotainment(Action.create({ vehicleAction: action }), options);
     }
 
     private resolveSeat(seat_position: Seat | number): number {
@@ -723,7 +823,7 @@ export default abstract class Commands extends VehicleSpecific {
 
     /** Pings the vehicle. On success, `reason` is the vehicle's timestamp in ISO 8601. */
     async ping(): Promise<CommandResponse> {
-        return this.vehicleAction(VehicleAction.create({ ping: Ping.create({ pingId: 0 }) }));
+        return this.vehicleAction(VehicleAction.create({ ping: Ping.create({ pingId: 0 }) }), { mutating: false });
     }
 
     /**
