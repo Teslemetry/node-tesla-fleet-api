@@ -717,12 +717,15 @@ export class PowerwallClient {
         const { reserve_percent = 100 } = options;
         assertPercent(reserve_percent, "reserve_percent");
 
-        const config = await this.get_config();
-        const reserve = lookup(config, "site_info", "backup_reserve_percent");
-        const saved = typeof reserve === "string" ? Number(reserve || NaN) : reserve;
-        this.#savedRealMode = String(config.default_real_mode || "self_consumption");
-        // Keeps a fractional value: Python's `int()` restores a raw 24.75 as 24.
-        this.#savedReservePercent = typeof saved === "number" && Number.isFinite(saved) ? saved : OFFSET;
+        // A second curtail would read back its own `backup` and reserve, and restore those.
+        if (!this.#curtailmentActive) {
+            const config = await this.get_config();
+            const reserve = lookup(config, "site_info", "backup_reserve_percent");
+            const saved = typeof reserve === "string" ? Number(reserve || NaN) : reserve;
+            this.#savedRealMode = String(config.default_real_mode || "self_consumption");
+            // Keeps a fractional value: Python's `int()` restores a raw 24.75 as 24.
+            this.#savedReservePercent = typeof saved === "number" && Number.isFinite(saved) ? saved : OFFSET;
+        }
 
         await this.write_config({
             default_real_mode: "backup",

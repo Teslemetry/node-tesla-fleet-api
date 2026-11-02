@@ -228,6 +228,35 @@ describe("curtail", () => {
         });
     });
 
+    it("restores the original values after a second curtail", async () => {
+        setConfig({ default_real_mode: "autonomous", site_info: { backup_reserve_percent: 24 } });
+
+        await client.curtail();
+        await client.curtail({ reserve_percent: 80 });
+        expect(gateway.configJson.site_info.backup_reserve_percent).toBe(80);
+        await client.restore_from_curtailment();
+
+        expect(gateway.configJson).toMatchObject({
+            default_real_mode: "autonomous",
+            site_info: { backup_reserve_percent: 24 },
+        });
+    });
+
+    it("saves afresh once restored", async () => {
+        setConfig({ default_real_mode: "autonomous", site_info: { backup_reserve_percent: 24 } });
+        await client.curtail();
+        await client.restore_from_curtailment();
+        setConfig({ default_real_mode: "self_consumption", site_info: { backup_reserve_percent: 50 } });
+
+        await client.curtail();
+        await client.restore_from_curtailment();
+
+        expect(gateway.configJson).toMatchObject({
+            default_real_mode: "self_consumption",
+            site_info: { backup_reserve_percent: 50 },
+        });
+    });
+
     it("stays inactive when the write fails", async () => {
         gateway.forceStatus("/tedapi/v1r", 500);
         await expect(client.curtail()).rejects.toBeInstanceOf(PowerwallProtocolError);
