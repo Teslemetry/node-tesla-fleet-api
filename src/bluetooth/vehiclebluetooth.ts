@@ -8,7 +8,7 @@ import {
     VehicleStatus,
 } from "@teslemetry/tesla-protocol/command/vcsec";
 import { Action } from "@teslemetry/tesla-protocol/command/car_server";
-import Commands, { SendOptions, SendRequires, SignedCommandResponse } from "../commands.js";
+import { SendOptions, SendRequires, SignedCommandResponse } from "../commands.js";
 import { CommandResponse } from "../types/commands.js";
 import { WakeUpOptions } from "../types/vehicle.js";
 import Vehicle from "../vehicle.js";
@@ -20,7 +20,7 @@ import {
     TeslaFleetError,
 } from "../exceptions.js";
 import { AsyncLock, BleCallTimeout, ReplyQueue, withTimeout } from "./async.js";
-import { ListenerRegistry, Unsubscribe } from "./broadcast.js";
+import { BroadcastListeners, ListenerRegistry, Unsubscribe } from "./broadcast.js";
 import {
     DEFAULT_CONNECT_ATTEMPTS,
     DEFAULT_CONNECT_TIMEOUT_MS,
@@ -109,7 +109,7 @@ class Link {
  * survives with them: a new link may re-handshake, but nothing here clears a
  * session or lets a new link trust a new key.
  */
-export default class VehicleBluetooth extends Commands {
+export default class VehicleBluetooth extends BroadcastListeners {
     readonly _transport_name: string = "bluetooth";
     protected override authMethod: "hmac" | "aes" = "aes";
 
@@ -162,10 +162,6 @@ export default class VehicleBluetooth extends Commands {
         this.connectTimeoutMs = options.connect_timeout_ms ?? DEFAULT_CONNECT_TIMEOUT_MS;
         this.scanTimeoutMs = options.scan_timeout_ms ?? DEFAULT_SCAN_TIMEOUT_MS;
         this.ble_name = get_name(vin);
-    }
-
-    private log(message: string): void {
-        this.parent.parent._log(message);
     }
 
     /**
@@ -424,11 +420,12 @@ export default class VehicleBluetooth extends Commands {
     /** Route one whole message: replies to their domain's queue, the rest to whoever listens. */
     private onMessage(message: RoutableMessage): void {
         const address = message.toDestination?.routingAddress;
+        const domain = message.fromDestination?.domain ?? Domain.DOMAIN_BROADCAST;
         if (!address || !this.fromDestination.equals(address)) {
+            this.dispatchBroadcast(domain, message);
             return;
         }
-        const domain = message.fromDestination?.domain;
-        const queue = domain === undefined ? undefined : this.queues[domain];
+        const queue = this.queues[domain];
         if (!queue) {
             this.log(`BLE ignored a reply from unhandled domain ${domain}`);
             return;
