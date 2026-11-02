@@ -5,7 +5,7 @@ import { SessionInfo, SessionInfoStatus, SignatureType, Tag } from "@teslemetry/
 import Commands from "../src/commands.js";
 import TeslaFleetApi from "../src/teslafleetapi.js";
 import Vehicle from "../src/vehicle.js";
-import { NotOnWhitelistFault, SessionInfoAuthenticationFault } from "../src/exceptions.js";
+import { NotOnWhitelistFault, SessionInfoAuthenticationFault, SigningDisabled } from "../src/exceptions.js";
 import { deriveSharedKey, publicKeyFor } from "../src/signing/crypto.js";
 import { Session } from "../src/signing/session.js";
 
@@ -32,7 +32,7 @@ class ConcreteCommands extends Commands {
     }
 }
 
-function makeCommands(vin: string = VIN, privateKey: Buffer = OUR_PRIVATE_KEY): ConcreteCommands {
+function makeCommands(vin: string = VIN, privateKey: Buffer | false = OUR_PRIVATE_KEY): ConcreteCommands {
     return new ConcreteCommands(new Vehicle(new TeslaFleetApi({ server: "https://fleet.test" })), vin, privateKey);
 }
 
@@ -84,7 +84,7 @@ describe("session info tag authentication", () => {
     });
 
     function expectRejected(resp: RoutableMessage): void {
-        expect(() => commands.validate_msg(resp, REQUEST_UUID)).toThrow(SessionInfoAuthenticationFault);
+        expect(() => commands.validate_msg(resp, REQUEST_UUID, VCSEC)).toThrow(SessionInfoAuthenticationFault);
         expect(commands.session().ready).toBe(false);
     }
 
@@ -108,6 +108,26 @@ describe("session info tag authentication", () => {
         expectRejected(reply(info(), REQUEST_UUID, { echo: Buffer.alloc(16, 0x22) }));
     });
 
+    it("refuses a reply relabelled as another domain, committing to neither session", () => {
+        const relabelled = { ...reply(info(), REQUEST_UUID), fromDestination: { domain: Domain.DOMAIN_INFOTAINMENT } };
+        expect(() => commands.validate_msg(relabelled, REQUEST_UUID, VCSEC)).toThrow(SessionInfoAuthenticationFault);
+        expect(commands.session(VCSEC).ready).toBe(false);
+        expect(commands.session(Domain.DOMAIN_INFOTAINMENT).ready).toBe(false);
+    });
+
+    it("refuses a reply with no source domain, or when no request domain is given", () => {
+        const unlabelled = { ...reply(info(), REQUEST_UUID), fromDestination: undefined };
+        expect(() => commands.validate_msg(unlabelled, REQUEST_UUID, VCSEC)).toThrow(SessionInfoAuthenticationFault);
+        expect(() => commands.validate_msg(reply(info(), REQUEST_UUID), REQUEST_UUID, undefined)).toThrow(SessionInfoAuthenticationFault);
+        expect(commands.session().ready).toBe(false);
+    });
+
+    it("lets SigningDisabled through, rather than blaming the reply", () => {
+        const disabled = makeCommands(VIN, false);
+        expect(() => disabled.validate_msg(reply(info(), REQUEST_UUID), REQUEST_UUID, VCSEC)).toThrow(SigningDisabled);
+        expect(disabled.session().ready).toBe(false);
+    });
+
     it("rejects session info bytes that do not decode", () => {
         const resp = reply(info(), REQUEST_UUID);
         resp.sessionInfo = Buffer.from("0aff", "hex");
@@ -119,32 +139,32 @@ describe("session info tag authentication", () => {
     });
 
     it("accepts a valid tag with an empty wire-level request_uuid, the real VCSEC shape", () => {
-        commands.validate_msg(reply(info(), REQUEST_UUID), REQUEST_UUID);
+        commands.validate_msg(reply(info(), REQUEST_UUID), REQUEST_UUID, VCSEC);
         expect(commands.session().ready).toBe(true);
         expect(commands.session().counter).toBe(100);
     });
 
     it("accepts a valid tag with a matching echoed request_uuid", () => {
-        commands.validate_msg(reply(info(), REQUEST_UUID, { echo: REQUEST_UUID }), REQUEST_UUID);
+        commands.validate_msg(reply(info(), REQUEST_UUID, { echo: REQUEST_UUID }), REQUEST_UUID, VCSEC);
         expect(commands.session().ready).toBe(true);
     });
 
     it("verifies the tag before trusting the whitelist status", () => {
         const notWhitelisted = info({ status: SessionInfoStatus.SESSION_INFO_STATUS_KEY_NOT_ON_WHITELIST });
-        expect(() => commands.validate_msg(reply(notWhitelisted, REQUEST_UUID, { tag: Buffer.alloc(32) }), REQUEST_UUID)).toThrow(
+        expect(() => commands.validate_msg(reply(notWhitelisted, REQUEST_UUID, { tag: Buffer.alloc(32) }), REQUEST_UUID, VCSEC)).toThrow(
             SessionInfoAuthenticationFault,
         );
     });
 
     it("raises NotOnWhitelistFault for an authenticated whitelist rejection", () => {
         const notWhitelisted = info({ status: SessionInfoStatus.SESSION_INFO_STATUS_KEY_NOT_ON_WHITELIST });
-        expect(() => commands.validate_msg(reply(notWhitelisted, REQUEST_UUID), REQUEST_UUID)).toThrow(NotOnWhitelistFault);
+        expect(() => commands.validate_msg(reply(notWhitelisted, REQUEST_UUID), REQUEST_UUID, VCSEC)).toThrow(NotOnWhitelistFault);
         expect(commands.session().ready).toBe(false);
     });
 
     it("raises NotOnWhitelistFault, unauthenticated, for an empty public key", () => {
         const empty = info({ publicKey: Buffer.alloc(0), status: SessionInfoStatus.SESSION_INFO_STATUS_KEY_NOT_ON_WHITELIST });
-        expect(() => commands.validate_msg(reply(empty, REQUEST_UUID, { echo: REQUEST_UUID, tag: Buffer.alloc(32) }), REQUEST_UUID)).toThrow(
+        expect(() => commands.validate_msg(reply(empty, REQUEST_UUID, { echo: REQUEST_UUID, tag: Buffer.alloc(32) }), REQUEST_UUID, VCSEC)).toThrow(
             NotOnWhitelistFault,
         );
         expect(commands.session().ready).toBe(false);
@@ -165,7 +185,7 @@ describe("counter and clock monotonicity", () => {
 
     function authenticate(counter: number, epochByte: number, clockTime: number, uuidByte: number): void {
         const uuid = Buffer.alloc(16, uuidByte);
-        commands.validate_msg(reply(info({ counter, epoch: Buffer.alloc(16, epochByte), clockTime }), uuid), uuid);
+        commands.validate_msg(reply(info({ counter, epoch: Buffer.alloc(16, epochByte), clockTime }), uuid), uuid, VCSEC);
     }
 
     it("establishes the counter and epoch", () => {
@@ -223,7 +243,7 @@ describe("protocol.md handshake reply", () => {
 
     it("authenticates and commits it", () => {
         const commands = makeCommands(SPEC_VIN, CLIENT_PRIVATE_KEY);
-        commands.validate_msg(specReply(TAG), SPEC_UUID);
+        commands.validate_msg(specReply(TAG), SPEC_UUID, Domain.DOMAIN_INFOTAINMENT);
         const session = commands.session(Domain.DOMAIN_INFOTAINMENT);
         expect(session.ready).toBe(true);
         expect(session.counter).toBe(6);
@@ -234,7 +254,7 @@ describe("protocol.md handshake reply", () => {
         const commands = makeCommands(SPEC_VIN, CLIENT_PRIVATE_KEY);
         const corrupted = Buffer.from(TAG);
         corrupted[0] ^= 1;
-        expect(() => commands.validate_msg(specReply(corrupted), SPEC_UUID)).toThrow(SessionInfoAuthenticationFault);
+        expect(() => commands.validate_msg(specReply(corrupted), SPEC_UUID, Domain.DOMAIN_INFOTAINMENT)).toThrow(SessionInfoAuthenticationFault);
         expect(commands.session(Domain.DOMAIN_INFOTAINMENT).ready).toBe(false);
     });
 });

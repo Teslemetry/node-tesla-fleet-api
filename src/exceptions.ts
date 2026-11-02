@@ -578,8 +578,9 @@ export class AuthorizedClientWaitExpired extends TeslaFleetError {
  * epoch. Also raised when the reply carries an empty `publicKey` (so no
  * shared key can be derived to verify a tag) with a status other than
  * `SESSION_INFO_STATUS_KEY_NOT_ON_WHITELIST`, which raises
- * `NotOnWhitelistFault` instead. The session's prior state is left
- * unmodified.
+ * `NotOnWhitelistFault` instead, when it names a vehicle public key other than
+ * the one the session pinned at first contact, or when its clock or counter
+ * could not sign a command. The session's prior state is left unmodified.
  */
 export class SessionInfoAuthenticationFault extends TeslaFleetError {
     static override readonly message: string = "Session info reply failed authentication and was discarded.";

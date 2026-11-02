@@ -48,7 +48,7 @@ class Transport extends Commands {
         this.requests.push(RoutableMessage.decode(bytes));
         const resp = RoutableMessage.decode(this.fakeVehicle.handle(bytes));
         this.replies.push(resp);
-        this.validate_msg(resp, Buffer.from(msg.uuid));
+        this.validate_msg(resp, Buffer.from(msg.uuid), msg.toDestination?.domain);
         return resp;
     }
 
