@@ -560,7 +560,7 @@ export default abstract class Commands extends VehicleSpecific {
      * Controls the front (which_trunk: "front") or rear (which_trunk: "rear") trunk.
      * @param which_trunk "front" or "rear"
      */
-    async actuate_truck(which_trunk: Trunk): Promise<CommandResponse> {
+    async actuate_trunk(which_trunk: Trunk): Promise<CommandResponse> {
         const field = TrunkFields[which_trunk];
         if (!field) {
             throw new Error(`Invalid trunk: ${which_trunk}`);
@@ -643,8 +643,9 @@ export default abstract class Commands extends VehicleSpecific {
 
     /**
      * Deactivates PIN to Drive and resets the associated PIN for vehicles running firmware versions 2023.44+. This command is only accessible to fleet managers or owners.
+     * @param _pin Accepted for parity with the REST command; the signed action carries no PIN.
      */
-    async clear_pin_to_drive_admin(): Promise<CommandResponse> {
+    async clear_pin_to_drive_admin(_pin?: string | number): Promise<CommandResponse> {
         return this.vehicleAction(
             VehicleAction.create({ vehicleControlResetPinToDriveAdminAction: VehicleControlResetPinToDriveAdminAction.create({}) }),
         );

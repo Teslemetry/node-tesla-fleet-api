@@ -15,7 +15,7 @@ import {
 } from "./exceptions.js";
 import {
   EnergyProduct,
-  ProductsResponse,
+  ProductsData,
   VehicleProduct,
 } from "./types/products.js";
 import { Logger, logRequestError, logRequestResult } from "./log.js";
@@ -318,10 +318,8 @@ export default class TeslaFleetApi {
    * Returns products mapped to user.
    * @returns An array of products including both vehicles and energy sites.
    */
-  async products(): Promise<ProductsResponse> {
-    return this._request("GET", "api/1/products").then(
-      ({ response }) => response,
-    );
+  async products(): Promise<ProductsData> {
+    return this._request("GET", "api/1/products");
   }
 
   /**
@@ -329,7 +327,7 @@ export default class TeslaFleetApi {
    * @returns A dictionary of vehicles and energy sites, each with an array of those products
    */
   async products_by_type(): Promise<ProductsByType> {
-    return this.products().then((products) => ({
+    return this.products().then(({ response: products }) => ({
       vehicles: products.filter(
         (product): product is VehicleProduct => "vin" in product,
       ),
