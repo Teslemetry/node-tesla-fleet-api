@@ -11,6 +11,7 @@ import VehicleSpecific from "./vehiclespecific.js";
 export { Commands, Energy, EnergySpecific, TeslaFleetApi, Teslemetry, Tessie, Vehicle, VehicleSigned, VehicleSpecific };
 export { Session } from "./signing/session.js";
 export * from "./exceptions.js";
-export { getTariffPeriods } from "./tariff.js";
+export { getTariffPeriods, unwrapTariffV2 } from "./tariff.js";
+export { firmwareAtLeast, firmwareCompare } from "./util.js";
 export * from "./const.js";
 export type { TariffRate, TariffPeriod, TariffResolution } from "./tariff.js";
