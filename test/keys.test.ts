@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inspect } from "node:util";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryError, PrivateKeyError } from "../src/exceptions.js";
 import {
     TeslaFleetApi,
@@ -185,14 +185,38 @@ describe("get_rsa_private_key", () => {
     });
 
     it("does not block the event loop while generating", async () => {
-        let ticks = 0;
-        const heart = setInterval(() => ticks++, 10);
+        // A count of timer ticks raced the generator, whose run time varies by
+        // orders of magnitude. Event loop turns are not a race: an immediate is
+        // always pending, and it runs before the poll phase that can deliver
+        // the generator's completion, so an off-loop key sees at least one turn
+        // between its start and its end, and a blocking key sees none.
+        const generateKeyPair = crypto.generateKeyPair as (...args: unknown[]) => void;
+        const generateKeyPairSync = vi.spyOn(crypto, "generateKeyPairSync");
+        let turnsWhileGenerating: number | undefined;
+        let turns = 0;
+        let beating = true;
+        const beat = () => {
+            turns++;
+            if (beating) setImmediate(beat);
+        };
+        vi.spyOn(crypto, "generateKeyPair").mockImplementation(((...args: unknown[]) => {
+            const done = args.pop() as (...result: unknown[]) => void;
+            const turnsAtStart = turns;
+            generateKeyPair.call(crypto, ...args, (...result: unknown[]) => {
+                turnsWhileGenerating = turns - turnsAtStart;
+                done(...result);
+            });
+        }) as typeof crypto.generateKeyPair);
+
+        setImmediate(beat);
         try {
             await makeApi().get_rsa_private_key(rsaPath, 4096);
         } finally {
-            clearInterval(heart);
+            beating = false;
+            vi.restoreAllMocks();
         }
-        expect(ticks).toBeGreaterThan(5);
+        expect(generateKeyPairSync).not.toHaveBeenCalled();
+        expect(turnsWhileGenerating).toBeGreaterThan(0);
     }, 60_000);
 });
 

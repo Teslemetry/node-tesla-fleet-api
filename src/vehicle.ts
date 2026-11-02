@@ -15,16 +15,25 @@ export default class Vehicle {
     /** Class `createFleet` instantiates; a subclass overrides it to supply its own vehicle type. */
     static Fleet: new (parent: Vehicle, vin: string) => VehicleSpecific = VehicleSpecific;
     /** Class `createSigned` instantiates; a subclass overrides it to supply its own signed vehicle type. */
-    static Signed: new (parent: Vehicle, vin: string, private_key?: Buffer, public_key?: Buffer) => VehicleSigned = VehicleSigned;
+    static Signed: new (parent: Vehicle, vin: string, private_key?: Buffer | false, public_key?: Buffer) => VehicleSigned = VehicleSigned;
 
     parent: TeslaFleetApi;
-    /** Fallback private key for `createSigned()` when a call site doesn't pass one explicitly. */
-    private_key?: Buffer;
+    // A native private field, so a structured log of this object cannot reach it.
+    #privateKey?: Buffer;
     /** Every vehicle created by this factory, keyed by VIN; the latest `create*` call for a VIN wins. */
     byVin: Map<string, VehicleSpecific> = new Map();
 
     constructor(parent: TeslaFleetApi) {
         this.parent = parent;
+    }
+
+    /** Fallback private key for `createSigned()` when a call site doesn't pass one explicitly. */
+    get private_key(): Buffer | undefined {
+        return this.#privateKey;
+    }
+
+    set private_key(key: Buffer | undefined) {
+        this.#privateKey = key;
     }
 
     /**
@@ -43,10 +52,10 @@ export default class Vehicle {
      * Command Protocol and dispatches them through the `/signed_command`
      * endpoint, instead of the plaintext REST commands.
      * @param vin
-     * @param private_key Raw 32-byte P-256 private key scalar. Falls back to `this.private_key`, then the client's `private_key`.
+     * @param private_key Raw 32-byte P-256 private key scalar. Falls back to `this.private_key`, then the client's `private_key`. `false` disables signing.
      * @param public_key Uncompressed P-256 public key point. Derived from `private_key` if omitted.
      */
-    createSigned(vin: string, private_key?: Buffer, public_key?: Buffer): VehicleSigned {
+    createSigned(vin: string, private_key?: Buffer | false, public_key?: Buffer): VehicleSigned {
         const vehicle = new (this.constructor as typeof Vehicle).Signed(this, vin, private_key, public_key);
         this.byVin.set(vin, vehicle);
         return vehicle;
@@ -58,7 +67,7 @@ export default class Vehicle {
     }
 
     /** Legacy name for `createSigned`. */
-    specificSigned(vin: string, private_key?: Buffer, public_key?: Buffer): VehicleSigned {
+    specificSigned(vin: string, private_key?: Buffer | false, public_key?: Buffer): VehicleSigned {
         return this.createSigned(vin, private_key, public_key);
     }
 
@@ -288,7 +297,7 @@ export default class Vehicle {
      * @param lon Longitude
      * @param order Order of multiple stops
      */
-    async navigation_gps_request(vehicle_tag: string | number, lat: number, lon: number, order?: number): Promise<CommandResponse> {
+    async navigation_gps_request(vehicle_tag: string | number, lat: number, lon: number, order: number = 0): Promise<CommandResponse> {
         return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/navigation_gps_request`, null, { lat, lon, order });
     }
 
@@ -365,9 +374,9 @@ export default class Vehicle {
      * @param seat_position Seat position
      * @param seat_cooler_level Cooling level
      */
-    async remote_seat_cooler_request(vehicle_tag: string | number, seat_position: Seat | number, seat_cooler_level: Level): Promise<CommandResponse> {
+    async remote_seat_cooler_request(vehicle_tag: string | number, seat_position: keyof typeof AutoSeat | number, seat_cooler_level: Level): Promise<CommandResponse> {
         if (typeof seat_position === "string") {
-            seat_position = Seats[seat_position];
+            seat_position = AutoSeat[seat_position];
         }
         return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/remote_seat_cooler_request`, null, {
             seat_position,
@@ -595,8 +604,8 @@ export default class Vehicle {
      * @param on `true` or `false`
      * @param password Four-digit passcode
      */
-    async set_valet_mode(vehicle_tag: string | number, on: boolean, password: string | number): Promise<CommandResponse> {
-        return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/set_valet_mode`, null, { on, password: String(password) });
+    async set_valet_mode(vehicle_tag: string | number, on: boolean, password?: string | number): Promise<CommandResponse> {
+        return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/set_valet_mode`, null, { on, password: password == null ? undefined : String(password) });
     }
 
     /**
@@ -677,8 +686,9 @@ export default class Vehicle {
      * @param lat Latitude
      * @param lon Longitude
      */
-    async trigger_homelink(vehicle_tag: string | number, lat: number, lon: number, token?: string): Promise<CommandResponse> {
-        return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/trigger_homelink`, null, { token, lat, lon });
+    async trigger_homelink(vehicle_tag: string | number, token?: string, lat?: number, lon?: number): Promise<CommandResponse> {
+        const location = lat != null && lon != null ? { lat, lon } : {};
+        return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/trigger_homelink`, null, { token: token || undefined, ...location });
     }
 
     /**
@@ -697,7 +707,7 @@ export default class Vehicle {
      * @param lat Latitude
      * @param lon Longitude
      */
-    async window_control(vehicle_tag: string | number, command: "vent" | "close", lat: number, lon: number): Promise<CommandResponse> {
+    async window_control(vehicle_tag: string | number, command: "vent" | "close", lat?: number, lon?: number): Promise<CommandResponse> {
         return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/window_control`, null, { command, lat, lon });
     }
 
