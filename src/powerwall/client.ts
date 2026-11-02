@@ -60,6 +60,11 @@ import { V1rTransport } from "./transport.js";
 /** The gateway's own Wi-Fi access point. */
 export const DEFAULT_GATEWAY_HOST = "192.168.91.1";
 
+/** Values of `default_real_mode`. Each sticks and reads back verbatim on a Powerwall 3. */
+export const OPERATION_MODES = ["self_consumption", "autonomous", "backup"] as const;
+/** Values of `site_info.customer_preferred_export_rule`. Each sticks and reads back verbatim on a Powerwall 3. */
+export const GRID_EXPORT_RULES = ["battery_ok", "pv_only", "never"] as const;
+
 /** `google.rpc.Code.UNIMPLEMENTED`, for a command the firmware does not implement. */
 const STATUS_UNIMPLEMENTED = 12;
 
@@ -130,6 +135,36 @@ function decodeConfig(blob: Uint8Array): Record<string, any> {
         throw new PowerwallProtocolError("config.json blob is not UTF-8", { cause: error });
     }
     return parseJsonObject(text, "config.json");
+}
+
+/** Set a dotted path in `config`. A missing or non-object step becomes `{}`. */
+function applyDottedUpdate(config: Record<string, any>, dottedPath: string, value: unknown): void {
+    const keys = dottedPath.split(".");
+    const last = keys.pop() as string;
+    let target = config;
+    for (const key of keys) {
+        const existing: unknown = Object.hasOwn(target, key) ? target[key] : undefined;
+        target = isRecord(existing) ? existing : (target[key] = {});
+    }
+    target[last] = value;
+}
+
+function requireNonEmptyString(value: string, name: string): void {
+    if (typeof value !== "string") {
+        throw new TypeError(`${name} must be a string`);
+    }
+    if (!value) {
+        throw new RangeError(`${name} must not be empty`);
+    }
+}
+
+function requireNonNegative(value: number, name: string): void {
+    if (typeof value !== "number") {
+        throw new TypeError(`${name} must be a number`);
+    }
+    if (!(value >= 0)) {
+        throw new RangeError(`${name} must be non-negative`);
+    }
 }
 
 function decodeEnvelope(inner: Uint8Array, what: string): MessageEnvelope {
@@ -244,6 +279,10 @@ export class PowerwallClient {
     readonly #transport: V1rTransport;
     #din: string | null = null;
     #connecting: Promise<string> | null = null;
+    // What `curtail` replaced. Held only here, so it does not survive a restart.
+    #savedRealMode: string | null = null;
+    #savedReservePercent: number | null = null;
+    #curtailmentActive = false;
 
     /** @throws PowerwallAuthenticationError for a bad PEM or a key that is not RSA. */
     constructor(options: PowerwallClientOptions, _legacyGateway = false) {
@@ -271,6 +310,11 @@ export class PowerwallClient {
     /** The gateway DIN, or `null` until `connect` succeeds. */
     get din(): string | null {
         return this.#din;
+    }
+
+    /** True between `curtail` and `restore_from_curtailment`. */
+    get curtailment_active(): boolean {
+        return this.#curtailmentActive;
     }
 
     /** Log in and fetch the gateway DIN. Idempotent, and concurrent callers share one attempt. */
@@ -475,6 +519,190 @@ export class PowerwallClient {
             clients: (clients?.clients ?? []).map(authorizedClient),
             enable_line_switch_off: clients?.enableLineSwitchOff ?? false,
         };
+    }
+
+    /**
+     * Patch `config.json`, a read-modify-write. The update carries the hash from
+     * the read unchanged: it is an optimistic lock held by the gateway, and the
+     * client never computes one.
+     * @param updates Dotted paths to values, such as `{"site_info.backup_reserve_percent": 24}`.
+     * @throws PowerwallProtocolError on bad JSON, or a reply with no `filestore`.
+     */
+    async write_config(updates: Record<string, unknown>): Promise<void> {
+        const din = await this.connect();
+        const { blob, hash } = await this._read_config(din);
+        const config = decodeConfig(blob);
+        for (const [dottedPath, value] of Object.entries(updates)) {
+            applyDottedUpdate(config, dottedPath, value);
+        }
+
+        const response = await this._post(
+            MessageEnvelope.create({
+                ...commandHeader(din),
+                filestore: {
+                    updateFileRequest: {
+                        domain: FileStoreAPIDomain.FILE_STORE_API_DOMAIN_CONFIG_JSON,
+                        file: { name: CONFIG_FILE, blob: Buffer.from(JSON.stringify(config), "utf8") },
+                        hash,
+                    },
+                },
+            }),
+            din,
+            "updateFile",
+        );
+        if (!response.filestore) {
+            throw new PowerwallProtocolError("updateFile response missing filestore payload");
+        }
+    }
+
+    /**
+     * Set the backup reserve on the app's 0-100 scale.
+     * @throws RangeError outside 0-100.
+     */
+    async set_backup_reserve(percent: number): Promise<void> {
+        await this.write_config({ "site_info.backup_reserve_percent": scaled_to_raw_reserve(percent) });
+    }
+
+    /**
+     * Write the backup reserve on the gateway's raw scale, where app 0% is raw 5%.
+     * @throws RangeError outside 0-100.
+     */
+    async set_backup_reserve_raw(percent: number): Promise<void> {
+        assertPercent(percent, "percent");
+        await this.write_config({ "site_info.backup_reserve_percent": percent });
+    }
+
+    /**
+     * Set the operation mode, as `operation` does through the cloud.
+     * @param mode One of `OPERATION_MODES`.
+     * @throws RangeError for any other value.
+     */
+    async set_operation_mode(mode: string): Promise<void> {
+        if (!(OPERATION_MODES as readonly string[]).includes(mode)) {
+            throw new RangeError(`mode must be one of ${OPERATION_MODES.join(", ")}`);
+        }
+        await this.write_config({ default_real_mode: mode });
+    }
+
+    /**
+     * Set `strategy.TOU_mode`, which is local-only: the cloud API does not expose it.
+     *
+     * The gateway does not validate this field, so a typo silently sets an
+     * unrecognized mode. Only `economic` is confirmed in use. The tariff itself
+     * lives in the cloud and cannot be set here.
+     * @throws RangeError on an empty string.
+     */
+    async set_tou_mode(mode: string): Promise<void> {
+        requireNonEmptyString(mode, "mode");
+        await this.write_config({ "strategy.TOU_mode": mode });
+    }
+
+    /**
+     * Set the export rule, the grid-charging flag, or both in one write. See
+     * `set_export_rule` and `set_grid_charging` for one of each.
+     * @throws RangeError for an unknown rule.
+     * @throws TypeError when given neither.
+     */
+    async set_grid_import_export(options: {
+        customer_preferred_export_rule?: string | null;
+        disallow_charge_from_grid_with_solar_installed?: boolean | null;
+    }): Promise<void> {
+        const { customer_preferred_export_rule: rule, disallow_charge_from_grid_with_solar_installed: disallow } = options;
+        const updates: Record<string, unknown> = {};
+        if (rule != null) {
+            if (!(GRID_EXPORT_RULES as readonly string[]).includes(rule)) {
+                throw new RangeError(`customer_preferred_export_rule must be one of ${GRID_EXPORT_RULES.join(", ")}`);
+            }
+            updates["site_info.customer_preferred_export_rule"] = rule;
+        }
+        if (disallow != null) {
+            updates["site_info.disallow_charge_from_grid_with_solar_installed"] = Boolean(disallow);
+        }
+        if (Object.keys(updates).length === 0) {
+            throw new TypeError(
+                "set_grid_import_export requires customer_preferred_export_rule and/or disallow_charge_from_grid_with_solar_installed",
+            );
+        }
+        await this.write_config(updates);
+    }
+
+    /**
+     * Set the export rule. `net_meter_mode` is independent and does not move.
+     * @param rule `battery_ok` exports solar and battery, `pv_only` solar only, `never` nothing.
+     * @throws RangeError for any other value.
+     */
+    async set_export_rule(rule: string): Promise<void> {
+        await this.set_grid_import_export({ customer_preferred_export_rule: rule });
+    }
+
+    /**
+     * Allow or disallow charging from the grid. The gateway stores the inverse
+     * flag and drops the key rather than store `false`, so treat an absent key
+     * as "allowed".
+     */
+    async set_grid_charging(enabled: boolean): Promise<void> {
+        await this.set_grid_import_export({ disallow_charge_from_grid_with_solar_installed: !enabled });
+    }
+
+    /**
+     * Enable on-grid solar curtailment. The gateway drops the key rather than
+     * store `false`, so treat an absent key as disabled.
+     */
+    async set_on_grid_solar_curtailment(enabled: boolean): Promise<void> {
+        await this.write_config({ "site_info.on_grid_solar_curtailment_enabled": Boolean(enabled) });
+    }
+
+    /**
+     * Cap grid import, in kilowatts, stored as given.
+     * @throws RangeError on a negative value.
+     */
+    async set_import_limit(kilowatts: number): Promise<void> {
+        requireNonNegative(kilowatts, "kilowatts");
+        await this.write_config({ "site_info.max_site_meter_power_ac": kilowatts });
+    }
+
+    /**
+     * Cap grid export, in kilowatts. Pass a positive magnitude: the gateway
+     * represents export as negative site-meter power.
+     * @throws RangeError on a negative value.
+     */
+    async set_export_limit(kilowatts: number): Promise<void> {
+        requireNonNegative(kilowatts, "kilowatts");
+        await this.write_config({ "site_info.min_site_meter_power_ac": kilowatts === 0 ? 0 : -kilowatts });
+    }
+
+    /**
+     * Stop grid export by switching to `backup` mode at a high reserve. This uses
+     * a config write, so no contactor cycles, but it takes about 90 seconds to
+     * apply. `restore_from_curtailment` puts back what this replaced.
+     * @param options.reserve_percent The reserve during curtailment, on the **raw** scale.
+     * @throws RangeError outside 0-100.
+     */
+    async curtail(options: { reserve_percent?: number } = {}): Promise<void> {
+        const { reserve_percent = 100 } = options;
+        assertPercent(reserve_percent, "reserve_percent");
+
+        const config = await this.get_config();
+        const reserve = lookup(config, "site_info", "backup_reserve_percent");
+        const saved = typeof reserve === "string" ? Number(reserve || NaN) : reserve;
+        this.#savedRealMode = String(config.default_real_mode || "self_consumption");
+        // Keeps a fractional value: Python's `int()` restores a raw 24.75 as 24.
+        this.#savedReservePercent = typeof saved === "number" && Number.isFinite(saved) ? saved : OFFSET;
+
+        await this.write_config({
+            default_real_mode: "backup",
+            "site_info.backup_reserve_percent": reserve_percent,
+        });
+        this.#curtailmentActive = true;
+    }
+
+    /** Write back what `curtail` replaced, or `self_consumption` at a raw 5 if nothing was saved. */
+    async restore_from_curtailment(): Promise<void> {
+        await this.write_config({
+            default_real_mode: this.#savedRealMode ?? "self_consumption",
+            "site_info.backup_reserve_percent": this.#savedReservePercent ?? OFFSET,
+        });
+        this.#curtailmentActive = false;
     }
 
     private async _query_graphql(query: string, code: Uint8Array, variables: string): Promise<string> {

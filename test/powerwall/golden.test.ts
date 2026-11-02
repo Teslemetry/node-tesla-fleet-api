@@ -1,6 +1,7 @@
 // Document 09, section 3: envelopes from the real Python client, captured with
 // this DIN and the clock frozen at 1800000000. Never regenerate them here.
 import { readFileSync } from "node:fs";
+import { MessageEnvelope } from "@teslemetry/tesla-protocol/energy_device/transport";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PowerwallClient } from "../../src/powerwall/client.js";
 import { GATEWAY_PASSWORD, TEST_KEY_PEM } from "../fixtures/powerwall.js";
@@ -29,6 +30,33 @@ afterEach(async () => {
 function sent(): string[] {
     return gateway.posts.map((post) => post.envelopeBytes.toString("hex"));
 }
+
+describe("config writes", () => {
+    it("matches Python's envelope, apart from Python's JSON spacing", async () => {
+        const blob = '{"default_real_mode": "self_consumption", "site_info": {"backup_reserve_percent": 24.0}}';
+        gateway.config = Buffer.from(blob);
+
+        await client.set_backup_reserve(20);
+
+        const [read, write] = GOLDEN.set_backup_reserve_20.map((hex) => MessageEnvelope.decode(Buffer.from(hex, "hex")));
+        expect(sent()[0]).toBe(GOLDEN.set_backup_reserve_20[0]);
+        expect(read.filestore?.readFileRequest).toBeDefined();
+
+        // `json.dumps` writes `24.0` with spaces and `JSON.stringify` writes `24` without.
+        const expected = write.filestore?.updateFileRequest;
+        const actual = gateway.posts[1].envelope.filestore?.updateFileRequest;
+        const blobText = (update: typeof actual) => JSON.parse(Buffer.from(update?.file?.blob ?? []).toString());
+        expect(blobText(actual)).toEqual(blobText(expected));
+        expect(actual?.domain).toBe(expected?.domain);
+        expect(actual?.file?.name).toBe(expected?.file?.name);
+        expect(Buffer.from(actual?.hash ?? []).toString("hex")).toBe(Buffer.from(expected?.hash ?? []).toString("hex"));
+        expect(gateway.posts[1].envelope).toMatchObject({
+            deliveryChannel: write.deliveryChannel,
+            sender: write.sender,
+            recipient: { din: DIN },
+        });
+    });
+});
 
 describe("golden envelopes", () => {
     it.each<[string, (client: PowerwallClient) => Promise<unknown>]>([
