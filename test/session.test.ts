@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Domain } from "@teslemetry/tesla-protocol/command/universal_message";
 import { SessionInfo } from "@teslemetry/tesla-protocol/command/signatures";
+import { SessionInfoAuthenticationFault } from "../src/exceptions.js";
 import { Session } from "../src/signing/session.js";
 import { deriveSharedKey, publicKeyFor } from "../src/signing/crypto.js";
 
@@ -59,7 +60,7 @@ describe("Session", () => {
         return new Session(Domain.DOMAIN_VEHICLE_SECURITY, (vehiclePublicKey) => deriveSharedKey(OUR_PRIVATE_KEY, vehiclePublicKey));
     }
 
-    /** Mirrors what `Commands.validateAndUpdateSession` does once a SessionInfo's tag has verified. */
+    /** Mirrors what `Commands.validate_msg` does once a SessionInfo's tag has verified. */
     function applyInfo(session: Session, overrides: Partial<SessionInfo> = {}): boolean {
         const info = sessionInfo(overrides);
         const keys = session.keysFor(Buffer.from(info.publicKey));
@@ -126,16 +127,16 @@ describe("Session", () => {
         expect(Buffer.from(session.epoch!).equals(newEpoch)).toBe(true);
     });
 
-    it("re-derives keys for a rotated vehicle public key on the next commit", () => {
+    it("refuses a rotated vehicle public key on the next commit, keeping its keys", () => {
         const session = makeSession();
         applyInfo(session);
         const firstSharedKey = session.sharedKey;
 
         const otherVehiclePrivateKey = Buffer.from("10a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b73", "hex");
         const otherVehiclePublicKey = publicKeyFor(otherVehiclePrivateKey);
-        applyInfo(session, { publicKey: otherVehiclePublicKey });
+        expect(() => applyInfo(session, { publicKey: otherVehiclePublicKey })).toThrow(SessionInfoAuthenticationFault);
 
-        expect(session.sharedKey?.equals(firstSharedKey!)).toBe(false);
+        expect(session.sharedKey?.equals(firstSharedKey!)).toBe(true);
     });
 
     it("throws when signing before the handshake has completed", () => {
