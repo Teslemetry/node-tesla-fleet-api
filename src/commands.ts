@@ -61,6 +61,18 @@ import {
     HvacSetPreconditioningMaxAction,
     HvacSteeringWheelHeaterAction,
     HvacTemperatureAdjustmentAction,
+    CancelSohTestAction,
+    DashcamSaveClipAction,
+    GetMessagesAction,
+    GetNearbyChargingSites,
+    HvacRecirculationAction,
+    SetKeepAccessoryPowerModeAction,
+    SetLowPowerModeAction,
+    SetSuspensionLevelAction,
+    SetTentModeRequestAction,
+    StartLightShowAction,
+    StopLightShowAction,
+    VideoRequestAction,
     AutoSeatClimateAction,
     AutoSeatClimateAction_CarSeat,
     AutoSeatClimateAction_AutoSeatPositionE,
@@ -987,6 +999,11 @@ export default abstract class Commands extends VehicleSpecific {
         );
     }
 
+    /** Cancels a State of Health test. */
+    async cancel_soh_test(): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ cancelSohTestAction: CancelSohTestAction.create({}) }));
+    }
+
     /** Charges in max range mode -- we recommend limiting the use of this mode to long trips. */
     async charge_max_range(): Promise<CommandResponse> {
         return this.vehicleAction(
@@ -1042,6 +1059,11 @@ export default abstract class Commands extends VehicleSpecific {
         return this.moveTonneau(ClosureMoveTypeE.CLOSURE_MOVE_TYPE_CLOSE);
     }
 
+    /** Saves a dashcam clip. */
+    async dashcam_save_clip(): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ dashcamSaveClipAction: DashcamSaveClipAction.create({}) }));
+    }
+
     /** Locks the vehicle. */
     async door_lock(): Promise<CommandResponse> {
         return this.sendVehicleSecurity(UnsignedMessage.create({ RKEAction: RKEActionE.RKE_ACTION_LOCK }));
@@ -1060,6 +1082,11 @@ export default abstract class Commands extends VehicleSpecific {
     /** Briefly flashes the vehicle headlights. Requires the vehicle to be in park. */
     async flash_lights(): Promise<CommandResponse> {
         return this.vehicleAction(VehicleAction.create({ vehicleControlFlashLightsAction: VehicleControlFlashLightsAction.create({}) }));
+    }
+
+    /** Gets vehicle in-car messages. The reply carries the vehicle's response under `getMessagesResponse`, if it sends one. */
+    async get_messages(): Promise<SignedCommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ getMessagesAction: GetMessagesAction.create({}) }), { mutating: false });
     }
 
     /**
@@ -1181,6 +1208,20 @@ export default abstract class Commands extends VehicleSpecific {
     /** Opens the Cybertruck tonneau cover. */
     async open_tonneau(): Promise<CommandResponse> {
         return this.moveTonneau(ClosureMoveTypeE.CLOSURE_MOVE_TYPE_OPEN);
+    }
+
+    /**
+     * Returns the charging sites near the current location of the vehicle.
+     * The sites are under `response.getNearbyChargingSites`.
+     * @param count Number of sites to return
+     * @param radius Search radius
+     * @param detail Whether to include site metadata
+     */
+    override async nearby_charging_sites(count?: number, radius?: number, detail?: boolean): Promise<SignedCommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({ getNearbyChargingSites: GetNearbyChargingSites.create({ count, radius, includeMetaData: detail }) }),
+            { mutating: false },
+        );
     }
 
     /**
@@ -1393,6 +1434,24 @@ export default abstract class Commands extends VehicleSpecific {
     }
 
     /**
+     * Turns Keep Accessory Power mode on and off, keeping 12V accessory power available while the vehicle is parked.
+     * @param on `true` or `false`
+     */
+    async set_keep_accessory_power_mode(on: boolean): Promise<CommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({ setKeepAccessoryPowerModeAction: SetKeepAccessoryPowerModeAction.create({ keepAccessoryPowerMode: on }) }),
+        );
+    }
+
+    /**
+     * Turns Low Power mode on and off, reducing standby power consumption while the vehicle is parked.
+     * @param on `true` or `false`
+     */
+    async set_low_power_mode(on: boolean): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setLowPowerModeAction: SetLowPowerModeAction.create({ lowPowerMode: on }) }));
+    }
+
+    /**
      * Sets a four-digit passcode for PIN to Drive.
      * @param on `true` or `false`
      * @param password Four-digit passcode
@@ -1414,6 +1473,14 @@ export default abstract class Commands extends VehicleSpecific {
                 hvacSetPreconditioningMaxAction: HvacSetPreconditioningMaxAction.create({ on, manualOverride: manual_override }),
             }),
         );
+    }
+
+    /**
+     * Sets HVAC recirculation mode on and off.
+     * @param on `true` or `false`
+     */
+    async set_recirculation(on: boolean): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ hvacRecirculationAction: HvacRecirculationAction.create({ on }) }));
     }
 
     /**
@@ -1479,6 +1546,14 @@ export default abstract class Commands extends VehicleSpecific {
     }
 
     /**
+     * Sets the vehicle suspension level.
+     * @param level `1` entry, `2` low, `3` medium, `4` high, `5` very high, `6` extract
+     */
+    async set_suspension_level(level: number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setSuspensionLevelAction: SetSuspensionLevelAction.create({ suspensionLevel: level }) }));
+    }
+
+    /**
      * Sets the driver and/or passenger-side cabin temperature (and other zones if sync is enabled).
      * @param driver_temp Driver temperature
      * @param passenger_temp Passenger temperature
@@ -1492,6 +1567,14 @@ export default abstract class Commands extends VehicleSpecific {
                 }),
             }),
         );
+    }
+
+    /**
+     * Enables or disables tent mode.
+     * @param on `true` or `false`
+     */
+    async set_tent_mode(on: boolean): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setTentModeRequestAction: SetTentModeRequestAction.create({ on }) }));
     }
 
     /**
@@ -1558,6 +1641,26 @@ export default abstract class Commands extends VehicleSpecific {
         return this.vehicleAction(VehicleAction.create({ drivingSetSpeedLimitAction: DrivingSetSpeedLimitAction.create({ limitMph: limit_mph }) }));
     }
 
+    /**
+     * Starts a light show.
+     * @param show_index Index of the show
+     * @param start_time Start time
+     * @param volume Volume
+     * @param dance_moves Whether the vehicle moves during the show
+     */
+    async start_light_show(show_index: number = 0, start_time: number = 0, volume: number = 0, dance_moves: boolean = false): Promise<CommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({
+                startLightShowAction: StartLightShowAction.create({ showIndex: show_index, startTime: start_time, volume, danceMoves: dance_moves }),
+            }),
+        );
+    }
+
+    /** Stops the current light show. */
+    async stop_light_show(): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ stopLightShowAction: StopLightShowAction.create({}) }));
+    }
+
     /** Stops the Cybertruck tonneau cover. */
     async stop_tonneau(): Promise<CommandResponse> {
         return this.moveTonneau(ClosureMoveTypeE.CLOSURE_MOVE_TYPE_STOP);
@@ -1621,6 +1724,14 @@ export default abstract class Commands extends VehicleSpecific {
         return this.vehicleAction(
             VehicleAction.create({ uiSetUpcomingCalendarEntries: UiSetUpcomingCalendarEntries.create({ calendarData: calendar_data }) }),
         );
+    }
+
+    /**
+     * Asks the vehicle to open a video stream.
+     * @param url Video URL
+     */
+    async video_request(url: string): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ videoRequestAction: VideoRequestAction.create({ url }) }));
     }
 
     /**

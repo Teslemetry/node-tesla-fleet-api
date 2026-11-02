@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { ClosureMoveTypeE, RKEActionE, UnsignedMessage } from "@teslemetry/tesla-protocol/command/vcsec";
-import { VehicleAction } from "@teslemetry/tesla-protocol/command/car_server";
+import {
+    ActionStatus,
+    NearbyChargingSites,
+    OperationStatusE,
+    Response,
+    SetSuspensionLevelAction_SuspensionLevel,
+    VehicleAction,
+} from "@teslemetry/tesla-protocol/command/car_server";
 import { FakeVehicleCommands } from "./helpers/testcommands.js";
 
 type Call = (vehicle: FakeVehicleCommands) => Promise<unknown>;
@@ -23,6 +30,22 @@ const infotainment: [name: string, call: Call, expected: Parameters<typeof Vehic
     ["navigation_waypoints_request", (v) => v.navigation_waypoints_request("refId:a,refId:b"), { navigationWaypointsRequest: { waypoints: "refId:a,refId:b" } }],
     ["reset_pin_to_drive_admin", (v) => v.reset_pin_to_drive_admin(), { vehicleControlResetPinToDriveAdminAction: {} }],
     ["clear_pin_to_drive_admin", (v) => v.clear_pin_to_drive_admin("1234"), { vehicleControlResetPinToDriveAdminAction: {} }],
+
+    // ENG-36 / SGN-7
+    ["set_keep_accessory_power_mode", (v) => v.set_keep_accessory_power_mode(true), { setKeepAccessoryPowerModeAction: { keepAccessoryPowerMode: true } }],
+    ["set_low_power_mode", (v) => v.set_low_power_mode(true), { setLowPowerModeAction: { lowPowerMode: true } }],
+    ["set_recirculation", (v) => v.set_recirculation(true), { hvacRecirculationAction: { on: true } }],
+    ["set_suspension_level", (v) => v.set_suspension_level(6), { setSuspensionLevelAction: { suspensionLevel: SetSuspensionLevelAction_SuspensionLevel.SUSPENSION_LEVEL_EXTRACT } }],
+    ["set_tent_mode", (v) => v.set_tent_mode(true), { setTentModeRequestAction: { on: true } }],
+    ["start_light_show", (v) => v.start_light_show(3, 1234, 0.5, true), { startLightShowAction: { showIndex: 3, startTime: 1234, volume: 0.5, danceMoves: true } }],
+    ["start_light_show, defaults", (v) => v.start_light_show(), { startLightShowAction: {} }],
+    ["stop_light_show", (v) => v.stop_light_show(), { stopLightShowAction: {} }],
+    ["dashcam_save_clip", (v) => v.dashcam_save_clip(), { dashcamSaveClipAction: {} }],
+    ["cancel_soh_test", (v) => v.cancel_soh_test(), { cancelSohTestAction: {} }],
+    ["nearby_charging_sites", (v) => v.nearby_charging_sites(5, 100, true), { getNearbyChargingSites: { count: 5, radius: 100, includeMetaData: true } }],
+    ["nearby_charging_sites, no arguments", (v) => v.nearby_charging_sites(), { getNearbyChargingSites: {} }],
+    ["video_request", (v) => v.video_request("https://video.test/a"), { videoRequestAction: { url: "https://video.test/a" } }],
+    ["get_messages", (v) => v.get_messages(), { getMessagesAction: {} }],
 ];
 
 /** Commands the Vehicle Security computer takes, each with the whole `UnsignedMessage` it must decode to. */
@@ -53,6 +76,19 @@ describe("signed commands round-trip through FakeVehicle", () => {
 
         expect(vehicle.fakeVehicle.infotainmentActions).toEqual([]);
         expect(vehicle.fakeVehicle.vcsecCommands).toEqual([UnsignedMessage.create(expected)]);
+    });
+
+    it("nearby_charging_sites returns its payload", async () => {
+        const vehicle = new FakeVehicleCommands();
+        const getNearbyChargingSites = { congestionSyncTimeUtcSecs: 7, superchargers: [{ name: "Site", siteId: 1 }] };
+        vehicle.fakeVehicle.replyToNextInfotainmentCommandWith(
+            Response.create({ actionStatus: ActionStatus.create({ result: OperationStatusE.OPERATIONSTATUS_OK }), getNearbyChargingSites }),
+        );
+
+        const reply = await vehicle.nearby_charging_sites(1);
+
+        expect(reply.response.result).toBe(true);
+        expect(reply.response.getNearbyChargingSites).toEqual(NearbyChargingSites.create(getNearbyChargingSites));
     });
 
     it("rejects an unknown trunk before sending anything", async () => {
