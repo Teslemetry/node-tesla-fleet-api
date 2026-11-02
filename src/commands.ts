@@ -91,6 +91,8 @@ import {
     SetTemperatureUnitAction,
     SetTimeDisplayFormatAction,
     SetTirePressureUnitAction,
+    DeleteDashcamClipsAction,
+    FormatUSBAction,
     AddManagedChargingSiteRequest,
     BatchRemoveChargeSchedulesAction,
     BatchRemovePreconditionSchedulesAction,
@@ -2030,6 +2032,19 @@ export default abstract class Commands extends VehicleSpecific {
                 ? VehicleControlWindowAction.create({ vent: VOID })
                 : VehicleControlWindowAction.create({ close: VOID });
         return this.vehicleAction(VehicleAction.create({ vehicleControlWindowAction: action }));
+    }
+
+    // Destructive. No confirmation parameter, as with `erase_user_data`: the
+    // library exposes the signed command and leaves confirmation to the caller.
+
+    /** Formats the USB drive connected to the vehicle, erasing all files on it. Irreversible. */
+    async format_usb(): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ formatUsbAction: FormatUSBAction.create({ formatUsb: true }) }));
+    }
+
+    /** Deletes all dashcam clips stored on the vehicle. Irreversible. */
+    async delete_dashcam_clips(): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ deleteDashcamClipsAction: DeleteDashcamClipsAction.create({ deleteClips: true }) }));
     }
 
     // Parental controls and display units

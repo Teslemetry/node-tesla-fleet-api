@@ -234,6 +234,10 @@ const infotainment: [name: string, call: Call, expected: DeepPartial<VehicleActi
         (v) => v.set_phone_setting_preferences(undefined, { distance_unit: DistanceUnit.MILES }),
         { setPhoneSettingPreferencesAction: { unitPreferences: {} } },
     ],
+
+    // ENG-40 / SGN-11
+    ["format_usb", (v) => v.format_usb(), { formatUsbAction: { formatUsb: true } }],
+    ["delete_dashcam_clips", (v) => v.delete_dashcam_clips(), { deleteDashcamClipsAction: { deleteClips: true } }],
 ];
 
 /** Commands the Vehicle Security computer takes, each with the whole `UnsignedMessage` it must decode to. */
