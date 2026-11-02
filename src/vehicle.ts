@@ -12,33 +12,54 @@ const WAKE_TIMEOUT_MS = 60_000;
 const WAKE_POLL_MS = 5_000;
 
 export default class Vehicle {
+    /** Class `createFleet` instantiates; a subclass overrides it to supply its own vehicle type. */
+    static Fleet: new (parent: Vehicle, vin: string) => VehicleSpecific = VehicleSpecific;
+    /** Class `createSigned` instantiates; a subclass overrides it to supply its own signed vehicle type. */
+    static Signed: new (parent: Vehicle, vin: string, private_key?: Buffer, public_key?: Buffer) => VehicleSigned = VehicleSigned;
+
     parent: TeslaFleetApi;
-    /** Fallback private key for `signed()` when a call site doesn't pass one explicitly. */
+    /** Fallback private key for `createSigned()` when a call site doesn't pass one explicitly. */
     private_key?: Buffer;
+    /** Every vehicle created by this factory, keyed by VIN; the latest `create*` call for a VIN wins. */
+    byVin: Map<string, VehicleSpecific> = new Map();
 
     constructor(parent: TeslaFleetApi) {
         this.parent = parent;
     }
 
     /**
-     * Returns a class for a single vehicle.
+     * Creates a Fleet API vehicle that sends plaintext REST commands.
      * @param vin
      * @returns
      */
-    specific(vin: string): VehicleSpecific {
-        return new VehicleSpecific(this, vin);
+    createFleet(vin: string): VehicleSpecific {
+        const vehicle = new (this.constructor as typeof Vehicle).Fleet(this, vin);
+        this.byVin.set(vin, vehicle);
+        return vehicle;
     }
 
     /**
-     * Returns a class for a single vehicle that signs commands with the
-     * Tesla Vehicle Command Protocol and dispatches them through the Fleet
-     * API `/signed_command` endpoint, instead of the plaintext REST commands.
+     * Creates a Fleet API vehicle that signs commands with the Tesla Vehicle
+     * Command Protocol and dispatches them through the `/signed_command`
+     * endpoint, instead of the plaintext REST commands.
      * @param vin
      * @param private_key Raw 32-byte P-256 private key scalar. Falls back to `this.private_key`.
      * @param public_key Uncompressed P-256 public key point. Derived from `private_key` if omitted.
      */
-    signed(vin: string, private_key?: Buffer, public_key?: Buffer): VehicleSigned {
-        return new VehicleSigned(this, vin, private_key, public_key);
+    createSigned(vin: string, private_key?: Buffer, public_key?: Buffer): VehicleSigned {
+        const vehicle = new (this.constructor as typeof Vehicle).Signed(this, vin, private_key, public_key);
+        this.byVin.set(vin, vehicle);
+        return vehicle;
+    }
+
+    /** Legacy name for `createFleet`. */
+    specific(vin: string): VehicleSpecific {
+        return this.createFleet(vin);
+    }
+
+    /** Legacy name for `createSigned`. */
+    specificSigned(vin: string, private_key?: Buffer, public_key?: Buffer): VehicleSigned {
+        return this.createSigned(vin, private_key, public_key);
     }
 
     /**

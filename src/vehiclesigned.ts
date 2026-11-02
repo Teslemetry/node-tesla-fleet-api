@@ -10,6 +10,8 @@ import Commands from "./commands.js";
  * else in `Commands` needs to change for that to work.
  */
 export default class VehicleSigned extends Commands {
+    readonly _transport_name: string = "fleet";
+
     protected async _send(msg: RoutableMessage, _requires: string, _expectsData?: boolean, _confirmBroadcast?: (status: VehicleStatus) => boolean): Promise<RoutableMessage> {
         const encoded = Buffer.from(RoutableMessage.encode(msg).finish()).toString("base64");
         const json = await this.parent.signed_command(this.vin, encoded);
