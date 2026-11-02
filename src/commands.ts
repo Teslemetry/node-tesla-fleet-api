@@ -61,6 +61,24 @@ import {
     HvacSetPreconditioningMaxAction,
     HvacSteeringWheelHeaterAction,
     HvacTemperatureAdjustmentAction,
+    SetLightbarBrightnessAction,
+    SetLightbarDitchAction,
+    SetLightbarMiddleAction,
+    SetOutletSocLimitAction,
+    SetOutletTimerAction,
+    SetOutletsOnOffAction,
+    SetPowerFeedOnOffAction,
+    SetPowerFeedSocLimitAction,
+    SetPowerFeedTimerAction,
+    SetPowershareDischargeLimitAction,
+    SetPowershareFeatureAction,
+    SetPowershareFeatureAction_PowershareFeatureRequest,
+    SetPowershareRequestAction,
+    SetPowershareRequestAction_PowershareRequest,
+    SetTrailerLightTestStartStopAction,
+    SetTruckBedLightAutoStateAction,
+    SetTruckBedLightBrightnessAction,
+    SetZoneLightRequestAction,
     AddManagedChargingSiteRequest,
     BatchRemoveChargeSchedulesAction,
     BatchRemovePreconditionSchedulesAction,
@@ -1995,5 +2013,151 @@ export default abstract class Commands extends VehicleSpecific {
                 ? VehicleControlWindowAction.create({ vent: VOID })
                 : VehicleControlWindowAction.create({ close: VOID });
         return this.vehicleAction(VehicleAction.create({ vehicleControlWindowAction: action }));
+    }
+
+    // Cybertruck and power
+
+    /**
+     * Enables or disables the Powershare feature.
+     * @param on `true` or `false`
+     */
+    async set_powershare_feature(on: boolean): Promise<CommandResponse> {
+        const powershareFeatureRequest = on
+            ? SetPowershareFeatureAction_PowershareFeatureRequest.POWERSHARE_FEATURE_REQUEST_ON
+            : SetPowershareFeatureAction_PowershareFeatureRequest.POWERSHARE_FEATURE_REQUEST_OFF;
+        return this.vehicleAction(VehicleAction.create({ setPowershareFeatureAction: SetPowershareFeatureAction.create({ powershareFeatureRequest }) }));
+    }
+
+    /**
+     * Enables or disables powershare.
+     * @param on `true` or `false`
+     */
+    async set_powershare_request(on: boolean): Promise<CommandResponse> {
+        const powershareRequest = on
+            ? SetPowershareRequestAction_PowershareRequest.POWERSHARE_REQUEST_ON
+            : SetPowershareRequestAction_PowershareRequest.POWERSHARE_REQUEST_OFF;
+        return this.vehicleAction(VehicleAction.create({ setPowershareRequestAction: SetPowershareRequestAction.create({ powershareRequest }) }));
+    }
+
+    /**
+     * Sets the Powershare discharge limit. This is not `set_discharge_limit`, which is a separate message.
+     * @param percent Discharge limit percentage
+     */
+    async set_powershare_discharge_limit(percent: number): Promise<CommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({ setPowershareDischargeLimitAction: SetPowershareDischargeLimitAction.create({ powershareDischargeLimit: percent }) }),
+        );
+    }
+
+    /**
+     * Sets the outlets on or off.
+     * @param request `0` off, `1` cabin and bed, `2` cabin
+     */
+    async set_outlets(request: number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setOutletsOnOffAction: SetOutletsOnOffAction.create({ outletRequest: request }) }));
+    }
+
+    /**
+     * Sets the outlet timer.
+     * @param num_minutes Minutes
+     */
+    async set_outlet_timer(num_minutes: number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setOutletTimerAction: SetOutletTimerAction.create({ numMinutes: num_minutes }) }));
+    }
+
+    /**
+     * Sets the outlet state of charge limit.
+     * @param percent State of charge percentage
+     */
+    async set_outlet_soc_limit(percent: number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setOutletSocLimitAction: SetOutletSocLimitAction.create({ percent }) }));
+    }
+
+    /**
+     * Sets the power feed on or off.
+     * @param request `0` off, `1` feed 1, `2` feed 2, `3` both
+     */
+    async set_power_feed(request: number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setPowerFeedOnOffAction: SetPowerFeedOnOffAction.create({ powerFeedRequest: request }) }));
+    }
+
+    /**
+     * Sets the power feed timer.
+     * @param num_minutes Minutes
+     */
+    async set_power_feed_timer(num_minutes: number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setPowerFeedTimerAction: SetPowerFeedTimerAction.create({ numMinutes: num_minutes }) }));
+    }
+
+    /**
+     * Sets the power feed state of charge limit.
+     * @param percent State of charge percentage
+     */
+    async set_power_feed_soc_limit(percent: number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setPowerFeedSocLimitAction: SetPowerFeedSocLimitAction.create({ percent }) }));
+    }
+
+    /**
+     * Sets the lightbar brightness.
+     * @param brightness Brightness
+     */
+    async set_lightbar_brightness(brightness: number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setLightbarBrightnessAction: SetLightbarBrightnessAction.create({ brightnessRequest: brightness }) }));
+    }
+
+    /**
+     * Turns the lightbar middle light on or off.
+     * @param on `true` or `false`
+     */
+    async set_lightbar_middle(on: boolean): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setLightbarMiddleAction: SetLightbarMiddleAction.create({ middleLightRequest: on }) }));
+    }
+
+    /**
+     * Turns the ditch lights on or off.
+     * @param on `true` or `false`
+     */
+    async set_lightbar_ditch(on: boolean): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setLightbarDitchAction: SetLightbarDitchAction.create({ ditchLightsRequest: on }) }));
+    }
+
+    /**
+     * Sets the front zone light level.
+     * @param level `0` off, `1` low, `2` medium, `3` high
+     */
+    async set_front_zone_lights(level: number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setFrontZoneLightRequestAction: SetZoneLightRequestAction.create({ zoneLightRequest: level }) }));
+    }
+
+    /**
+     * Sets the rear zone light level.
+     * @param level `0` off, `1` low, `2` medium, `3` high
+     */
+    async set_rear_zone_lights(level: number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setRearZoneLightRequestAction: SetZoneLightRequestAction.create({ zoneLightRequest: level }) }));
+    }
+
+    /**
+     * Starts or stops the trailer light test.
+     * @param on `true` or `false`
+     */
+    async set_trailer_light_test(on: boolean): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setTrailerLightTestStartStopAction: SetTrailerLightTestStartStopAction.create({ startStop: on }) }));
+    }
+
+    /**
+     * Sets the truck bed light's auto state.
+     * @param on `true` or `false`
+     */
+    async set_truck_bed_light_auto(on: boolean): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setTruckBedLightAutoStateAction: SetTruckBedLightAutoStateAction.create({ powerState: on }) }));
+    }
+
+    /**
+     * Sets the truck bed light brightness.
+     * @param brightness Brightness
+     */
+    async set_truck_bed_light_brightness(brightness: number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setTruckBedLightBrightnessAction: SetTruckBedLightBrightnessAction.create({ brightness }) }));
     }
 }

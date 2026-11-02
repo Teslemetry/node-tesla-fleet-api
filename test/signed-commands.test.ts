@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { ClosureMoveTypeE, RKEActionE, UnsignedMessage } from "@teslemetry/tesla-protocol/command/vcsec";
 import {
+    SetOutletsOnOffAction_OutletRequest,
+    SetPowerFeedOnOffAction_PowerFeedRequest,
+    SetPowershareFeatureAction_PowershareFeatureRequest,
+    SetPowershareRequestAction_PowershareRequest,
+    SetZoneLightRequestAction_ZoneLightRequest,
     ActionStatus,
     ChargeOnSolarFeature,
     GetManagedChargingSitesResponse,
@@ -165,6 +170,27 @@ const infotainment: [name: string, call: Call, expected: DeepPartial<VehicleActi
             },
         },
     ],
+
+    // ENG-38 / SGN-9
+    ["set_powershare_feature, on", (v) => v.set_powershare_feature(true), { setPowershareFeatureAction: { powershareFeatureRequest: SetPowershareFeatureAction_PowershareFeatureRequest.POWERSHARE_FEATURE_REQUEST_ON } }],
+    ["set_powershare_feature, off", (v) => v.set_powershare_feature(false), { setPowershareFeatureAction: { powershareFeatureRequest: SetPowershareFeatureAction_PowershareFeatureRequest.POWERSHARE_FEATURE_REQUEST_OFF } }],
+    ["set_powershare_request, on", (v) => v.set_powershare_request(true), { setPowershareRequestAction: { powershareRequest: SetPowershareRequestAction_PowershareRequest.POWERSHARE_REQUEST_ON } }],
+    ["set_powershare_request, off", (v) => v.set_powershare_request(false), { setPowershareRequestAction: { powershareRequest: SetPowershareRequestAction_PowershareRequest.POWERSHARE_REQUEST_OFF } }],
+    ["set_powershare_discharge_limit", (v) => v.set_powershare_discharge_limit(20), { setPowershareDischargeLimitAction: { powershareDischargeLimit: 20 } }],
+    ["set_outlets", (v) => v.set_outlets(2), { setOutletsOnOffAction: { outletRequest: SetOutletsOnOffAction_OutletRequest.OUTLET_REQUEST_CABIN } }],
+    ["set_outlet_timer", (v) => v.set_outlet_timer(30), { setOutletTimerAction: { numMinutes: 30 } }],
+    ["set_outlet_soc_limit", (v) => v.set_outlet_soc_limit(25), { setOutletSocLimitAction: { percent: 25 } }],
+    ["set_power_feed", (v) => v.set_power_feed(3), { setPowerFeedOnOffAction: { powerFeedRequest: SetPowerFeedOnOffAction_PowerFeedRequest.POWER_FEED_REQUEST_FEED_1_AND_FEED_2 } }],
+    ["set_power_feed_timer", (v) => v.set_power_feed_timer(45), { setPowerFeedTimerAction: { numMinutes: 45 } }],
+    ["set_power_feed_soc_limit", (v) => v.set_power_feed_soc_limit(35), { setPowerFeedSocLimitAction: { percent: 35 } }],
+    ["set_lightbar_brightness", (v) => v.set_lightbar_brightness(70), { setLightbarBrightnessAction: { brightnessRequest: 70 } }],
+    ["set_lightbar_middle", (v) => v.set_lightbar_middle(true), { setLightbarMiddleAction: { middleLightRequest: true } }],
+    ["set_lightbar_ditch", (v) => v.set_lightbar_ditch(true), { setLightbarDitchAction: { ditchLightsRequest: true } }],
+    ["set_front_zone_lights", (v) => v.set_front_zone_lights(2), { setFrontZoneLightRequestAction: { zoneLightRequest: SetZoneLightRequestAction_ZoneLightRequest.ZONE_LIGHT_REQUEST_MED } }],
+    ["set_rear_zone_lights", (v) => v.set_rear_zone_lights(3), { setRearZoneLightRequestAction: { zoneLightRequest: SetZoneLightRequestAction_ZoneLightRequest.ZONE_LIGHT_REQUEST_HIGH } }],
+    ["set_trailer_light_test", (v) => v.set_trailer_light_test(true), { setTrailerLightTestStartStopAction: { startStop: true } }],
+    ["set_truck_bed_light_auto", (v) => v.set_truck_bed_light_auto(true), { setTruckBedLightAutoStateAction: { powerState: true } }],
+    ["set_truck_bed_light_brightness", (v) => v.set_truck_bed_light_brightness(40), { setTruckBedLightBrightnessAction: { brightness: 40 } }],
 ];
 
 /** Commands the Vehicle Security computer takes, each with the whole `UnsignedMessage` it must decode to. */
@@ -254,6 +280,17 @@ describe("signed commands round-trip through FakeVehicle", () => {
         await expect(vehicle.add_precondition_schedule("Someday", true, 1, 2, 3)).rejects.toThrow("Invalid day of week: Someday");
 
         expect(vehicle.fakeVehicle.infotainmentActions).toEqual([]);
+    });
+
+    it("set_discharge_limit and set_powershare_discharge_limit build different messages", async () => {
+        const vehicle = new FakeVehicleCommands();
+
+        await vehicle.set_discharge_limit(20);
+        await vehicle.set_powershare_discharge_limit(20);
+
+        const [general, powershare] = vehicle.fakeVehicle.infotainmentActions.map((action) => action.vehicleAction);
+        expect(general).toEqual(VehicleAction.create({ setDischargeLimitAction: { dischargeLimit: 20 } }));
+        expect(powershare).toEqual(VehicleAction.create({ setPowershareDischargeLimitAction: { powershareDischargeLimit: 20 } }));
     });
 
     it("rejects an unknown trunk before sending anything", async () => {
