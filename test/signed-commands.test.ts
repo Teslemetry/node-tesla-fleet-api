@@ -2,18 +2,28 @@ import { describe, expect, it } from "vitest";
 import { ClosureMoveTypeE, RKEActionE, UnsignedMessage } from "@teslemetry/tesla-protocol/command/vcsec";
 import {
     ActionStatus,
+    ChargeOnSolarFeature,
+    GetManagedChargingSitesResponse,
+    GetRateTariffResponse,
     NearbyChargingSites,
     OperationStatusE,
     Response,
+    SetRateTariffRequest_Seasons,
+    SetRateTariffRequest_Tariff,
     SetSuspensionLevelAction_SuspensionLevel,
     VehicleAction,
 } from "@teslemetry/tesla-protocol/command/car_server";
 import { FakeVehicleCommands } from "./helpers/testcommands.js";
 
+const SEASONS = SetRateTariffRequest_Seasons.create({ Winter: { fromDay: 1, fromMonth: 5, toDay: 31, toMonth: 8 } });
+const TARIFF = SetRateTariffRequest_Tariff.create({ code: "TOU-1", currency: "AUD" });
+
 type Call = (vehicle: FakeVehicleCommands) => Promise<unknown>;
 
+type DeepPartial<T> = T extends Date | Uint8Array ? T : T extends (infer U)[] ? DeepPartial<U>[] : T extends object ? { [K in keyof T]?: DeepPartial<T[K]> } : T;
+
 /** Commands the Infotainment computer takes, each with the whole `VehicleAction` it must decode to. */
-const infotainment: [name: string, call: Call, expected: Parameters<typeof VehicleAction.create>[0]][] = [
+const infotainment: [name: string, call: Call, expected: DeepPartial<VehicleAction>][] = [
     // ENG-35 / SGN-6
     ["media_volume_up", (v) => v.media_volume_up(), { mediaUpdateVolume: { volumeDelta: 1 } }],
     [
@@ -46,10 +56,119 @@ const infotainment: [name: string, call: Call, expected: Parameters<typeof Vehic
     ["nearby_charging_sites, no arguments", (v) => v.nearby_charging_sites(), { getNearbyChargingSites: {} }],
     ["video_request", (v) => v.video_request("https://video.test/a"), { videoRequestAction: { url: "https://video.test/a" } }],
     ["get_messages", (v) => v.get_messages(), { getMessagesAction: {} }],
+
+    // ENG-37 / SGN-8
+    [
+        "add_charge_schedule, a midnight start with no end",
+        (v) => v.add_charge_schedule("monday", true, 0, 0, 0),
+        { addChargeScheduleAction: { daysOfWeek: 2, enabled: true, startEnabled: true, startTime: 0, endEnabled: false } },
+    ],
+    [
+        "add_charge_schedule, every field",
+        (v) => v.add_charge_schedule("Mon,Wed", false, -33.5, 151.25, 60, 360, true, 7, "Work"),
+        {
+            addChargeScheduleAction: {
+                daysOfWeek: 10,
+                enabled: false,
+                latitude: -33.5,
+                longitude: 151.25,
+                startEnabled: true,
+                startTime: 60,
+                endEnabled: true,
+                endTime: 360,
+                oneTime: true,
+                id: 7,
+                name: "Work",
+            },
+        },
+    ],
+    ["remove_charge_schedule", (v) => v.remove_charge_schedule(7), { removeChargeScheduleAction: { id: 7 } }],
+    [
+        "add_precondition_schedule, day names",
+        (v) => v.add_precondition_schedule("Weekdays", true, 1.5, 2.5, 450),
+        { addPreconditionScheduleAction: { daysOfWeek: 62, enabled: true, latitude: 1.5, longitude: 2.5, preconditionTime: 450 } },
+    ],
+    [
+        "add_precondition_schedule, every field",
+        (v) => v.add_precondition_schedule(127, false, 1.5, 2.5, 450, 3, true, "Morning"),
+        {
+            addPreconditionScheduleAction: {
+                daysOfWeek: 127,
+                enabled: false,
+                latitude: 1.5,
+                longitude: 2.5,
+                preconditionTime: 450,
+                id: 3,
+                oneTime: true,
+                name: "Morning",
+            },
+        },
+    ],
+    ["remove_precondition_schedule", (v) => v.remove_precondition_schedule(3), { removePreconditionScheduleAction: { id: 3 } }],
+    ["batch_remove_charge_schedules", (v) => v.batch_remove_charge_schedules(true, false, true), { batchRemoveChargeSchedulesAction: { home: true, work: false, other: true } }],
+    [
+        "batch_remove_precondition_schedules",
+        (v) => v.batch_remove_precondition_schedules(false, true, false),
+        { batchRemovePreconditionSchedulesAction: { home: false, work: true, other: false } },
+    ],
+    [
+        "update_charge_on_solar",
+        (v) => v.update_charge_on_solar(true, 50.5, 80.5),
+        { updateChargeOnSolarFeatureRequest: { chargeOnSolar: { enabled: true, lowerChargeLimit: 50.5, upperChargeLimit: 80.5 } } },
+    ],
+    ["get_charge_on_solar", (v) => v.get_charge_on_solar(), { getChargeOnSolarFeatureRequest: {} }],
+    ["set_rate_tariff", (v) => v.set_rate_tariff(SEASONS, TARIFF), { setRateTariffRequest: { seasons: SEASONS, tariff: TARIFF } }],
+    ["set_rate_tariff, no tariff", (v) => v.set_rate_tariff(SEASONS), { setRateTariffRequest: { seasons: SEASONS } }],
+    ["get_rate_tariff", (v) => v.get_rate_tariff(), { getRateTariffRequest: {} }],
+    [
+        "add_managed_charging_site",
+        (v) => v.add_managed_charging_site("point", "1234-DIN", 1.5, 2.5),
+        {
+            addManagedChargingSiteRequest: {
+                site: { publicKey: "point", managerType: { siteController: { din: "1234-DIN" } }, latLon: { latitude: 1.5, longitude: 2.5 } },
+            },
+        },
+    ],
+    ["remove_managed_charging_site", (v) => v.remove_managed_charging_site("point"), { removeManagedChargingSiteRequest: { publicKey: "point" } }],
+    ["get_managed_charging_sites", (v) => v.get_managed_charging_sites(), { getManagedChargingSitesRequest: {} }],
+    ["set_discharge_limit", (v) => v.set_discharge_limit(20), { setDischargeLimitAction: { dischargeLimit: 20 } }],
+
+    // Doc 01 section 12: a present recurrence block switches its feature on.
+    [
+        "set_scheduled_departure, leaving preconditioning and off-peak charging off",
+        (v) => v.set_scheduled_departure(true, false, false, 480, false, false, 360),
+        { scheduledDepartureAction: { enabled: true, departureTime: 480, offPeakHoursEndTime: 360 } },
+    ],
+    [
+        "set_scheduled_departure, all week",
+        (v) => v.set_scheduled_departure(true, true, false, 480, true, false, 360),
+        {
+            scheduledDepartureAction: {
+                enabled: true,
+                departureTime: 480,
+                preconditioningTimes: { allWeek: {} },
+                offPeakChargingTimes: { allWeek: {} },
+                offPeakHoursEndTime: 360,
+            },
+        },
+    ],
+    [
+        "set_scheduled_departure, weekdays only",
+        (v) => v.set_scheduled_departure(true, false, true, 480, false, true, 360),
+        {
+            scheduledDepartureAction: {
+                enabled: true,
+                departureTime: 480,
+                preconditioningTimes: { weekdays: {} },
+                offPeakChargingTimes: { weekdays: {} },
+                offPeakHoursEndTime: 360,
+            },
+        },
+    ],
 ];
 
 /** Commands the Vehicle Security computer takes, each with the whole `UnsignedMessage` it must decode to. */
-const vehicleSecurity: [name: string, call: Call, expected: Parameters<typeof UnsignedMessage.create>[0]][] = [
+const vehicleSecurity: [name: string, call: Call, expected: DeepPartial<UnsignedMessage>][] = [
     // ENG-35 / SGN-6
     ["actuate_trunk, front", (v) => v.actuate_trunk("front"), { closureMoveRequest: { frontTrunk: ClosureMoveTypeE.CLOSURE_MOVE_TYPE_MOVE } }],
     ["actuate_trunk, rear", (v) => v.actuate_trunk("rear"), { closureMoveRequest: { rearTrunk: ClosureMoveTypeE.CLOSURE_MOVE_TYPE_MOVE } }],
@@ -66,7 +185,7 @@ describe("signed commands round-trip through FakeVehicle", () => {
         await expect(call(vehicle)).resolves.toMatchObject({ response: { result: true, reason: "" } });
 
         expect(vehicle.fakeVehicle.vcsecCommands).toEqual([]);
-        expect(vehicle.fakeVehicle.infotainmentActions.map((action) => action.vehicleAction)).toEqual([VehicleAction.create(expected)]);
+        expect(vehicle.fakeVehicle.infotainmentActions.map((action) => action.vehicleAction)).toEqual([VehicleAction.create(expected as never)]);
     });
 
     it.each(vehicleSecurity)("%s", async (_name, call, expected) => {
@@ -75,12 +194,12 @@ describe("signed commands round-trip through FakeVehicle", () => {
         await expect(call(vehicle)).resolves.toMatchObject({ response: { result: true, reason: "" } });
 
         expect(vehicle.fakeVehicle.infotainmentActions).toEqual([]);
-        expect(vehicle.fakeVehicle.vcsecCommands).toEqual([UnsignedMessage.create(expected)]);
+        expect(vehicle.fakeVehicle.vcsecCommands).toEqual([UnsignedMessage.create(expected as never)]);
     });
 
     it("nearby_charging_sites returns its payload", async () => {
         const vehicle = new FakeVehicleCommands();
-        const getNearbyChargingSites = { congestionSyncTimeUtcSecs: 7, superchargers: [{ name: "Site", siteId: 1 }] };
+        const getNearbyChargingSites = { congestionSyncTimeUtcSecs: 7, superchargers: [{ name: "Site", id: 1 }] };
         vehicle.fakeVehicle.replyToNextInfotainmentCommandWith(
             Response.create({ actionStatus: ActionStatus.create({ result: OperationStatusE.OPERATIONSTATUS_OK }), getNearbyChargingSites }),
         );
@@ -89,6 +208,52 @@ describe("signed commands round-trip through FakeVehicle", () => {
 
         expect(reply.response.result).toBe(true);
         expect(reply.response.getNearbyChargingSites).toEqual(NearbyChargingSites.create(getNearbyChargingSites));
+    });
+
+    it("get_charge_on_solar returns its payload", async () => {
+        const vehicle = new FakeVehicleCommands();
+        const chargeOnSolar = ChargeOnSolarFeature.create({ enabled: true, lowerChargeLimit: 50, upperChargeLimit: 80 });
+        vehicle.fakeVehicle.replyToNextInfotainmentCommandWith(Response.create({ getChargeOnSolarFeatureResponse: { chargeOnSolar } }));
+
+        const reply = await vehicle.get_charge_on_solar();
+
+        expect(reply.response.getChargeOnSolarFeatureResponse?.chargeOnSolar).toEqual(chargeOnSolar);
+    });
+
+    it("get_rate_tariff returns its payload", async () => {
+        const vehicle = new FakeVehicleCommands();
+        const getRateTariffResponse = GetRateTariffResponse.create({ seasons: SEASONS });
+        vehicle.fakeVehicle.replyToNextInfotainmentCommandWith(Response.create({ getRateTariffResponse }));
+
+        const reply = await vehicle.get_rate_tariff();
+
+        expect(reply.response.getRateTariffResponse).toEqual(getRateTariffResponse);
+    });
+
+    it("get_managed_charging_sites tells an empty list from no reply payload", async () => {
+        const vehicle = new FakeVehicleCommands();
+        vehicle.fakeVehicle.replyToNextInfotainmentCommandWith(Response.create({ getManagedChargingSitesResponse: {} }));
+
+        const empty = await vehicle.get_managed_charging_sites();
+
+        expect(empty.response.getManagedChargingSitesResponse).toEqual(GetManagedChargingSitesResponse.create({}));
+        expect((await vehicle.get_managed_charging_sites()).response.getManagedChargingSitesResponse).toBeUndefined();
+    });
+
+    it("add_charge_schedule needs a start or an end time before sending anything", async () => {
+        const vehicle = new FakeVehicleCommands();
+
+        await expect(vehicle.add_charge_schedule("All", true, 1, 2)).rejects.toThrow("Either start_time or end_time or both must be provided");
+
+        expect(vehicle.fakeVehicle.infotainmentActions).toEqual([]);
+    });
+
+    it("a schedule's unknown day name fails before sending anything", async () => {
+        const vehicle = new FakeVehicleCommands();
+
+        await expect(vehicle.add_precondition_schedule("Someday", true, 1, 2, 3)).rejects.toThrow("Invalid day of week: Someday");
+
+        expect(vehicle.fakeVehicle.infotainmentActions).toEqual([]);
     });
 
     it("rejects an unknown trunk before sending anything", async () => {

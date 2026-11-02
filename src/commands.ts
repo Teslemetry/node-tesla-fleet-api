@@ -61,7 +61,25 @@ import {
     HvacSetPreconditioningMaxAction,
     HvacSteeringWheelHeaterAction,
     HvacTemperatureAdjustmentAction,
+    AddManagedChargingSiteRequest,
+    BatchRemoveChargeSchedulesAction,
+    BatchRemovePreconditionSchedulesAction,
     CancelSohTestAction,
+    ChargeOnSolarFeature,
+    GetChargeOnSolarFeatureRequest,
+    GetManagedChargingSitesRequest,
+    GetRateTariffRequest,
+    ManagedChargingSite,
+    ManagerType,
+    RemoveChargeScheduleAction,
+    RemoveManagedChargingSiteRequest,
+    RemovePreconditionScheduleAction,
+    SetDischargeLimitAction,
+    SetRateTariffRequest,
+    SetRateTariffRequest_Seasons,
+    SetRateTariffRequest_Tariff,
+    SiteController,
+    UpdateChargeOnSolarFeatureRequest,
     DashcamSaveClipAction,
     GetMessagesAction,
     GetNearbyChargingSites,
@@ -100,7 +118,15 @@ import {
     TakeDrivenoteAction,
     UiSetUpcomingCalendarEntries,
 } from "@teslemetry/tesla-protocol/command/car_server";
-import { Void, LatLong, PreconditioningTimes, OffPeakChargingTimes, StwHeatLevel } from "@teslemetry/tesla-protocol/command/common";
+import {
+    ChargeSchedule,
+    LatLong,
+    OffPeakChargingTimes,
+    PreconditionSchedule,
+    PreconditioningTimes,
+    StwHeatLevel,
+    Void,
+} from "@teslemetry/tesla-protocol/command/common";
 import { VehicleData, VehicleState_GuestMode, ClimateState_CopActivationTemp } from "@teslemetry/tesla-protocol/command/vehicle";
 import { ClimateMode, ClimateModes, CommandResponse, Level, Seat, Seats, Trunk } from "./types/commands.js";
 import { AutoSeat } from "./const.js";
@@ -952,6 +978,109 @@ export default abstract class Commands extends VehicleSpecific {
     }
 
     /**
+     * Add or modify a charging schedule. At least one of `start_time` or `end_time` is required.
+     * @param days_of_week Comma-joined day names (e.g. `"Mon,Wed"`, `"All"`, `"Weekdays"`) or a day bitmask
+     * @param enabled `true` or `false`
+     * @param lat Latitude of the schedule's location
+     * @param lon Longitude of the schedule's location
+     * @param start_time Minutes after midnight to start charging
+     * @param end_time Minutes after midnight to stop charging
+     * @param one_time Run the schedule only once
+     * @param id Schedule ID to modify an existing schedule
+     * @param name Schedule name
+     */
+    override async add_charge_schedule(
+        days_of_week: string | number,
+        enabled: boolean,
+        lat: number,
+        lon: number,
+        start_time?: number,
+        end_time?: number,
+        one_time?: boolean,
+        id?: number,
+        name?: string,
+    ): Promise<CommandResponse> {
+        if (start_time == null && end_time == null) {
+            throw new Error("Either start_time or end_time or both must be provided");
+        }
+        return this.vehicleAction(
+            VehicleAction.create({
+                addChargeScheduleAction: ChargeSchedule.create({
+                    daysOfWeek: days_of_week_mask(days_of_week),
+                    enabled,
+                    startEnabled: start_time != null,
+                    endEnabled: end_time != null,
+                    latitude: lat,
+                    longitude: lon,
+                    startTime: start_time,
+                    endTime: end_time,
+                    oneTime: one_time,
+                    id,
+                    name,
+                }),
+            }),
+        );
+    }
+
+    /**
+     * Registers a managed charging site, for a utility managed-charging program, on this vehicle.
+     * @param public_key The raw EC point string the vehicle expects, not the DER a gateway's `get_signed_commands_public_key` returns
+     * @param din The gateway's DIN, which the vehicle matches to the site controller
+     * @param lat Latitude
+     * @param lon Longitude
+     */
+    async add_managed_charging_site(public_key: string, din: string, lat: number, lon: number): Promise<SignedCommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({
+                addManagedChargingSiteRequest: AddManagedChargingSiteRequest.create({
+                    site: ManagedChargingSite.create({
+                        publicKey: public_key,
+                        managerType: ManagerType.create({ siteController: SiteController.create({ din }) }),
+                        latLon: LatLong.create({ latitude: lat, longitude: lon }),
+                    }),
+                }),
+            }),
+        );
+    }
+
+    /**
+     * Add or modify a preconditioning schedule.
+     * @param days_of_week Comma-joined day names (e.g. `"Mon,Wed"`, `"All"`, `"Weekdays"`) or a day bitmask
+     * @param enabled `true` or `false`
+     * @param lat Latitude of the schedule's location
+     * @param lon Longitude of the schedule's location
+     * @param precondition_time Minutes after midnight to be preconditioned by
+     * @param id Schedule ID to modify an existing schedule
+     * @param one_time Run the schedule only once
+     * @param name Schedule name
+     */
+    override async add_precondition_schedule(
+        days_of_week: string | number,
+        enabled: boolean,
+        lat: number,
+        lon: number,
+        precondition_time: number,
+        id?: number,
+        one_time?: boolean,
+        name?: string,
+    ): Promise<CommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({
+                addPreconditionScheduleAction: PreconditionSchedule.create({
+                    daysOfWeek: days_of_week_mask(days_of_week),
+                    enabled,
+                    preconditionTime: precondition_time,
+                    latitude: lat,
+                    longitude: lon,
+                    oneTime: one_time,
+                    id,
+                    name,
+                }),
+            }),
+        );
+    }
+
+    /**
      * Controls the front (which_trunk: "front") or rear (which_trunk: "rear") trunk.
      * @param which_trunk "front" or "rear"
      */
@@ -990,6 +1119,32 @@ export default abstract class Commands extends VehicleSpecific {
     /** Auto secures the vehicle: locks it and closes what it can. */
     async auto_secure_vehicle(): Promise<CommandResponse> {
         return this.sendVehicleSecurity(UnsignedMessage.create({ RKEAction: RKEActionE.RKE_ACTION_AUTO_SECURE_VEHICLE }));
+    }
+
+    /**
+     * Removes charging schedules by location type.
+     * @param home Remove schedules at home
+     * @param work Remove schedules at work
+     * @param other Remove schedules at other locations
+     */
+    override async batch_remove_charge_schedules(home: boolean, work: boolean, other: boolean): Promise<CommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({ batchRemoveChargeSchedulesAction: BatchRemoveChargeSchedulesAction.create({ home, work, other }) }),
+        );
+    }
+
+    /**
+     * Removes preconditioning schedules by location type.
+     * @param home Remove schedules at home
+     * @param work Remove schedules at work
+     * @param other Remove schedules at other locations
+     */
+    override async batch_remove_precondition_schedules(home: boolean, work: boolean, other: boolean): Promise<CommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({
+                batchRemovePreconditionSchedulesAction: BatchRemovePreconditionSchedulesAction.create({ home, work, other }),
+            }),
+        );
     }
 
     /** Cancels the countdown to install the vehicle software update. */
@@ -1084,9 +1239,30 @@ export default abstract class Commands extends VehicleSpecific {
         return this.vehicleAction(VehicleAction.create({ vehicleControlFlashLightsAction: VehicleControlFlashLightsAction.create({}) }));
     }
 
+    /** Gets the charge on solar settings, under `response.getChargeOnSolarFeatureResponse`. */
+    async get_charge_on_solar(): Promise<SignedCommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({ getChargeOnSolarFeatureRequest: GetChargeOnSolarFeatureRequest.create({}) }),
+            { mutating: false },
+        );
+    }
+
+    /** Gets the registered managed charging sites, under `response.getManagedChargingSitesResponse`. */
+    async get_managed_charging_sites(): Promise<SignedCommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({ getManagedChargingSitesRequest: GetManagedChargingSitesRequest.create({}) }),
+            { mutating: false },
+        );
+    }
+
     /** Gets vehicle in-car messages. The reply carries the vehicle's response under `getMessagesResponse`, if it sends one. */
     async get_messages(): Promise<SignedCommandResponse> {
         return this.vehicleAction(VehicleAction.create({ getMessagesAction: GetMessagesAction.create({}) }), { mutating: false });
+    }
+
+    /** Gets the current time-of-use rate tariff schedule, under `response.getRateTariffResponse`. */
+    async get_rate_tariff(): Promise<SignedCommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ getRateTariffRequest: GetRateTariffRequest.create({}) }), { mutating: false });
     }
 
     /**
@@ -1249,6 +1425,32 @@ export default abstract class Commands extends VehicleSpecific {
      */
     async remote_auto_steering_wheel_heat_climate_request(on: boolean): Promise<CommandResponse> {
         return this.vehicleAction(VehicleAction.create({ autoStwHeatAction: AutoStwHeatAction.create({ on }) }));
+    }
+
+    /**
+     * Removes a charging schedule.
+     * @param id Schedule ID
+     */
+    override async remove_charge_schedule(id: number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ removeChargeScheduleAction: RemoveChargeScheduleAction.create({ id }) }));
+    }
+
+    /**
+     * Removes a registered managed charging site.
+     * @param public_key The public key it was registered with
+     */
+    async remove_managed_charging_site(public_key: string): Promise<SignedCommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({ removeManagedChargingSiteRequest: RemoveManagedChargingSiteRequest.create({ publicKey: public_key }) }),
+        );
+    }
+
+    /**
+     * Removes a preconditioning schedule.
+     * @param id Schedule ID
+     */
+    override async remove_precondition_schedule(id: number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ removePreconditionScheduleAction: RemovePreconditionScheduleAction.create({ id }) }));
     }
 
     /**
@@ -1434,6 +1636,14 @@ export default abstract class Commands extends VehicleSpecific {
     }
 
     /**
+     * Sets the vehicle's general discharge limit. This is not `set_powershare_discharge_limit`, which is a separate message.
+     * @param discharge_limit Discharge limit
+     */
+    async set_discharge_limit(discharge_limit: number): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setDischargeLimitAction: SetDischargeLimitAction.create({ dischargeLimit: discharge_limit }) }));
+    }
+
+    /**
      * Turns Keep Accessory Power mode on and off, keeping 12V accessory power available while the vehicle is parked.
      * @param on `true` or `false`
      */
@@ -1476,6 +1686,17 @@ export default abstract class Commands extends VehicleSpecific {
     }
 
     /**
+     * Sets a time-of-use rate tariff schedule. The schedule nests up to five
+     * named seasons of four period types each, so build `seasons` and `tariff`
+     * with the `tesla-protocol` message types.
+     * @param seasons The tariff's seasons
+     * @param tariff The tariff
+     */
+    async set_rate_tariff(seasons: SetRateTariffRequest_Seasons, tariff?: SetRateTariffRequest_Tariff): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ setRateTariffRequest: SetRateTariffRequest.create({ seasons, tariff }) }));
+    }
+
+    /**
      * Sets HVAC recirculation mode on and off.
      * @param on `true` or `false`
      */
@@ -1497,32 +1718,40 @@ export default abstract class Commands extends VehicleSpecific {
     /**
      * Sets a time at which departure should be completed.
      *
-     * `preconditioning_enabled` and `off_peak_charging_enabled` are accepted
-     * for cross-transport signature parity but have no field in the signed
-     * command protobuf, so they are not sent.
+     * The protocol has no enable flags: a present recurrence block switches its
+     * feature on. So preconditioning and off-peak charging are sent only when
+     * their `*_enabled` or `*_weekdays_only` argument is true, and an absent
+     * block is what turns the feature off.
      * @param enable `true` or `false`
-     * @param preconditioning_enabled not representable in a signed command
+     * @param preconditioning_enabled `true` or `false`
      * @param preconditioning_weekdays_only `true` or `false`
      * @param departure_time Minutes after midnight
-     * @param off_peak_charging_enabled not representable in a signed command
+     * @param off_peak_charging_enabled `true` or `false`
      * @param off_peak_charging_weekdays_only `true` or `false`
      * @param end_off_peak_time Minutes after midnight
      */
     async set_scheduled_departure(
         enable: boolean = true,
-        _preconditioning_enabled: boolean = false,
+        preconditioning_enabled: boolean = false,
         preconditioning_weekdays_only: boolean = false,
         departure_time: number = 0,
-        _off_peak_charging_enabled: boolean = false,
+        off_peak_charging_enabled: boolean = false,
         off_peak_charging_weekdays_only: boolean = false,
         end_off_peak_time: number = 0,
     ): Promise<CommandResponse> {
-        const preconditioningTimes = preconditioning_weekdays_only
-            ? PreconditioningTimes.create({ weekdays: VOID })
-            : PreconditioningTimes.create({ allWeek: VOID });
-        const offPeakChargingTimes = off_peak_charging_weekdays_only
-            ? OffPeakChargingTimes.create({ weekdays: VOID })
-            : OffPeakChargingTimes.create({ allWeek: VOID });
+        let preconditioningTimes: PreconditioningTimes | undefined;
+        if (preconditioning_weekdays_only) {
+            preconditioningTimes = PreconditioningTimes.create({ weekdays: VOID });
+        } else if (preconditioning_enabled) {
+            preconditioningTimes = PreconditioningTimes.create({ allWeek: VOID });
+        }
+
+        let offPeakChargingTimes: OffPeakChargingTimes | undefined;
+        if (off_peak_charging_weekdays_only) {
+            offPeakChargingTimes = OffPeakChargingTimes.create({ weekdays: VOID });
+        } else if (off_peak_charging_enabled) {
+            offPeakChargingTimes = OffPeakChargingTimes.create({ allWeek: VOID });
+        }
 
         return this.vehicleAction(
             VehicleAction.create({
@@ -1708,6 +1937,26 @@ export default abstract class Commands extends VehicleSpecific {
                 vehicleControlTriggerHomelinkAction: VehicleControlTriggerHomelinkAction.create({
                     location: LatLong.create({ latitude: lat, longitude: lon }),
                     token,
+                }),
+            }),
+        );
+    }
+
+    /**
+     * Updates the charge on solar settings.
+     * @param enabled `true` or `false`
+     * @param lower_charge_limit Lower charge limit
+     * @param upper_charge_limit Upper charge limit
+     */
+    async update_charge_on_solar(enabled: boolean, lower_charge_limit: number, upper_charge_limit: number): Promise<CommandResponse> {
+        return this.vehicleAction(
+            VehicleAction.create({
+                updateChargeOnSolarFeatureRequest: UpdateChargeOnSolarFeatureRequest.create({
+                    chargeOnSolar: ChargeOnSolarFeature.create({
+                        enabled,
+                        lowerChargeLimit: lower_charge_limit,
+                        upperChargeLimit: upper_charge_limit,
+                    }),
                 }),
             }),
         );

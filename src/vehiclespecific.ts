@@ -515,6 +515,7 @@ export default class VehicleSpecific {
    * @param end_time Minutes after midnight to stop charging
    * @param one_time Run the schedule only once
    * @param id Schedule ID to modify an existing schedule
+   * @param _name Only the signed path carries a schedule name; REST accepts it for parity and does not send it
    */
   async add_charge_schedule(
     days_of_week: string | number,
@@ -525,6 +526,7 @@ export default class VehicleSpecific {
     end_time?: number,
     one_time?: boolean,
     id?: number,
+    _name?: string,
   ): Promise<CommandResponse> {
     if (start_time == null && end_time == null) {
       throw new Error("Either start_time or end_time or both must be provided");
@@ -557,6 +559,7 @@ export default class VehicleSpecific {
    * @param precondition_time Minutes after midnight to be preconditioned by
    * @param id Schedule ID to modify an existing schedule
    * @param one_time Run the schedule only once
+   * @param _name Only the signed path carries a schedule name; REST accepts it for parity and does not send it
    */
   async add_precondition_schedule(
     days_of_week: string | number,
@@ -566,6 +569,7 @@ export default class VehicleSpecific {
     precondition_time: number,
     id?: number,
     one_time?: boolean,
+    _name?: string,
   ): Promise<CommandResponse> {
     return this.parent.parent._request(
       "POST",
