@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getTariffPeriods } from "../src/tariff.js";
+import { InvalidResponse } from "../src/exceptions.js";
+import { getTariffPeriods, unwrapTariffV2 } from "../src/tariff.js";
 import { TariffContentV2 } from "../src/types/site_info.js";
 import { SAMPLE_TARIFF } from "./fixtures/sample-tariff.js";
 
@@ -8,6 +9,34 @@ const TZ = "Australia/Brisbane";
 function brisbane(year: number, month: number, day: number, hour: number, minute = 0): Date {
     return new Date(Date.UTC(year, month - 1, day, hour - 10, minute));
 }
+
+describe("unwrapTariffV2", () => {
+    it("unwraps the site_info envelope", () => {
+        expect(unwrapTariffV2({ response: { tariff_content_v2: SAMPLE_TARIFF } }).code).toBe("POWER_SYNC:FLOW_POWER");
+    });
+
+    it("unwraps the time_of_use_settings envelope", () => {
+        expect(unwrapTariffV2({ tou_settings: { tariff_content_v2: SAMPLE_TARIFF } })).toBe(SAMPLE_TARIFF);
+    });
+
+    it("accepts the bare tariff object", () => {
+        expect(unwrapTariffV2(SAMPLE_TARIFF)).toBe(SAMPLE_TARIFF);
+    });
+
+    it.each([
+        ["a null body", null],
+        ["an undefined body", undefined],
+        ["a non-object body", "nope"],
+        ["a malformed envelope", { response: { nope: true } }],
+        ["an empty bare object", {}],
+        ["an unrelated bare object", { unexpected: true }],
+        ["an empty tariff under the response envelope", { response: { tariff_content_v2: {} } }],
+        ["an empty tariff under the tou_settings envelope", { tou_settings: { tariff_content_v2: {} } }],
+        ["an empty tariff under a top-level key", { tariff_content_v2: {} }],
+    ])("throws InvalidResponse for %s", (_, body) => {
+        expect(() => unwrapTariffV2(body)).toThrow(InvalidResponse);
+    });
+});
 
 describe("getTariffPeriods: live sample fixture", () => {
     it("resolves the current buy/sell rate at a normal half-hour boundary", () => {

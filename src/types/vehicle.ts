@@ -18,6 +18,13 @@ export type VehicleResponse = {
     ble_autopair_enrolled: boolean;
 };
 
+export type WakeUpOptions = {
+    /** Poll `vehicle()` until the vehicle reports `online`, raising `VehicleOffline` at the deadline. */
+    wait?: boolean;
+    /** Deadline for `wait`, in milliseconds. */
+    timeoutMs?: number;
+};
+
 export type GranularAccess = {
     hide_private: boolean;
 };

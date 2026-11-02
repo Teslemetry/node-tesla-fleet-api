@@ -1,40 +1,65 @@
 import TeslaFleetApi from "./teslafleetapi.js";
 import { ClimateMode, ClimateModes, CommandResponse, FleetTelemetryConfig, Level, Seat, Seats, Trunk, VehicleDataEndpoint } from "./types/commands.js";
-import { OptionsResponse } from "./types/responses.js";
-import { Models, VehicleResponse } from "./types/vehicle.js";
+import { OptionsResponse, ResponseEnvelope } from "./types/responses.js";
+import { Models, VehicleResponse, WakeUpOptions } from "./types/vehicle.js";
 import { AutoSeat } from "./const.js";
+import { VehicleOffline } from "./exceptions.js";
 import { VehicleDataResponse } from "./types/vehicle_data.js";
 import VehicleSpecific from "./vehiclespecific.js";
 import VehicleSigned from "./vehiclesigned.js";
 
+const WAKE_TIMEOUT_MS = 60_000;
+const WAKE_POLL_MS = 5_000;
+
 export default class Vehicle {
+    /** Class `createFleet` instantiates; a subclass overrides it to supply its own vehicle type. */
+    static Fleet: new (parent: Vehicle, vin: string) => VehicleSpecific = VehicleSpecific;
+    /** Class `createSigned` instantiates; a subclass overrides it to supply its own signed vehicle type. */
+    static Signed: new (parent: Vehicle, vin: string, private_key?: Buffer, public_key?: Buffer) => VehicleSigned = VehicleSigned;
+
     parent: TeslaFleetApi;
-    /** Fallback private key for `signed()` when a call site doesn't pass one explicitly. */
+    /** Fallback private key for `createSigned()` when a call site doesn't pass one explicitly. */
     private_key?: Buffer;
+    /** Every vehicle created by this factory, keyed by VIN; the latest `create*` call for a VIN wins. */
+    byVin: Map<string, VehicleSpecific> = new Map();
 
     constructor(parent: TeslaFleetApi) {
         this.parent = parent;
     }
 
     /**
-     * Returns a class for a single vehicle.
+     * Creates a Fleet API vehicle that sends plaintext REST commands.
      * @param vin
      * @returns
      */
-    specific(vin: string): VehicleSpecific {
-        return new VehicleSpecific(this, vin);
+    createFleet(vin: string): VehicleSpecific {
+        const vehicle = new (this.constructor as typeof Vehicle).Fleet(this, vin);
+        this.byVin.set(vin, vehicle);
+        return vehicle;
     }
 
     /**
-     * Returns a class for a single vehicle that signs commands with the
-     * Tesla Vehicle Command Protocol and dispatches them through the Fleet
-     * API `/signed_command` endpoint, instead of the plaintext REST commands.
+     * Creates a Fleet API vehicle that signs commands with the Tesla Vehicle
+     * Command Protocol and dispatches them through the `/signed_command`
+     * endpoint, instead of the plaintext REST commands.
      * @param vin
      * @param private_key Raw 32-byte P-256 private key scalar. Falls back to `this.private_key`.
      * @param public_key Uncompressed P-256 public key point. Derived from `private_key` if omitted.
      */
-    signed(vin: string, private_key?: Buffer, public_key?: Buffer): VehicleSigned {
-        return new VehicleSigned(this, vin, private_key, public_key);
+    createSigned(vin: string, private_key?: Buffer, public_key?: Buffer): VehicleSigned {
+        const vehicle = new (this.constructor as typeof Vehicle).Signed(this, vin, private_key, public_key);
+        this.byVin.set(vin, vehicle);
+        return vehicle;
+    }
+
+    /** Legacy name for `createFleet`. */
+    specific(vin: string): VehicleSpecific {
+        return this.createFleet(vin);
+    }
+
+    /** Legacy name for `createSigned`. */
+    specificSigned(vin: string, private_key?: Buffer, public_key?: Buffer): VehicleSigned {
+        return this.createSigned(vin, private_key, public_key);
     }
 
     /**
@@ -62,7 +87,7 @@ export default class Vehicle {
      * @param vehicle_tag VIN or id field of a vehicle
      * @param which_trunk "front" or "rear"
      */
-    async actuate_truck(vehicle_tag: string | number, which_trunk: Trunk): Promise<CommandResponse> {
+    async actuate_trunk(vehicle_tag: string | number, which_trunk: Trunk): Promise<CommandResponse> {
         return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/actuate_trunk`, null, { which_trunk });
     }
 
@@ -153,9 +178,10 @@ export default class Vehicle {
     /**
      * Deactivates PIN to Drive and resets the associated PIN for vehicles running firmware versions 2023.44+. This command is only accessible to fleet managers or owners.
      * @param vehicle_tag VIN or id field of a vehicle
+     * @param pin Optional four-digit PIN
      */
-    async clear_pin_to_drive_admin(vehicle_tag: string | number): Promise<CommandResponse> {
-        return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/clear_pin_to_drive_admin`);
+    async clear_pin_to_drive_admin(vehicle_tag: string | number, pin?: string | number): Promise<CommandResponse> {
+        return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/clear_pin_to_drive_admin`, null, { pin: pin == null ? undefined : String(pin) });
     }
 
     /**
@@ -360,8 +386,8 @@ export default class Vehicle {
             seat_position = Seats[seat_position];
         }
         return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/remote_seat_heater_request`, null, {
-            seat_position,
-            seat_heater_level,
+            heater: seat_position,
+            level: seat_heater_level,
         });
     }
 
@@ -681,8 +707,8 @@ export default class Vehicle {
      * Returns all allowed drivers for a vehicle. This endpoint is only available for the vehicle owner.
      * @param vehicle_tag VIN or id field of a vehicle
      */
-    async drivers(vehicle_tag: string | number): Promise<Record<string, any>[]> {
-        return this.parent._request("GET", `api/1/vehicles/${vehicle_tag}/drivers`).then(({ response }) => response);
+    async drivers(vehicle_tag: string | number): Promise<ResponseEnvelope<Record<string, any>[]>> {
+        return this.parent._request("GET", `api/1/vehicles/${vehicle_tag}/drivers`);
     }
 
     /**
@@ -724,7 +750,7 @@ export default class Vehicle {
      * @param config A dictionary description the fleet telemetry configuration
      * @returns
      */
-    async fleet_telemetry_config(config: FleetTelemetryConfig): Promise<Record<string, any>> {
+    async fleet_telemetry_config_create(config: FleetTelemetryConfig): Promise<Record<string, any>> {
         return this.parent._request("POST", "api/1/vehicles/fleet_telemetry_config", null, config);
     }
 
@@ -855,8 +881,8 @@ export default class Vehicle {
      * Returns information about a vehicle.
      * @param vehicle_tag VIN or id field of a vehicle
      */
-    async vehicle(vehicle_tag: string | number): Promise<VehicleResponse> {
-        return this.parent._request("GET", `api/1/vehicles/${vehicle_tag}`).then(({ response }) => response);
+    async vehicle(vehicle_tag: string | number): Promise<ResponseEnvelope<VehicleResponse>> {
+        return this.parent._request("GET", `api/1/vehicles/${vehicle_tag}`);
     }
 
     /**
@@ -864,17 +890,28 @@ export default class Vehicle {
      * @param vehicle_tag VIN or id field of a vehicle
      * @param endpoints
      */
-    async vehicle_data(vehicle_tag: string | number, endpoints?: VehicleDataEndpoint[] | string): Promise<VehicleDataResponse> {
+    async vehicle_data(vehicle_tag: string | number, endpoints?: VehicleDataEndpoint[] | string): Promise<ResponseEnvelope<VehicleDataResponse>> {
         if (typeof endpoints === "object") endpoints = endpoints.join(";");
-        return this.parent._request("GET", `api/1/vehicles/${vehicle_tag}/vehicle_data`, { endpoints }).then(({ response }) => response);
+        return this.parent._request("GET", `api/1/vehicles/${vehicle_tag}/vehicle_data`, { endpoints });
     }
 
     /**
      * Wakes the vehicle from sleep, which is a state to minimize idle energy consumption.
      * @param vehicle_tag VIN or id field of a vehicle
+     * @param options.wait Poll `vehicle()` until the vehicle reports `online`, raising `VehicleOffline` at the deadline
+     * @param options.timeoutMs Deadline for `wait`, in milliseconds (default 60000)
      */
-    async wake_up(vehicle_tag: string | number): Promise<Record<string, any>> {
-        return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/wake_up`);
+    async wake_up(vehicle_tag: string | number, { wait = false, timeoutMs = WAKE_TIMEOUT_MS }: WakeUpOptions = {}): Promise<ResponseEnvelope<VehicleResponse>> {
+        const deadline = Date.now() + timeoutMs;
+        let result: ResponseEnvelope<VehicleResponse> = await this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/wake_up`);
+        if (!wait) return result;
+        while (result.response?.state !== "online") {
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) throw new VehicleOffline(result);
+            await new Promise((resolve) => setTimeout(resolve, Math.min(WAKE_POLL_MS, remaining)));
+            result = await this.vehicle(vehicle_tag);
+        }
+        return result;
     }
 
     /**

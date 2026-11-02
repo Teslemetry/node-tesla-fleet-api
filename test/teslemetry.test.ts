@@ -25,7 +25,7 @@ describe("Teslemetry", () => {
         const fetchMock = fakeFetch({ response: [] }, { "x-region": "eu" });
         const api = new Teslemetry("test-token");
 
-        await expect(api.products()).resolves.toEqual([]);
+        await expect(api.products()).resolves.toEqual({ response: [] });
         expect(api.server).toBe("https://eu.teslemetry.com");
         expect(requestedUrls(fetchMock)).toEqual([
             "https://api.teslemetry.com/api/1/products",
@@ -58,8 +58,8 @@ describe("Teslemetry", () => {
         const fetchMock = fakeFetch({ response: {} });
         const api = new Teslemetry("test-token", "na");
 
-        await api.vehicle!.eligible_subscriptions("VIN");
-        await api.vehicle!.eligible_upgrades("VIN");
+        await api.vehicles!.eligible_subscriptions("VIN");
+        await api.vehicles!.eligible_upgrades("VIN");
         expect(requestedUrls(fetchMock)).toEqual([
             "https://na.teslemetry.com/api/1/dx/vehicles/subscriptions/eligibility?vin=VIN",
             "https://na.teslemetry.com/api/1/dx/vehicles/upgrades/eligibility?vin=VIN",

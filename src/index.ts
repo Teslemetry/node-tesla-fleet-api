@@ -1,4 +1,4 @@
-import Commands from "./commands.js";
+import Commands, { infotainment_command_name, vcsec_command_name } from "./commands.js";
 import Energy from "./energy.js";
 import EnergySpecific from "./energyspecific.js";
 import TeslaFleetApi from "./teslafleetapi.js";
@@ -9,9 +9,13 @@ import VehicleSigned from "./vehiclesigned.js";
 import VehicleSpecific from "./vehiclespecific.js";
 
 export { Commands, Energy, EnergySpecific, TeslaFleetApi, Teslemetry, Tessie, Vehicle, VehicleSigned, VehicleSpecific };
+export { infotainment_command_name, vcsec_command_name };
+export type { AccessToken } from "./teslafleetapi.js";
+export type { Logger } from "./log.js";
 export { Session } from "./signing/session.js";
 export { DAY_OF_WEEK_BITS, days_of_week_mask } from "./commands.js";
 export * from "./exceptions.js";
-export { getTariffPeriods } from "./tariff.js";
+export { getTariffPeriods, unwrapTariffV2 } from "./tariff.js";
+export { firmwareAtLeast, firmwareCompare } from "./util.js";
 export * from "./const.js";
 export type { TariffRate, TariffPeriod, TariffResolution } from "./tariff.js";

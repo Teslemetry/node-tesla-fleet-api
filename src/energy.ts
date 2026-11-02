@@ -1,3 +1,4 @@
+import { KeyObject } from "crypto";
 import EnergySpecific from "./energyspecific.js";
 import TeslaFleetApi from "./teslafleetapi.js";
 import { LiveStatusResponse } from "./types/live_status.js";
@@ -5,7 +6,17 @@ import { SiteInfoResponse } from "./types/site_info.js";
 
 // Energy Class
 export default class Energy {
+  /** Class `create` instantiates; a subclass overrides it to supply its own site type. */
+  static Site: new (
+    parent: Energy,
+    energy_site_id: number,
+    private_key?: KeyObject,
+    din?: string,
+  ) => EnergySpecific = EnergySpecific;
+
   parent: TeslaFleetApi;
+  /** Every site created by this factory, keyed by `energy_site_id`; the latest `create` call wins. */
+  byId: Map<number, EnergySpecific> = new Map();
 
   constructor(parent: TeslaFleetApi) {
     this.parent = parent;
@@ -14,10 +25,23 @@ export default class Energy {
   /**
    * Create an Energy class for a specific site.
    * @param energy_site_id ID field of an energy site from /api/1/products endpoint.
+   * @param private_key RSA key `VERIFIED` on this gateway, for client-signed device commands. Requires `din`.
+   * @param din Gateway DIN (the energy site's `gateway_id` in `products`).
    * @returns `EnergySpecific` class
    */
-  specific(energy_site_id: number): EnergySpecific {
-    return new EnergySpecific(this, energy_site_id);
+  create(
+    energy_site_id: number,
+    private_key?: KeyObject,
+    din?: string,
+  ): EnergySpecific {
+    const site = new (this.constructor as typeof Energy).Site(
+      this,
+      energy_site_id,
+      private_key,
+      din,
+    );
+    this.byId.set(energy_site_id, site);
+    return site;
   }
 
   /**

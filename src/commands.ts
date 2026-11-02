@@ -21,6 +21,7 @@ import {
     VehicleStatus,
     OperationStatusE as VcsecOperationStatusE,
     signedMessageInformationEToJSON,
+    rKEActionEToJSON,
 } from "@teslemetry/tesla-protocol/command/vcsec";
 import { genericErrorEToJSON } from "@teslemetry/tesla-protocol/command/errors";
 import {
@@ -86,6 +87,7 @@ import { AutoSeat } from "./const.js";
 import Vehicle from "./vehicle.js";
 import VehicleSpecific from "./vehiclespecific.js";
 import { Session } from "./signing/session.js";
+import { logRequestError, logRequestResult } from "./log.js";
 import { deriveSharedKey, publicKeyFor, uint32BE } from "./signing/crypto.js";
 import {
     MESSAGE_FAULTS,
@@ -173,6 +175,28 @@ function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * The name of a message's populated oneof field, as `WhichOneof` gives it in
+ * Python. ts-proto leaves unset oneof members `undefined`; `plainFields` names
+ * any fields outside the oneof, which always carry a value.
+ */
+function populatedField(message: object, plainFields: readonly string[] = []): string | undefined {
+    return Object.entries(message).find(([key, value]) => value !== undefined && !plainFields.includes(key))?.[0];
+}
+
+/** A short debug-log name for a VCSEC command: the RKE action name, or the populated field. */
+export function vcsec_command_name(command: UnsignedMessage): string {
+    if (command.RKEAction !== undefined) {
+        return rKEActionEToJSON(command.RKEAction);
+    }
+    return populatedField(command) ?? "unknown";
+}
+
+/** A short debug-log name for an infotainment command: the populated `VehicleAction` field. */
+export function infotainment_command_name(command: Action): string {
+    return (command.vehicleAction && populatedField(command.vehicleAction, ["dropNominalSuccessResponses"])) ?? "unknown";
+}
+
 function ok(reason: string = ""): CommandResponse {
     return { response: { result: true, reason } };
 }
@@ -242,6 +266,8 @@ export default abstract class Commands extends VehicleSpecific {
     protected retryDelayMs = 2000;
     private readonly fromDestination: Buffer;
     private readonly sessions: Partial<Record<Domain, Session>>;
+    /** Transport identity for debug logging; set per concrete subclass. */
+    abstract readonly _transport_name: string;
 
     constructor(parent: Vehicle, vin: string, privateKey?: Buffer, publicKey?: Buffer) {
         super(parent, vin);
@@ -527,12 +553,36 @@ export default abstract class Commands extends VehicleSpecific {
         return ok();
     }
 
+    /** Dispatch one signed command, logging its name, transport and outcome. */
+    private async dispatchLogged(name: string, domain: Domain, command: Buffer, expectsData: boolean): Promise<CommandResponse> {
+        const log = (message: string) => this.parent.parent._log(message);
+        let result: CommandResponse;
+        try {
+            result = await this.dispatch(domain, command, expectsData);
+        } catch (error) {
+            logRequestError(log, name, this._transport_name, error);
+            throw error;
+        }
+        logRequestResult(log, name, this._transport_name, result);
+        return result;
+    }
+
     private async sendVehicleSecurity(command: UnsignedMessage): Promise<CommandResponse> {
-        return this.dispatch(Domain.DOMAIN_VEHICLE_SECURITY, Buffer.from(UnsignedMessage.encode(command).finish()), false);
+        return this.dispatchLogged(
+            vcsec_command_name(command),
+            Domain.DOMAIN_VEHICLE_SECURITY,
+            Buffer.from(UnsignedMessage.encode(command).finish()),
+            false,
+        );
     }
 
     private async sendInfotainment(action: Action): Promise<CommandResponse> {
-        return this.dispatch(Domain.DOMAIN_INFOTAINMENT, Buffer.from(Action.encode(action).finish()), true);
+        return this.dispatchLogged(
+            infotainment_command_name(action),
+            Domain.DOMAIN_INFOTAINMENT,
+            Buffer.from(Action.encode(action).finish()),
+            true,
+        );
     }
 
     private vehicleAction(action: VehicleAction): Promise<CommandResponse> {
@@ -549,7 +599,7 @@ export default abstract class Commands extends VehicleSpecific {
      * Controls the front (which_trunk: "front") or rear (which_trunk: "rear") trunk.
      * @param which_trunk "front" or "rear"
      */
-    async actuate_truck(which_trunk: Trunk): Promise<CommandResponse> {
+    async actuate_trunk(which_trunk: Trunk): Promise<CommandResponse> {
         const field = TrunkFields[which_trunk];
         if (!field) {
             throw new Error(`Invalid trunk: ${which_trunk}`);
@@ -632,8 +682,9 @@ export default abstract class Commands extends VehicleSpecific {
 
     /**
      * Deactivates PIN to Drive and resets the associated PIN for vehicles running firmware versions 2023.44+. This command is only accessible to fleet managers or owners.
+     * @param _pin Accepted for parity with the REST command; the signed action carries no PIN.
      */
-    async clear_pin_to_drive_admin(): Promise<CommandResponse> {
+    async clear_pin_to_drive_admin(_pin?: string | number): Promise<CommandResponse> {
         return this.vehicleAction(
             VehicleAction.create({ vehicleControlResetPinToDriveAdminAction: VehicleControlResetPinToDriveAdminAction.create({}) }),
         );

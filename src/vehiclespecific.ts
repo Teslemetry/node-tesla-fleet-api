@@ -7,8 +7,8 @@ import {
   VehicleDataEndpoint,
 } from "./types/commands.js";
 import { AutoSeat } from "./const.js";
-import { OptionsResponse } from "./types/responses.js";
-import { VehicleResponse } from "./types/vehicle.js";
+import { OptionsResponse, ResponseEnvelope } from "./types/responses.js";
+import { VehicleResponse, WakeUpOptions } from "./types/vehicle.js";
 import { VehicleDataResponse } from "./types/vehicle_data.js";
 import { FleetTelemetryConfig } from "./types/commands.js";
 import Vehicle from "./vehicle.js";
@@ -32,8 +32,8 @@ export default class VehicleSpecific {
    * Controls the front (which_trunk: "front") or rear (which_trunk: "rear") trunk.
    * @param which_trunk "front" or "rear"
    */
-  async actuate_truck(which_trunk: Trunk): Promise<CommandResponse> {
-    return this.parent.actuate_truck(this.vin, which_trunk);
+  async actuate_trunk(which_trunk: Trunk): Promise<CommandResponse> {
+    return this.parent.actuate_trunk(this.vin, which_trunk);
   }
 
   /**
@@ -109,9 +109,10 @@ export default class VehicleSpecific {
 
   /**
    * Deactivates PIN to Drive and resets the associated PIN for vehicles running firmware versions 2023.44+. This command is only accessible to fleet managers or owners.
+   * @param pin Optional four-digit PIN
    */
-  async clear_pin_to_drive_admin(): Promise<CommandResponse> {
-    return this.parent.clear_pin_to_drive_admin(this.vin);
+  async clear_pin_to_drive_admin(pin?: string | number): Promise<CommandResponse> {
+    return this.parent.clear_pin_to_drive_admin(this.vin, pin);
   }
 
   /**
@@ -778,7 +779,7 @@ export default class VehicleSpecific {
   /**
    * Returns all allowed drivers for a vehicle. This endpoint is only available for the vehicle owner.
    */
-  async drivers(): Promise<Record<string, any>> {
+  async drivers(): Promise<ResponseEnvelope<Record<string, any>[]>> {
     return this.parent.drivers(this.vin);
   }
 
@@ -820,10 +821,10 @@ export default class VehicleSpecific {
    * @param config A dictionary description the fleet telemetry configuration
    * @returns
    */
-  async fleet_telemetry_config(
+  async fleet_telemetry_config_create(
     config: FleetTelemetryConfig["config"],
   ): Promise<Record<string, any>> {
-    return this.parent.fleet_telemetry_config({
+    return this.parent.fleet_telemetry_config_create({
       vins: [this.vin],
       config,
     });
@@ -951,7 +952,7 @@ export default class VehicleSpecific {
   /**
    * Returns information about a vehicle.
    */
-  async vehicle(): Promise<VehicleResponse> {
+  async vehicle(): Promise<ResponseEnvelope<VehicleResponse>> {
     return this.parent.vehicle(this.vin);
   }
 
@@ -961,15 +962,17 @@ export default class VehicleSpecific {
    */
   async vehicle_data(
     endpoints?: VehicleDataEndpoint[] | string,
-  ): Promise<VehicleDataResponse> {
+  ): Promise<ResponseEnvelope<VehicleDataResponse>> {
     return this.parent.vehicle_data(this.vin, endpoints);
   }
 
   /**
    * Wakes the vehicle from sleep, which is a state to minimize idle energy consumption.
+   * @param options.wait Poll `vehicle()` until the vehicle reports `online`, raising `VehicleOffline` at the deadline
+   * @param options.timeoutMs Deadline for `wait`, in milliseconds (default 60000)
    */
-  async wake_up(): Promise<Record<string, any>> {
-    return this.parent.wake_up(this.vin);
+  async wake_up(options?: WakeUpOptions): Promise<ResponseEnvelope<VehicleResponse>> {
+    return this.parent.wake_up(this.vin, options);
   }
 
   /**
