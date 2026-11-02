@@ -22,6 +22,24 @@ export type TessieOptions = {
     max_attempts?: number;
 };
 
+/** Options of `all_battery_health`. `start` and `end` are sent as `from` and `to`. */
+export type TessieAllBatteryHealthOptions = {
+    start?: number | null;
+    end?: number | null;
+    distance_format?: string;
+    only_active?: boolean;
+};
+
+/** Options of `charging_invoices`. `start` and `end` are sent as `from` and `to`. */
+export type TessieChargingInvoicesOptions = {
+    start?: number | null;
+    end?: number | null;
+    timezone?: string;
+    vin?: string;
+    format?: string;
+    only_active?: boolean;
+};
+
 export default class Tessie extends TeslaFleetApi {
     static override Vehicles: new (parent: TeslaFleetApi) => Vehicle = TessieVehicles;
 
@@ -79,5 +97,17 @@ export default class Tessie extends TeslaFleetApi {
 
     async wake(vin: string): Promise<boolean> {
         return this._request("POST", `${vin}/wake`).then(({ result }) => result);
+    }
+
+    /** Get battery health data for every vehicle. */
+    async all_battery_health(options: TessieAllBatteryHealthOptions = {}): Promise<any> {
+        const { start, end, distance_format, only_active = false } = options;
+        return this._request("GET", "battery_health", { from: start, to: end, distance_format, only_active });
+    }
+
+    /** Get charging costs for every vehicle. */
+    async charging_invoices(options: TessieChargingInvoicesOptions = {}): Promise<any> {
+        const { start, end, ...params } = options;
+        return this._request("GET", "charging_invoices", { from: start, to: end, ...params });
     }
 }

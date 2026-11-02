@@ -188,8 +188,334 @@ describe("TessieVehicle commands", () => {
     });
 });
 
-/** Filled by the read half of `TessieVehicle`. */
-const READS = new Set<string>([]);
+/** method name, call, verb, path below the VIN, query, and body (undefined for none). */
+const READ_ROUTES: [string, Call, string, string, Record<string, string>, unknown?][] = [
+    ["state", (v) => v.state(), "GET", "state", { use_cache: "true" }],
+    ["vehicle", (v) => v.vehicle(false), "GET", "state", { use_cache: "false" }],
+    ["battery", (v) => v.battery(), "GET", "battery", {}],
+    ["battery_health", (v) => v.battery_health(0, 2, "km"), "GET", "battery_health", { from: "0", to: "2", distance_format: "km" }],
+    ["states", (v) => v.states({ start: 1, end: 2 }), "GET", "states", { from: "1", to: "2" }],
+    ["location", (v) => v.location(), "GET", "location", {}],
+    ["firmware_alerts", (v) => v.firmware_alerts(), "GET", "firmware_alerts", {}],
+    ["map", (v) => v.map({ width: 10, height: 20, zoom: 3, marker_size: "small", style: "dark" }), "GET", "map", { width: "10", height: "20", zoom: "3", marker_size: "small", style: "dark" }],
+    ["consumption_since_charge", (v) => v.consumption_since_charge(), "GET", "consumption_since_charge", {}],
+    ["weather", (v) => v.weather(), "GET", "weather", {}],
+    ["drives", (v) => v.drives({ start: 1, end: 2 }), "GET", "drives", { from: "1", to: "2" }],
+    ["path", (v) => v.path(1, 2, { separate: true, simplify: false, details: true, timezone: "UTC" }), "GET", "path", { from: "1", to: "2", separate: "true", simplify: "false", details: "true", timezone: "UTC" }],
+    ["charges", (v) => v.charges({ start: 1, end: 2 }), "GET", "charges", { from: "1", to: "2" }],
+    ["idles", (v) => v.idles({ start: 1, end: 2 }), "GET", "idles", { from: "1", to: "2" }],
+    ["last_idle_state", (v) => v.last_idle_state(), "GET", "last_idle_state", {}],
+    ["drivers", (v) => v.drivers(), "GET", "drivers", {}],
+    ["delete_driver", (v) => v.delete_driver("abc", 12), "POST", "drivers/abc/delete", {}, { user_id: 12 }],
+    ["invitations", (v) => v.invitations(), "GET", "invitations", {}],
+    ["create_invitation", (v) => v.create_invitation("a@example.com", "driver"), "POST", "invitations", { email: "a@example.com", role: "driver" }],
+    ["revoke_invitation", (v) => v.revoke_invitation(9), "POST", "invitations/9/revoke", {}],
+    ["set_roles", (v) => v.set_roles("SUBSCRIPTION", "555555555"), "POST", "roles", {}, { role: "SUBSCRIPTION", account_id: "555555555" }],
+    ["get_fleet_telemetry_config", (v) => v.get_fleet_telemetry_config(), "GET", "fleet_telemetry_config", {}],
+    ["set_fleet_telemetry_config", (v) => v.set_fleet_telemetry_config({ hostname: "h" }, { Soc: {} }), "POST", "fleet_telemetry_config", {}, { hostname: "h", fields: { Soc: {} } }],
+    ["delete_fleet_telemetry_config", (v) => v.delete_fleet_telemetry_config(), "DELETE", "fleet_telemetry_config", {}],
+    ["set_drive_tag", (v) => v.set_drive_tag({ tag: "work", drives: [1, 2] }), "POST", "drives/set_tag", {}, { drives: [1, 2], tag: "work" }],
+    ["set_charge_cost", (v) => v.set_charge_cost(5, 0, "AUD"), "POST", "charges/5/set_cost", { cost: "0", currency: "AUD" }],
+    ["tire_pressure", (v) => v.tire_pressure("bar", 1, 2), "GET", "tire_pressure", { pressure_format: "bar", from: "1", to: "2" }],
+    ["vehicle_status", (v) => v.vehicle_status(), "GET", "status", {}],
+    ["plate", (v) => v.plate(), "GET", "plate", {}],
+    ["update_plate", (v) => v.update_plate("ABC123", "CA"), "POST", "plate", {}, { plate: "ABC123", state: "CA" }],
+];
+
+const READS = new Set(READ_ROUTES.map(([name]) => name));
+
+describe("TessieVehicle reads", () => {
+    it.each(READ_ROUTES)("%s", async (_name, call, method, path, query, body) => {
+        const { fetch, vehicle } = makeVehicle();
+
+        await expect(call(vehicle)).resolves.toEqual({ result: true });
+        expect(sent(fetch)).toEqual({ method, path: `${VIN}/${path}`, query, body });
+    });
+
+    it("state defaults use_cache to true and vehicle follows it", async () => {
+        const { fetch, vehicle } = makeVehicle();
+
+        await vehicle.vehicle();
+        expect(sent(fetch).query).toEqual({ use_cache: "true" });
+    });
+
+    it("states maps start and end and passes the rest", async () => {
+        const { fetch, vehicle } = makeVehicle();
+
+        await vehicle.states({
+            start: 0,
+            end: 2,
+            interval: 60,
+            condense: false,
+            timezone: "UTC",
+            distance_format: "km",
+            temperature_format: "c",
+            format: "json",
+            results: 10,
+            page: 2,
+            exclude: "a",
+            fields: "b",
+        });
+        expect(sent(fetch).query).toEqual({
+            from: "0",
+            to: "2",
+            interval: "60",
+            condense: "false",
+            timezone: "UTC",
+            distance_format: "km",
+            temperature_format: "c",
+            format: "json",
+            results: "10",
+            page: "2",
+            exclude: "a",
+            fields: "b",
+        });
+    });
+
+    it("drives passes every filter", async () => {
+        const { fetch, vehicle } = makeVehicle();
+
+        await vehicle.drives({
+            start: 1,
+            end: 2,
+            timezone: "UTC",
+            distance_format: "km",
+            temperature_format: "c",
+            origin_latitude: 1.5,
+            origin_longitude: 2.5,
+            origin_radius: 3,
+            exclude_origin: false,
+            destination_latitude: 4.5,
+            destination_longitude: 5.5,
+            destination_radius: 6,
+            exclude_destination: true,
+            tag: "t",
+            exclude_tag: "x",
+            driver_profile: "p",
+            exclude_driver_profile: "q",
+            format: "json",
+            minimum_distance: 0.5,
+            limit: 10,
+            page: 2,
+        });
+        expect(sent(fetch).query).toEqual({
+            from: "1",
+            to: "2",
+            timezone: "UTC",
+            distance_format: "km",
+            temperature_format: "c",
+            origin_latitude: "1.5",
+            origin_longitude: "2.5",
+            origin_radius: "3",
+            exclude_origin: "false",
+            destination_latitude: "4.5",
+            destination_longitude: "5.5",
+            destination_radius: "6",
+            exclude_destination: "true",
+            tag: "t",
+            exclude_tag: "x",
+            driver_profile: "p",
+            exclude_driver_profile: "q",
+            format: "json",
+            minimum_distance: "0.5",
+            limit: "10",
+            page: "2",
+        });
+    });
+
+    it("charges passes every filter", async () => {
+        const { fetch, vehicle } = makeVehicle();
+
+        await vehicle.charges({
+            start: 1,
+            end: 2,
+            timezone: "UTC",
+            distance_format: "km",
+            format: "json",
+            superchargers_only: true,
+            origin_latitude: 1.5,
+            origin_longitude: 2.5,
+            origin_radius: 3,
+            exclude_origin: true,
+            minimum_energy_added: 0.5,
+            limit: 10,
+            page: 2,
+        });
+        expect(sent(fetch).query).toEqual({
+            from: "1",
+            to: "2",
+            timezone: "UTC",
+            distance_format: "km",
+            format: "json",
+            superchargers_only: "true",
+            origin_latitude: "1.5",
+            origin_longitude: "2.5",
+            origin_radius: "3",
+            exclude_origin: "true",
+            minimum_energy_added: "0.5",
+            limit: "10",
+            page: "2",
+        });
+    });
+
+    it("idles passes every filter", async () => {
+        const { fetch, vehicle } = makeVehicle();
+
+        await vehicle.idles({
+            start: 1,
+            end: 2,
+            timezone: "UTC",
+            distance_format: "km",
+            format: "json",
+            origin_latitude: 1.5,
+            origin_longitude: 2.5,
+            origin_radius: 3,
+            exclude_origin: true,
+            limit: 10,
+            page: 2,
+        });
+        expect(sent(fetch).query).toEqual({
+            from: "1",
+            to: "2",
+            timezone: "UTC",
+            distance_format: "km",
+            format: "json",
+            origin_latitude: "1.5",
+            origin_longitude: "2.5",
+            origin_radius: "3",
+            exclude_origin: "true",
+            limit: "10",
+            page: "2",
+        });
+    });
+
+    describe.each(["drives", "charges", "idles"] as const)("%s page size", (name) => {
+        it("sends results as limit when limit is unset", async () => {
+            const { fetch, vehicle } = makeVehicle();
+
+            await vehicle[name]({ results: 5 });
+            expect(sent(fetch).query).toEqual({ limit: "5" });
+        });
+
+        it("prefers limit, including zero", async () => {
+            const { fetch, vehicle } = makeVehicle();
+
+            await vehicle[name]({ limit: 0, results: 5 });
+            expect(sent(fetch).query).toEqual({ limit: "0" });
+        });
+    });
+
+    it("reads send no query when nothing is given", async () => {
+        const { fetch, vehicle } = makeVehicle();
+
+        await vehicle.states();
+        expect(fetch.mock.calls[0][0]).toBe(`https://api.tessie.com/${VIN}/states`);
+    });
+
+    it("delete_driver drops an unset user_id", async () => {
+        const { fetch, vehicle } = makeVehicle();
+
+        await vehicle.delete_driver(3);
+        expect(sent(fetch).body).toEqual({});
+    });
+
+    it("set_roles omits unset optional fields", async () => {
+        const { fetch, vehicle } = makeVehicle();
+
+        await vehicle.set_roles("CHARGING");
+        expect(sent(fetch).body).toEqual({ role: "CHARGING" });
+    });
+
+    it("set_fleet_telemetry_config sends a config unchanged without fields", async () => {
+        const { fetch, vehicle } = makeVehicle();
+
+        await vehicle.set_fleet_telemetry_config({ hostname: "h", fields: { Soc: {} } });
+        expect(sent(fetch).body).toEqual({ hostname: "h", fields: { Soc: {} } });
+    });
+
+    it("set_fleet_telemetry_config lets fields replace the config's", async () => {
+        const { fetch, vehicle } = makeVehicle();
+
+        await vehicle.set_fleet_telemetry_config({ fields: { Soc: {} } }, { Odometer: {} });
+        expect(sent(fetch).body).toEqual({ fields: { Odometer: {} } });
+    });
+
+    it("set_drive_tag by timeframe uses the query, keeping a start of zero", async () => {
+        const { fetch, vehicle } = makeVehicle();
+
+        await vehicle.set_drive_tag({ start: 0, end: 2, tag: "work" });
+        expect(sent(fetch)).toEqual({
+            method: "POST",
+            path: `${VIN}/drives/set_tag`,
+            query: { from: "0", to: "2", tag: "work" },
+            body: undefined,
+        });
+    });
+
+    it("set_drive_tag validates its arguments", async () => {
+        const { fetch, vehicle } = makeVehicle();
+
+        await expect(vehicle.set_drive_tag({ start: 1, end: 2 })).rejects.toThrow("tag is required");
+        await expect(vehicle.set_drive_tag({ tag: "t", start: 1 })).rejects.toThrow("Provide drives or both start and end");
+        expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it("set_charge_cost drops a null cost", async () => {
+        const { fetch, vehicle } = makeVehicle();
+
+        await vehicle.set_charge_cost(5, null);
+        expect(sent(fetch).query).toEqual({});
+    });
+
+    it("update_plate omits an empty state", async () => {
+        const { fetch, vehicle } = makeVehicle();
+
+        await vehicle.update_plate("ABC123", "");
+        expect(sent(fetch).body).toEqual({ plate: "ABC123" });
+    });
+});
+
+describe("Tessie fleet reads", () => {
+    it("all_battery_health maps start and end, and defaults only_active to false", async () => {
+        const { api, fetch } = makeApi();
+
+        await expect(api.all_battery_health({ start: 0, end: 2, distance_format: "km" })).resolves.toEqual({ result: true });
+        expect(sent(fetch)).toEqual({
+            method: "GET",
+            path: "battery_health",
+            query: { from: "0", to: "2", distance_format: "km", only_active: "false" },
+            body: undefined,
+        });
+    });
+
+    it("all_battery_health takes only_active", async () => {
+        const { api, fetch } = makeApi();
+
+        await api.all_battery_health({ only_active: true });
+        expect(sent(fetch).query).toEqual({ only_active: "true" });
+    });
+
+    it("charging_invoices maps start and end and passes the rest", async () => {
+        const { api, fetch } = makeApi();
+
+        await expect(
+            api.charging_invoices({ start: 1, end: 2, timezone: "UTC", vin: VIN, format: "json", only_active: false }),
+        ).resolves.toEqual({ result: true });
+        expect(sent(fetch)).toEqual({
+            method: "GET",
+            path: "charging_invoices",
+            query: { from: "1", to: "2", timezone: "UTC", vin: VIN, format: "json", only_active: "false" },
+            body: undefined,
+        });
+    });
+
+    it("charging_invoices sends no query when nothing is given", async () => {
+        const { api, fetch } = makeApi();
+
+        await api.charging_invoices();
+        expect(fetch.mock.calls[0][0]).toBe("https://api.tessie.com/charging_invoices");
+    });
+});
 
 describe("wait_for_completion and max_attempts", () => {
     it("come from the client", async () => {

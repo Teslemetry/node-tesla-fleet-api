@@ -35,6 +35,100 @@ export type TessiePreconditionScheduleOptions = {
   wait_for_completion?: boolean;
 };
 
+/** A time range, in epoch seconds. Sent as `from` and `to`. */
+type TimeRange = { start?: number | null; end?: number | null };
+
+/** Options of `states`. */
+export type TessieStatesOptions = TimeRange & {
+  interval?: number;
+  condense?: boolean;
+  timezone?: string;
+  distance_format?: string;
+  temperature_format?: string;
+  format?: string;
+  results?: number;
+  page?: number;
+  exclude?: string;
+  fields?: string;
+};
+
+/** Options of `map`. */
+export type TessieMapOptions = {
+  width?: number;
+  height?: number;
+  zoom?: number;
+  marker_size?: string;
+  style?: string;
+};
+
+/** Filters on a place, shared by `drives`, `charges` and `idles`. */
+type OriginFilter = {
+  origin_latitude?: number;
+  origin_longitude?: number;
+  origin_radius?: number;
+  exclude_origin?: boolean;
+};
+
+/** Page size options, shared by `drives`, `charges` and `idles`. `results` is used when `limit` is not given. */
+type Paged = { limit?: number; results?: number; page?: number };
+
+/** Options of `drives`. */
+export type TessieDrivesOptions = TimeRange & OriginFilter & Paged & {
+  timezone?: string;
+  distance_format?: string;
+  temperature_format?: string;
+  destination_latitude?: number;
+  destination_longitude?: number;
+  destination_radius?: number;
+  exclude_destination?: boolean;
+  tag?: string;
+  exclude_tag?: string;
+  driver_profile?: string;
+  exclude_driver_profile?: string;
+  format?: string;
+  minimum_distance?: number;
+};
+
+/** Options of `path`. */
+export type TessiePathOptions = {
+  separate?: boolean;
+  simplify?: boolean;
+  details?: boolean;
+  timezone?: string;
+};
+
+/** Options of `charges`. */
+export type TessieChargesOptions = TimeRange & OriginFilter & Paged & {
+  timezone?: string;
+  distance_format?: string;
+  format?: string;
+  superchargers_only?: boolean;
+  minimum_energy_added?: number;
+};
+
+/** Options of `idles`. */
+export type TessieIdlesOptions = TimeRange & OriginFilter & Paged & {
+  timezone?: string;
+  distance_format?: string;
+  format?: string;
+};
+
+/** Options of `set_drive_tag`: `tag`, and either `drives` or both `start` and `end`. */
+export type TessieDriveTagOptions = TimeRange & {
+  tag?: string | null;
+  drives?: number[] | null;
+};
+
+/** Query parameters with `start` and `end` renamed to Tessie's `from` and `to`. */
+function fromTo<T extends TimeRange>({ start, end, ...params }: T): Record<string, any> {
+  return { from: start, to: end, ...params };
+}
+
+/** Query parameters of a paged read: `fromTo`, with `results` standing in for an unset `limit`. */
+function paged<T extends TimeRange & Paged>({ limit, results, ...params }: T): Record<string, any> {
+  return { ...fromTo(params), limit: limit ?? results };
+}
+
 /**
  * A Tessie vehicle: Tessie's commands and reads, on top of the Fleet REST commands.
  *
@@ -445,6 +539,185 @@ export class TessieVehicle extends VehicleSpecific {
   /** Disable Low Power Mode. */
   async disable_low_power_mode(wait_for_completion?: boolean | null, max_attempts?: number | null): Promise<Reply> {
     return this._command("disable_low_power_mode", wait_for_completion, max_attempts);
+  }
+
+  // Vehicle data
+
+  /** Get vehicle data. */
+  async state(use_cache: boolean = true): Promise<Reply> {
+    return this._request("GET", `${this.vin}/state`, { use_cache });
+  }
+
+  /** The same as `state`, under the Fleet name. */
+  override async vehicle(use_cache: boolean = true): Promise<Reply> {
+    return this.state(use_cache);
+  }
+
+  /** Get battery data. */
+  async battery(): Promise<Reply> {
+    return this._request("GET", `${this.vin}/battery`);
+  }
+
+  /** Get battery health data. */
+  async battery_health(start?: number | null, end?: number | null, distance_format?: string | null): Promise<Reply> {
+    return this._request("GET", `${this.vin}/battery_health`, { from: start, to: end, distance_format });
+  }
+
+  /** Get historical vehicle states within a timeframe. */
+  async states(options: TessieStatesOptions = {}): Promise<Reply> {
+    return this._request("GET", `${this.vin}/states`, fromTo(options));
+  }
+
+  /** Get coordinates, address and saved location. */
+  async location(): Promise<Reply> {
+    return this._request("GET", `${this.vin}/location`);
+  }
+
+  /** Get the list of firmware-generated alerts. */
+  async firmware_alerts(): Promise<Reply> {
+    return this._request("GET", `${this.vin}/firmware_alerts`);
+  }
+
+  /** Get a map image of the vehicle's location. */
+  async map(options: TessieMapOptions = {}): Promise<Reply> {
+    return this._request("GET", `${this.vin}/map`, options);
+  }
+
+  /** Get energy use since the last charge. */
+  async consumption_since_charge(): Promise<Reply> {
+    return this._request("GET", `${this.vin}/consumption_since_charge`);
+  }
+
+  /** Get the weather forecast around the vehicle. */
+  async weather(): Promise<Reply> {
+    return this._request("GET", `${this.vin}/weather`);
+  }
+
+  /** Get historical drive records. */
+  async drives(options: TessieDrivesOptions = {}): Promise<Reply> {
+    return this._request("GET", `${this.vin}/drives`, paged(options));
+  }
+
+  /** Get the driving route during a timeframe. */
+  async path(start: number, end: number, options: TessiePathOptions = {}): Promise<Reply> {
+    return this._request("GET", `${this.vin}/path`, { from: start, to: end, ...options });
+  }
+
+  /** Get charging history. */
+  async charges(options: TessieChargesOptions = {}): Promise<Reply> {
+    return this._request("GET", `${this.vin}/charges`, paged(options));
+  }
+
+  /** Get the periods when the vehicle was idle. */
+  async idles(options: TessieIdlesOptions = {}): Promise<Reply> {
+    return this._request("GET", `${this.vin}/idles`, paged(options));
+  }
+
+  /** Get the latest idle period. */
+  async last_idle_state(): Promise<Reply> {
+    return this._request("GET", `${this.vin}/last_idle_state`);
+  }
+
+  // Driver management
+
+  /** List additional authorized drivers. */
+  override async drivers(): Promise<Reply> {
+    return this._request("GET", `${this.vin}/drivers`);
+  }
+
+  /** Remove a driver's access. */
+  async delete_driver(id: string | number, user_id?: number | null): Promise<Reply> {
+    return this._request("POST", `${this.vin}/drivers/${id}/delete`, null, { user_id });
+  }
+
+  /** List pending driver invitations. */
+  async invitations(): Promise<Reply> {
+    return this._request("GET", `${this.vin}/invitations`);
+  }
+
+  /** Create a driver invitation. */
+  async create_invitation(email?: string | null, role?: string | null): Promise<Reply> {
+    return this._request("POST", `${this.vin}/invitations`, { email, role });
+  }
+
+  /** Cancel a driver invitation. */
+  async revoke_invitation(id: string | number): Promise<Reply> {
+    return this._request("POST", `${this.vin}/invitations/${id}/revoke`);
+  }
+
+  /** Assign the subscription or charging payer role. Requires a Tesla Business account. */
+  async set_roles(role: string, account_id?: string | null, federation_id?: string | null): Promise<Reply> {
+    return this._request("POST", `${this.vin}/roles`, null, { role, account_id, federation_id });
+  }
+
+  // Fleet Telemetry
+
+  /** Get the telemetry configuration. */
+  async get_fleet_telemetry_config(): Promise<Reply> {
+    return this._request("GET", `${this.vin}/fleet_telemetry_config`);
+  }
+
+  /**
+   * Set the telemetry configuration.
+   * @param config The configuration.
+   * @param fields Replaces `config.fields`.
+   */
+  async set_fleet_telemetry_config(config?: Record<string, any> | null, fields?: Record<string, any> | null): Promise<Reply> {
+    return this._request("POST", `${this.vin}/fleet_telemetry_config`, null, {
+      ...config,
+      ...(fields != null ? { fields } : {}),
+    });
+  }
+
+  /** Remove the telemetry configuration. */
+  async delete_fleet_telemetry_config(): Promise<Reply> {
+    return this._request("DELETE", `${this.vin}/fleet_telemetry_config`);
+  }
+
+  // Data management
+
+  /**
+   * Assign a tag to drives, given by id or by timeframe.
+   * @throws Error without a `tag`, or without `drives` or both `start` and `end`.
+   */
+  async set_drive_tag({ start, end, tag, drives }: TessieDriveTagOptions): Promise<Reply> {
+    if (tag == null) {
+      throw new Error("tag is required");
+    }
+    if (drives != null) {
+      return this._request("POST", `${this.vin}/drives/set_tag`, null, { drives, tag });
+    }
+    if (start == null || end == null) {
+      throw new Error("Provide drives or both start and end");
+    }
+    return this._request("POST", `${this.vin}/drives/set_tag`, { from: start, to: end, tag });
+  }
+
+  /** Record a charge's cost. */
+  async set_charge_cost(charge_id: number, cost: number | null, currency?: string | null): Promise<Reply> {
+    return this._request("POST", `${this.vin}/charges/${charge_id}/set_cost`, { cost, currency });
+  }
+
+  // Vehicle information
+
+  /** Get the current tire pressure readings. */
+  async tire_pressure(pressure_format?: string | null, start?: number | null, end?: number | null): Promise<Reply> {
+    return this._request("GET", `${this.vin}/tire_pressure`, { pressure_format, from: start, to: end });
+  }
+
+  /** Get the vehicle's operational status. */
+  async vehicle_status(): Promise<Reply> {
+    return this._request("GET", `${this.vin}/status`);
+  }
+
+  /** Get license plate information. */
+  async plate(): Promise<Reply> {
+    return this._request("GET", `${this.vin}/plate`);
+  }
+
+  /** Update license plate information. */
+  async update_plate(plate: string, state?: string | null): Promise<Reply> {
+    return this._request("POST", `${this.vin}/plate`, null, { plate, state: state || undefined });
   }
 }
 
