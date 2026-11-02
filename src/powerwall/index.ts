@@ -28,7 +28,7 @@ export {
     pv_string_current,
 } from "./components.js";
 export type { BatteryRole, BatteryUnit, SignalValue } from "./components.js";
-export { PowerwallEnergySite } from "./energysite.js";
+export { ISLAND_MODE_OFF_GRID, ISLAND_MODE_ON_GRID, PowerwallEnergySite } from "./energysite.js";
 export type { CommandResult, LocalConfig } from "./energysite.js";
 export {
     PowerwallAuthenticationError,

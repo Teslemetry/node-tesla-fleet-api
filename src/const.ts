@@ -27,6 +27,9 @@ export function is_valid_region(value: string): value is Region {
     return Object.hasOwn(SERVERS, value);
 }
 
+/** `navigation_request`'s locale when none is given: this process's, as in Python. */
+export const DEFAULT_LOCALE: string = new Intl.DateTimeFormat().resolvedOptions().locale || "en-US";
+
 /** Model name keyed by the fourth character of the VIN. */
 export const Models: Readonly<Record<string, string>> = Object.freeze({
     S: "Model S",

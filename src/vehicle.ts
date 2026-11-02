@@ -2,7 +2,7 @@ import TeslaFleetApi from "./teslafleetapi.js";
 import { ClimateMode, ClimateModes, CommandResponse, FleetTelemetryConfig, Level, Seat, Seats, Trunk, VehicleDataEndpoint } from "./types/commands.js";
 import { OptionsResponse, ResponseEnvelope } from "./types/responses.js";
 import { Models, VehicleResponse, WakeUpOptions } from "./types/vehicle.js";
-import { AutoSeat } from "./const.js";
+import { AutoSeat, DEFAULT_LOCALE } from "./const.js";
 import { VehicleOffline } from "./exceptions.js";
 import { VehicleDataResponse } from "./types/vehicle_data.js";
 import VehicleSpecific from "./vehiclespecific.js";
@@ -304,18 +304,25 @@ export default class Vehicle {
     /**
      * Sends a location to the in-vehicle navigation system.
      * @param vehicle_tag VIN or id field of a vehicle
+     * @param value Destination text
      * @param type "share_ext_content_raw"
-     * @param locale ISO locale such as "en-US"
-     * @param timestamp_ms
+     * @param locale ISO locale such as "en-US". Defaults to `DEFAULT_LOCALE`.
+     * @param timestamp_ms Defaults to now
      */
-    async navigation_request(vehicle_tag: string | number, value: string, locale: string, type: string = "share_ext_content_raw"): Promise<CommandResponse> {
+    async navigation_request(
+        vehicle_tag: string | number,
+        value: string,
+        type: string = "share_ext_content_raw",
+        locale?: string | null,
+        timestamp_ms?: number | null,
+    ): Promise<CommandResponse> {
         return this.parent._request("POST", `api/1/vehicles/${vehicle_tag}/command/navigation_request`, null, {
-            type,
-            locale,
-            timestamp_ms: String(Date.now()),
             value: {
                 "android.intent.extra.TEXT": value,
             },
+            type,
+            locale: locale || DEFAULT_LOCALE,
+            timestamp_ms: timestamp_ms || Date.now(),
         });
     }
 
@@ -726,8 +733,8 @@ export default class Vehicle {
      * @param vehicle_tag VIN or id field of a vehicle
      * @param share_user_id
      */
-    async drivers_remove(vehicle_tag: string | number, share_user_id?: number): Promise<Record<string, any>> {
-        return this.parent._request("DELETE", `api/1/vehicles/${vehicle_tag}/drivers`, null, { share_user_id });
+    async drivers_remove(vehicle_tag: string | number, share_user_id?: string | number): Promise<Record<string, any>> {
+        return this.parent._request("DELETE", `api/1/vehicles/${vehicle_tag}/drivers`, { share_user_id });
     }
 
     /**

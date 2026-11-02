@@ -13,6 +13,7 @@ import {
     SIGNATURE_LENGTH,
     deterministicNonce,
     encodePoint,
+    public_key_bytes,
     sign,
     sign_fleet_telemetry_config,
     sign_jws,
@@ -46,6 +47,17 @@ describe("curve constants", () => {
     it("the order matches OpenSSL: (n - 1)G = -G", () => {
         const minusOne = publicKeyFor(key((N - 1n).toString(16)));
         expect(minusOne.equals(encodePoint([G[0], P - G[1]]))).toBe(true);
+    });
+});
+
+describe("public_key_bytes", () => {
+    it("is the 65-byte uncompressed point, and verifies what the key signs", () => {
+        const privateKey = key("01");
+        const point = public_key_bytes(privateKey);
+        expect(point.equals(encodePoint(G))).toBe(true);
+        expect(point).toHaveLength(65);
+        const message = Buffer.from("message");
+        expect(verify(point, message, sign(privateKey, message))).toBe(true);
     });
 });
 

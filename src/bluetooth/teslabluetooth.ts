@@ -13,6 +13,11 @@ export class VehiclesBluetooth extends Vehicle {
     /** Class `createBluetooth` instantiates; a subclass overrides it to supply its own vehicle type. */
     static Bluetooth: new (parent: Vehicle, vin: string, options: VehicleBluetoothOptions) => VehicleBluetooth = VehicleBluetooth;
 
+    /** Same as `createBluetooth`, under Python's other name. */
+    create(vin: string, options: VehicleBluetoothOptions): VehicleBluetooth {
+        return this.createBluetooth(vin, options);
+    }
+
     /** Creates a vehicle reached over Bluetooth through `options.transport`. */
     createBluetooth(vin: string, options: VehicleBluetoothOptions): VehicleBluetooth {
         const vehicle = new (this.constructor as typeof VehiclesBluetooth).Bluetooth(this, vin, options);

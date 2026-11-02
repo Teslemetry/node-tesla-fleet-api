@@ -20,6 +20,10 @@ Stages still to run, from design document 06, section 4:
 | HW-5 | Homey end to end, and a 24 h soak. |
 | HW-6 | Charge-port acceptance, with the captain present. |
 
+## Local Powerwall: nothing yet
+
+**No Node code has talked to a real gateway.** `pnpm powerwall:check` is the read-only run that gates PW-17. Record its setup (gateway model, firmware, how it was reached) and its pass or fail per step here, never a value it read.
+
 ## Offline checks of backend packages (2026-11-02)
 
 **Setup:** the published packages, read and run on a development machine, with no radio, proxy or car. These check our reading of each package, and say nothing about hardware.

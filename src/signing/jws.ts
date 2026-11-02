@@ -25,6 +25,11 @@ export const TELEMETRY_AUDIENCE = "com.tesla.fleet.TelemetryClient";
 export const SCALAR_LENGTH = 32;
 export const SIGNATURE_LENGTH = 3 * SCALAR_LENGTH;
 
+/** The 65-byte uncompressed public point for a raw P-256 private key. */
+export function public_key_bytes(privateKey: Uint8Array): Buffer {
+    return publicKeyFor(Buffer.from(privateKey));
+}
+
 type AffinePoint = readonly [x: bigint, y: bigint];
 /** `null` is the point at infinity. */
 type Point = AffinePoint | null;

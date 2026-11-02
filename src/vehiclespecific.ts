@@ -216,16 +216,18 @@ export default class VehicleSpecific {
 
   /**
    * Sends a location to the in-vehicle navigation system.
+   * @param value Destination text
    * @param type "share_ext_content_raw"
-   * @param locale ISO locale such as "en-US"
-   * @param timestamp_ms
+   * @param locale ISO locale such as "en-US". Defaults to `DEFAULT_LOCALE`.
+   * @param timestamp_ms Defaults to now
    */
   async navigation_request(
     value: string,
-    locale: string,
     type: string = "share_ext_content_raw",
+    locale?: string | null,
+    timestamp_ms?: number | null,
   ): Promise<CommandResponse> {
-    return this.parent.navigation_request(this.vin, value, locale, type);
+    return this.parent.navigation_request(this.vin, value, type, locale, timestamp_ms);
   }
 
   /**
@@ -791,7 +793,7 @@ export default class VehicleSpecific {
    * Removes driver access from a vehicle. Share users can only remove their own access. Owners can remove share access or their own.
    * @param share_user_id
    */
-  async drivers_remove(share_user_id?: number): Promise<Record<string, any>> {
+  async drivers_remove(share_user_id?: string | number): Promise<Record<string, any>> {
     return this.parent.drivers_remove(this.vin, share_user_id);
   }
 

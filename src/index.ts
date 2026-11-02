@@ -1,3 +1,4 @@
+import Charging from "./charging.js";
 import Commands, { infotainment_command_name, vcsec_command_name } from "./commands.js";
 import Energy from "./energy.js";
 import EnergySpecific, {
@@ -5,10 +6,12 @@ import EnergySpecific, {
     UNSIGNED_DEVICE_COMMANDS,
     validate_dispatch_battery_power,
 } from "./energyspecific.js";
+import Partner from "./partner.js";
 import TeslaFleetApi from "./teslafleetapi.js";
 import TeslaFleetOAuth from "./oauth.js";
 import Teslemetry, { REGISTER_URL, register_client } from "./teslemetry.js";
 import Tessie from "./tessie.js";
+import User from "./user.js";
 import Vehicle from "./vehicle.js";
 import VehicleSigned from "./vehiclesigned.js";
 import VehicleSpecific from "./vehiclespecific.js";
@@ -29,7 +32,7 @@ export type {
     TessieStatesOptions,
 } from "./tessievehicle.js";
 export type { TessieAllBatteryHealthOptions, TessieChargingInvoicesOptions, TessieOptions } from "./tessie.js";
-export { Commands, Energy, EnergySpecific, TeslaFleetApi, TeslaFleetOAuth, Teslemetry, Tessie, Vehicle, VehicleSigned, VehicleSpecific };
+export { Charging, Commands, Energy, EnergySpecific, Partner, TeslaFleetApi, TeslaFleetOAuth, Teslemetry, Tessie, User, Vehicle, VehicleSigned, VehicleSpecific };
 export { REGISTER_URL, infotainment_command_name, register_client, vcsec_command_name };
 export type { TeslemetryClientRegistration } from "./teslemetry.js";
 export type { SendOptions, SendRequires, SignedCommandResponse, SignedReply } from "./commands.js";
