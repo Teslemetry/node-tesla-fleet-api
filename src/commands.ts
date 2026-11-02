@@ -30,6 +30,7 @@ import { genericErrorEToJSON } from "@teslemetry/tesla-protocol/command/errors";
 import {
     Action,
     VehicleAction,
+    Ping,
     Response,
     OperationStatusE as ActionOperationStatusE,
     ChargingStartStopAction,
@@ -84,7 +85,7 @@ import {
     UiSetUpcomingCalendarEntries,
 } from "@teslemetry/tesla-protocol/command/car_server";
 import { Void, LatLong, PreconditioningTimes, OffPeakChargingTimes, StwHeatLevel } from "@teslemetry/tesla-protocol/command/common";
-import { VehicleState_GuestMode, ClimateState_CopActivationTemp } from "@teslemetry/tesla-protocol/command/vehicle";
+import { VehicleData, VehicleState_GuestMode, ClimateState_CopActivationTemp } from "@teslemetry/tesla-protocol/command/vehicle";
 import { ClimateMode, ClimateModes, CommandResponse, Level, Seat, Seats, Trunk } from "./types/commands.js";
 import { AutoSeat } from "./const.js";
 import Vehicle from "./vehicle.js";
@@ -93,6 +94,7 @@ import { Session, SessionKeys } from "./signing/session.js";
 import { logRequestError, logRequestResult } from "./log.js";
 import { deriveSharedKey, publicKeyFor, uint32BE } from "./signing/crypto.js";
 import {
+    InvalidResponse,
     MESSAGE_FAULTS,
     NotOnWhitelistFault,
     SIGNED_MESSAGE_INFORMATION_FAULTS,
@@ -105,6 +107,14 @@ import {
 } from "./exceptions.js";
 
 const VOID: Void = {};
+
+/** A signed command's outcome, with any other `Response` payload under its field name. */
+export interface SignedCommandResponse extends CommandResponse {
+    response: CommandResponse["response"] & Partial<Omit<Response, "actionStatus" | "vehicleData" | "ping">>;
+}
+
+/** What one signed dispatch resolves to: a command outcome, or the data a read asked for. */
+export type SignedReply = SignedCommandResponse | { response: VehicleData } | { response: VehicleStatus };
 
 /** Maximum HMAC-personalized (re)send attempts for one logical command, matching the reference implementation. */
 const MAX_ATTEMPTS = 4;
@@ -288,17 +298,22 @@ export default abstract class Commands extends VehicleSpecific {
         this.#publicKey = publicKey ?? publicKeyFor(this.#privateKey);
 
         this.fromDestination = crypto.randomBytes(16);
-        const deriveKey = (vehiclePublicKey: Buffer) => deriveSharedKey(this.#privateKey, vehiclePublicKey);
+        const deriveKey = (vehiclePublicKey: Buffer) => this.shared_key(vehiclePublicKey);
         this.sessions = {
             [Domain.DOMAIN_VEHICLE_SECURITY]: new Session(Domain.DOMAIN_VEHICLE_SECURITY, deriveKey),
             [Domain.DOMAIN_INFOTAINMENT]: new Session(Domain.DOMAIN_INFOTAINMENT, deriveKey),
         };
     }
 
+    /** Derive the 16-byte shared key used for signed-command session encryption. */
+    shared_key(vehicleKey: Buffer): Buffer {
+        return deriveSharedKey(this.#privateKey, vehicleKey);
+    }
+
     /**
      * Transmit a signed (or session-handshake) `RoutableMessage` to the
      * vehicle and return its reply. Implementations must call
-     * `validateAndUpdateSession(resp, msg.uuid)` on the reply before
+     * `validate_msg(resp, msg.uuid)` on the reply before
      * returning it.
      */
     protected abstract _send(
@@ -337,7 +352,7 @@ export default abstract class Commands extends VehicleSpecific {
      * one status is accepted unauthenticated. Any other status with no key is
      * malformed.
      */
-    protected validateAndUpdateSession(resp: RoutableMessage, requestUuid: Buffer): void {
+    validate_msg(resp: RoutableMessage, requestUuid: Buffer): void {
         if (resp.sessionInfo && resp.sessionInfo.length > 0) {
             const domain = resp.fromDestination?.domain;
             const session = domain !== undefined ? this.sessions[domain] : undefined;
@@ -422,6 +437,17 @@ export default abstract class Commands extends VehicleSpecific {
         await this._send(msg, "session_info");
     }
 
+    /** Perform a handshake with the vehicle security domain, even if a session is already established. */
+    async handshakeVehicleSecurity(): Promise<void> {
+        const session = this.sessionFor(Domain.DOMAIN_VEHICLE_SECURITY);
+        await session.withLock(() => this.handshake(Domain.DOMAIN_VEHICLE_SECURITY));
+    }
+
+    /** Perform a handshake with the infotainment domain, even if a session is already established. */
+    async handshakeInfotainment(): Promise<void> {
+        await this.handshake(Domain.DOMAIN_INFOTAINMENT);
+    }
+
     private buildHmacMessage(session: Session, command: Buffer): RoutableMessage {
         const personalized = session.hmacPersonalized();
         if (!session.hmacKey) {
@@ -468,11 +494,11 @@ export default abstract class Commands extends VehicleSpecific {
      * most one VCSEC message is ever in flight. Infotainment keeps the
      * narrower build-only lock, serializing only counter assignment.
      */
-    private async dispatch(domain: Domain, command: Buffer, expectsData: boolean): Promise<CommandResponse> {
+    private async dispatch(domain: Domain, command: Buffer, expectsData: boolean): Promise<SignedReply> {
         const session = this.sessionFor(domain);
         const serializeWholeDispatch = domain === Domain.DOMAIN_VEHICLE_SECURITY;
 
-        const run = async (): Promise<CommandResponse> => {
+        const run = async (): Promise<SignedReply> => {
             if (!session.ready) {
                 await this.handshake(domain);
             }
@@ -504,7 +530,7 @@ export default abstract class Commands extends VehicleSpecific {
                     continue;
                 }
 
-                const result = this.interpretResponse(resp);
+                const result = this.interpretResponse(resp, expectsData);
                 if (result === "wait") {
                     if (attempt >= MAX_ATTEMPTS - 1) {
                         return fail("Too many retries");
@@ -521,14 +547,14 @@ export default abstract class Commands extends VehicleSpecific {
         return serializeWholeDispatch ? session.withLock(run) : run();
     }
 
-    private interpretResponse(resp: RoutableMessage): CommandResponse | "wait" {
+    private interpretResponse(resp: RoutableMessage, expectsData: boolean): SignedReply | "wait" {
         if (!resp.protobufMessageAsBytes || resp.protobufMessageAsBytes.length === 0) {
             return ok();
         }
 
         const domain = resp.fromDestination?.domain;
         if (domain === Domain.DOMAIN_VEHICLE_SECURITY) {
-            return this.interpretVcsecResponse(resp.protobufMessageAsBytes);
+            return this.interpretVcsecResponse(resp.protobufMessageAsBytes, expectsData);
         }
         if (domain === Domain.DOMAIN_INFOTAINMENT) {
             return this.interpretInfotainmentResponse(resp.protobufMessageAsBytes);
@@ -536,16 +562,16 @@ export default abstract class Commands extends VehicleSpecific {
         return ok();
     }
 
-    private interpretVcsecResponse(bytes: Uint8Array): CommandResponse | "wait" {
+    private interpretVcsecResponse(bytes: Uint8Array, expectsData: boolean): SignedReply | "wait" {
         const vcsec = FromVCSECMessage.decode(bytes);
 
         if (vcsec.nominalError) {
             return fail(genericErrorEToJSON(vcsec.nominalError.genericError));
         }
         if (vcsec.vehicleStatus) {
-            // Every current VCSEC command is an actuation, so a populated
-            // vehicleStatus here is always the ack, never a requested read.
-            return ok();
+            // An actuation has no data reply of its own: a populated
+            // vehicleStatus there stands in for the ack. Only a read wants it.
+            return expectsData ? { response: vcsec.vehicleStatus } : ok();
         }
         if (vcsec.commandStatus) {
             const status = vcsec.commandStatus;
@@ -589,26 +615,34 @@ export default abstract class Commands extends VehicleSpecific {
         }
     }
 
-    private interpretInfotainmentResponse(bytes: Uint8Array): CommandResponse {
+    private interpretInfotainmentResponse(bytes: Uint8Array): SignedReply {
         const response = Response.decode(bytes);
         if (response.ping) {
-            return ok(String(response.ping.localTimestamp ?? ""));
+            return ok(response.ping.localTimestamp?.toISOString() ?? "");
         }
+        if (response.vehicleData) {
+            return { response: response.vehicleData };
+        }
+        // Any other response_msg member reaches the caller under its field
+        // name, so an empty payload differs from an undecoded one.
+        const field = populatedField(response, ["actionStatus"]);
+        const data = field ? { [field]: response[field as keyof Response] } : {};
         if (response.actionStatus) {
             return {
                 response: {
                     result: response.actionStatus.result === ActionOperationStatusE.OPERATIONSTATUS_OK,
                     reason: response.actionStatus.resultReason?.plainText ?? "",
+                    ...data,
                 },
             };
         }
-        return ok();
+        return { response: { result: true, reason: "", ...data } };
     }
 
     /** Dispatch one signed command, logging its name, transport and outcome. */
-    private async dispatchLogged(name: string, domain: Domain, command: Buffer, expectsData: boolean): Promise<CommandResponse> {
+    private async dispatchLogged(name: string, domain: Domain, command: Buffer, expectsData: boolean): Promise<SignedReply> {
         const log = (message: string) => this.parent.parent._log(message);
-        let result: CommandResponse;
+        let result: SignedReply;
         try {
             result = await this.dispatch(domain, command, expectsData);
         } catch (error) {
@@ -619,25 +653,65 @@ export default abstract class Commands extends VehicleSpecific {
         return result;
     }
 
+    /** The data a read asked for. A reply that only reports an outcome carries none. */
+    private readData<T extends VehicleData | VehicleStatus>(reply: SignedReply): T {
+        if ("result" in reply.response) {
+            throw new InvalidResponse({ result: reply.response.result, reason: reply.response.reason });
+        }
+        return reply.response as T;
+    }
+
+    /** Sign and send an actuation: its reply is a bare terminal ack, so `expectsData` is false. */
     private async sendVehicleSecurity(command: UnsignedMessage): Promise<CommandResponse> {
-        return this.dispatchLogged(
+        const reply = await this.dispatchLogged(
             vcsec_command_name(command),
             Domain.DOMAIN_VEHICLE_SECURITY,
             Buffer.from(UnsignedMessage.encode(command).finish()),
             false,
         );
+        return reply as CommandResponse;
     }
 
-    private async sendInfotainment(action: Action): Promise<CommandResponse> {
-        return this.dispatchLogged(
+    /**
+     * Sign and send a read to the Vehicle Security computer.
+     * @throws InvalidResponse when the reply carries no `VehicleStatus`.
+     */
+    protected async _getVehicleSecurity(command: UnsignedMessage): Promise<VehicleStatus> {
+        const reply = await this.dispatchLogged(
+            vcsec_command_name(command),
+            Domain.DOMAIN_VEHICLE_SECURITY,
+            Buffer.from(UnsignedMessage.encode(command).finish()),
+            true,
+        );
+        return this.readData<VehicleStatus>(reply);
+    }
+
+    /** Sign and send a command to the Infotainment computer. Reads go through `_getInfotainment`. */
+    private async sendInfotainment(action: Action): Promise<SignedCommandResponse> {
+        const reply = await this.dispatchLogged(
             infotainment_command_name(action),
             Domain.DOMAIN_INFOTAINMENT,
             Buffer.from(Action.encode(action).finish()),
             true,
         );
+        return reply as SignedCommandResponse;
     }
 
-    private vehicleAction(action: VehicleAction): Promise<CommandResponse> {
+    /**
+     * Sign and send a read to the Infotainment computer.
+     * @throws InvalidResponse when the reply carries no `VehicleData`.
+     */
+    protected async _getInfotainment(action: Action): Promise<VehicleData> {
+        const reply = await this.dispatchLogged(
+            infotainment_command_name(action),
+            Domain.DOMAIN_INFOTAINMENT,
+            Buffer.from(Action.encode(action).finish()),
+            true,
+        );
+        return this.readData<VehicleData>(reply);
+    }
+
+    protected vehicleAction(action: VehicleAction): Promise<SignedCommandResponse> {
         return this.sendInfotainment(Action.create({ vehicleAction: action }));
     }
 
@@ -646,6 +720,11 @@ export default abstract class Commands extends VehicleSpecific {
     }
 
     // Vehicle Commands
+
+    /** Pings the vehicle. On success, `reason` is the vehicle's timestamp in ISO 8601. */
+    async ping(): Promise<CommandResponse> {
+        return this.vehicleAction(VehicleAction.create({ ping: Ping.create({ pingId: 0 }) }));
+    }
 
     /**
      * Controls the front (which_trunk: "front") or rear (which_trunk: "rear") trunk.

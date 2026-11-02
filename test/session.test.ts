@@ -59,7 +59,7 @@ describe("Session", () => {
         return new Session(Domain.DOMAIN_VEHICLE_SECURITY, (vehiclePublicKey) => deriveSharedKey(OUR_PRIVATE_KEY, vehiclePublicKey));
     }
 
-    /** Mirrors what `Commands.validateAndUpdateSession` does once a SessionInfo's tag has verified. */
+    /** Mirrors what `Commands.validate_msg` does once a SessionInfo's tag has verified. */
     function applyInfo(session: Session, overrides: Partial<SessionInfo> = {}): boolean {
         const info = sessionInfo(overrides);
         const keys = session.keysFor(Buffer.from(info.publicKey));

@@ -4,17 +4,32 @@ import { SessionInfoStatus } from "@teslemetry/tesla-protocol/command/signatures
 import {
     CommandStatus,
     FromVCSECMessage,
+    InformationRequest,
+    InformationRequestType,
     OperationStatusE,
     SignedMessageInformationE,
+    UnsignedMessage,
+    VehicleLockStateE,
     VehicleStatus,
     WhitelistOperationInformationE,
 } from "@teslemetry/tesla-protocol/command/vcsec";
 import { GenericErrorE } from "@teslemetry/tesla-protocol/command/errors";
-import { Action, AutoSeatClimateAction_AutoSeatPositionE, RemoteNavTripOrderE, VehicleAction } from "@teslemetry/tesla-protocol/command/car_server";
+import {
+    Action,
+    ActionStatus,
+    AutoSeatClimateAction_AutoSeatPositionE,
+    GetVehicleData,
+    OperationStatusE as ActionOperationStatusE,
+    RemoteNavTripOrderE,
+    Response,
+    VehicleAction,
+} from "@teslemetry/tesla-protocol/command/car_server";
+import { VehicleData } from "@teslemetry/tesla-protocol/command/vehicle";
 import Commands from "../src/commands.js";
 import TeslaFleetApi from "../src/teslafleetapi.js";
 import Vehicle from "../src/vehicle.js";
 import {
+    InvalidResponse,
     NotOnWhitelistFault,
     SessionInfoAuthenticationFault,
     SignedMessageInformationFaultNotOnWhitelist,
@@ -24,7 +39,7 @@ import {
 } from "../src/exceptions.js";
 import { publicKeyFor } from "../src/signing/crypto.js";
 import { AutoSeat, Seats } from "../src/const.js";
-import { FakeVehicle } from "./helpers/fakevehicle.js";
+import { FAKE_PING_TIMESTAMP, FakeVehicle } from "./helpers/fakevehicle.js";
 
 const VIN = "5YJXCAE43LF123456";
 const OUR_PRIVATE_KEY = Buffer.from("10181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3ea", "hex");
@@ -55,7 +70,7 @@ class TestCommands extends Commands {
         }
         const replyBytes = this.fakeVehicle.handle(Buffer.from(RoutableMessage.encode(msg).finish()));
         const resp = RoutableMessage.decode(replyBytes);
-        this.validateAndUpdateSession(resp, Buffer.from(msg.uuid));
+        this.validate_msg(resp, Buffer.from(msg.uuid));
         return resp;
     }
 }
@@ -260,6 +275,121 @@ describe("Commands: VCSEC commandStatus", () => {
             FromVCSECMessage.create({ nominalError: { genericError: GenericErrorE.GENERICERROR_CLOSURES_OPEN } }),
         );
         await expect(commands.door_lock()).resolves.toEqual({ response: { result: false, reason: "GENERICERROR_CLOSURES_OPEN" } });
+    });
+});
+
+describe("Commands: reply payloads and reads", () => {
+    class ReadingCommands extends TestCommands {
+        readVehicleSecurity(): Promise<VehicleStatus> {
+            return this._getVehicleSecurity(
+                UnsignedMessage.create({
+                    InformationRequest: InformationRequest.create({ informationRequestType: InformationRequestType.INFORMATION_REQUEST_TYPE_GET_STATUS }),
+                }),
+            );
+        }
+
+        readInfotainment(): Promise<VehicleData> {
+            return this._getInfotainment(
+                Action.create({ vehicleAction: VehicleAction.create({ getVehicleData: GetVehicleData.create({ getChargeState: {} }) }) }),
+            );
+        }
+
+        callManagedChargingSites(): Promise<Awaited<ReturnType<Commands["ping"]>> & Record<string, any>> {
+            return this.vehicleAction(VehicleAction.create({ getManagedChargingSitesRequest: {} })) as any;
+        }
+    }
+
+    const lockedStatus = VehicleStatus.create({ vehicleLockState: VehicleLockStateE.VEHICLELOCKSTATE_LOCKED });
+
+    it("returns a payload under its field name, with result and reason", async () => {
+        const commands = new ReadingCommands();
+        const sites = { sites: [{ siteId: "one" }] };
+        commands.fakeVehicle.replyToNextInfotainmentCommandWith(Response.create({ getManagedChargingSitesResponse: sites as any }));
+        const reply = await commands.callManagedChargingSites();
+        expect(reply.response).toMatchObject({ result: true, reason: "" });
+        expect(reply.response.getManagedChargingSitesResponse.sites).toHaveLength(1);
+    });
+
+    it("keeps an action status alongside a payload", async () => {
+        const commands = new ReadingCommands();
+        commands.fakeVehicle.replyToNextInfotainmentCommandWith(
+            Response.create({
+                actionStatus: ActionStatus.create({
+                    result: ActionOperationStatusE.OPERATIONSTATUS_ERROR,
+                    resultReason: { plainText: "busy" },
+                }),
+                getManagedChargingSitesResponse: { sites: [] } as any,
+            }),
+        );
+        const reply = await commands.callManagedChargingSites();
+        expect(reply.response).toMatchObject({ result: false, reason: "busy" });
+        expect(reply.response.getManagedChargingSitesResponse).toBeDefined();
+    });
+
+    it("tells an empty payload from a reply with no payload", async () => {
+        const commands = new ReadingCommands();
+        commands.fakeVehicle.replyToNextInfotainmentCommandWith(Response.create({ getManagedChargingSitesResponse: { sites: [] } as any }));
+        const empty = await commands.callManagedChargingSites();
+        expect("getManagedChargingSitesResponse" in empty.response).toBe(true);
+
+        const none = await commands.callManagedChargingSites();
+        expect("getManagedChargingSitesResponse" in none.response).toBe(false);
+    });
+
+    it("ping returns the timestamp as reason", async () => {
+        const commands = new ReadingCommands();
+        await expect(commands.ping()).resolves.toEqual({ response: { result: true, reason: FAKE_PING_TIMESTAMP.toISOString() } });
+    });
+
+    it("vehicleStatus is success for an actuation", async () => {
+        const commands = new ReadingCommands();
+        commands.fakeVehicle.replyToNextVcsecCommandWith(FromVCSECMessage.create({ vehicleStatus: lockedStatus }));
+        await expect(commands.door_lock()).resolves.toEqual({ response: { result: true, reason: "" } });
+    });
+
+    it("vehicleStatus is the data for a read", async () => {
+        const commands = new ReadingCommands();
+        commands.fakeVehicle.replyToNextVcsecCommandWith(FromVCSECMessage.create({ vehicleStatus: lockedStatus }));
+        const status = await commands.readVehicleSecurity();
+        expect(status.vehicleLockState).toBe(VehicleLockStateE.VEHICLELOCKSTATE_LOCKED);
+    });
+
+    it("returns vehicleData for an Infotainment read", async () => {
+        const commands = new ReadingCommands();
+        commands.fakeVehicle.replyToNextInfotainmentCommandWith(Response.create({ vehicleData: VehicleData.create({ chargeState: { chargeLimitSoc: 80 } as any }) }));
+        const data = await commands.readInfotainment();
+        expect(data.chargeState?.chargeLimitSoc).toBe(80);
+    });
+
+    it("raises InvalidResponse for a read answered with only an outcome", async () => {
+        const commands = new ReadingCommands();
+        await expect(commands.readVehicleSecurity()).rejects.toThrow(InvalidResponse);
+        await expect(commands.readInfotainment()).rejects.toThrow(InvalidResponse);
+    });
+
+    it("exposes handshakes that always reach the vehicle", async () => {
+        const commands = new ReadingCommands();
+        await commands.handshakeVehicleSecurity();
+        await commands.handshakeVehicleSecurity();
+        await commands.handshakeInfotainment();
+        expect(commands.sendCount).toBe(3);
+        expect((commands as any).sessions[Domain.DOMAIN_VEHICLE_SECURITY].ready).toBe(true);
+        expect((commands as any).sessions[Domain.DOMAIN_INFOTAINMENT].ready).toBe(true);
+    });
+
+    it("shared_key derives the protocol's key", () => {
+        const client = Buffer.from("2538CDC29A97C19C1E99A637D6CF4F8C970C118B56EDE1E6323E6D162C4B30DB", "hex");
+        const vehicle = Buffer.from(
+            "04c7a1f47138486aa4729971494878d33b1a24e39571f748a6e16c5955b3d877d3a6aaa0e955166474af5d32c410f439a2234137ad1bb085fd4e8813c958f11d97",
+            "hex",
+        );
+        class Keyed extends Commands {
+            readonly _transport_name = "test";
+            protected _send(): Promise<RoutableMessage> {
+                throw new Error("unused");
+            }
+        }
+        expect(new Keyed(makeParent(), VIN, client).shared_key(vehicle).toString("hex")).toBe("1b2fce19967b79db696f909cff89ea9a");
     });
 });
 

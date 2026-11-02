@@ -21,7 +21,7 @@ export interface SessionKeys {
  * because the caller must authenticate a `SessionInfo` reply - by verifying
  * its `session_info_tag` against the very keys derived here - *before*
  * trusting anything in it, including the vehicle public key the shared key
- * itself is derived from. See `Commands.validateAndUpdateSession`.
+ * itself is derived from. See `Commands.validate_msg`.
  *
  * A `Session` is not itself thread-safe; `withLock` serializes the
  * message-build step (which mutates `counter`) so concurrent commands on the

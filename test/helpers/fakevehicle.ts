@@ -17,6 +17,9 @@ import { deriveSharedKey, publicKeyFor, uint32BE } from "../../src/signing/crypt
 
 const VIN = "5YJXCAE43LF123456";
 
+/** The vehicle clock a `FakeVehicle` reports in a ping reply. */
+export const FAKE_PING_TIMESTAMP = new Date("2026-01-02T03:04:05.000Z");
+
 type SessionInfoAttack =
     | { kind: "corrupt-tag" }
     | { kind: "empty-tag" }
@@ -51,6 +54,7 @@ export class FakeVehicle {
     private omitRequestUuidEcho = false;
     private nextHandshakeEmptyKeyStatus: SessionInfoStatus | null = null;
     private nextVcsecReply: FromVCSECMessage | null = null;
+    private nextInfotainmentReply: Response | null = null;
     /** Counters of every VCSEC command in the order this FakeVehicle actually received them - for concurrency/ordering tests. */
     readonly vcsecCounterArrivals: number[] = [];
 
@@ -98,6 +102,11 @@ export class FakeVehicle {
     /** Answer the next accepted VCSEC command with this message instead of `commandStatus` OK. */
     replyToNextVcsecCommandWith(message: FromVCSECMessage): void {
         this.nextVcsecReply = message;
+    }
+
+    /** Answer the next accepted Infotainment command with this message instead of `actionStatus` OK. */
+    replyToNextInfotainmentCommandWith(message: Response): void {
+        this.nextInfotainmentReply = message;
     }
 
     /** Simulate a captured old session-info reply replayed against a request it wasn't tagged for. */
@@ -316,9 +325,15 @@ export class FakeVehicle {
                     }),
             ).finish();
         } else {
-            Action.decode(command); // exercised for shape validation
+            const action = Action.decode(command);
+            const scripted = this.nextInfotainmentReply;
+            this.nextInfotainmentReply = null;
+            const ping = action.vehicleAction?.ping;
             payload = Response.encode(
-                Response.create({ actionStatus: ActionStatus.create({ result: ActionOperationStatusE.OPERATIONSTATUS_OK }) }),
+                scripted ??
+                    (ping
+                        ? Response.create({ ping: { pingId: ping.pingId, localTimestamp: FAKE_PING_TIMESTAMP } })
+                        : Response.create({ actionStatus: ActionStatus.create({ result: ActionOperationStatusE.OPERATIONSTATUS_OK }) })),
             ).finish();
         }
 
