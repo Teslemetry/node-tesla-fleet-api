@@ -6,8 +6,13 @@ import { BluetoothUnconfirmedCommand, TeslaFleetApi, InvalidResponse, firmwareAt
 import { getTariffPeriods, unwrapTariffV2 } from "tesla-fleet-api/tariff";
 import { Models, SERVERS } from "tesla-fleet-api/const";
 import * as router from "tesla-fleet-api/router";
+import { BleNotSubmittedError, ReassemblingBuffer, SERVICE_UUID } from "tesla-fleet-api/bluetooth";
 
 assert.equal(typeof TeslaFleetApi, "function");
+// ./bluetooth must load with no GATT backend installed.
+assert.equal(typeof ReassemblingBuffer, "function");
+assert.ok(new BleNotSubmittedError("x") instanceof Error);
+assert.equal(SERVICE_UUID, "00000211-b2d1-43f0-9b88-960cebf8b91e");
 assert.equal(typeof getTariffPeriods, "function");
 assert.equal(rootGetTariffPeriods, getTariffPeriods);
 assert.equal(rootModels, Models);

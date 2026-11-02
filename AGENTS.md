@@ -5,7 +5,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 ## Build & tooling
 
 - `pnpm install` (whose `prepare` script runs `tsdown`, same as `pnpm build`) is the build gate; `npx tsc --noEmit` typechecks without emitting. `pnpm test` runs the vitest suite under `test/`, which `tsconfig.json`'s `include` deliberately excludes so tests never ship in `dist`.
-- The package is a dual ESM/CJS unbundled build (`tsdown.config.ts`). Its public surface is exactly `package.json`'s `exports` map (`.`, `./tariff`, `./const`, `./router`, `./types`); deep `dist/...` imports are blocked by design. A new subpath needs an entry in both files. `./tariff` must never pull in `@teslemetry/tesla-protocol` (`@teslemetry/api` inlines it), and `./types` is type-only (`export type *`). CI checks `attw --pack . --profile node16`, runs `test/consumers/` from both module systems, and greps `dist/tariff.*`.
+- The package is a dual ESM/CJS unbundled build (`tsdown.config.ts`). Its public surface is exactly `package.json`'s `exports` map (`.`, `./tariff`, `./const`, `./router`, `./types`, `./bluetooth`); deep `dist/...` imports are blocked by design. A new subpath needs an entry in both files. `./tariff` must never pull in `@teslemetry/tesla-protocol` (`@teslemetry/api` inlines it), and `./types` is type-only (`export type *`). CI checks `attw --pack . --profile node16`, runs `test/consumers/` from both module systems, and greps `dist/tariff.*`.
 - `tsconfig.json` must keep `"module": "NodeNext"` / `"moduleResolution": "NodeNext"`. `@teslemetry/tesla-protocol` gates its subpaths behind a package.json `exports` map with per-subpath types; under classic/ESNext resolution every scoped-package import (even `@types/node` internals) fails to resolve.
 - `__VERSION__` (sent in `X-Library`) is a compile-time `define` from `package.json`, set in **both** `tsdown.config.ts` and `vitest.config.ts`; a new build or test entry point needs it too.
 - Tesla protobuf types (`RoutableMessage`, `vcsec`, `car_server`, `signatures`, `keys`, ...) come only from `@teslemetry/tesla-protocol` (subpaths like `@teslemetry/tesla-protocol/command/signatures`); nothing is vendored or generated here. It is ts-proto output: plain-object messages with `Type.create(partial)` / `Type.encode(msg).finish()` / `Type.decode(bytes)`, not `google-protobuf`'s `.setX()`/`.serializeBinary()`.
@@ -28,6 +28,15 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `test/helpers/fakevehicle.ts` is a from-scratch reimplementation of the vehicle side (independent HMAC and AES-GCM in both directions, not a mock), so round-trip tests check the client against a second implementation of the wire format.
 - `src/signing/jws.ts` (Tesla.SS256) takes the raw key, so a subclass reaches it only through `Commands.signFleetTelemetryConfig`. Its vectors in `test/fixtures/ss256_vectors.json` are Tesla's Go SDK output, copied from Python; never regenerate them. There is deliberately no low-`s` normalisation.
 
+## Bluetooth (`src/bluetooth/`)
+
+- `VehicleBluetooth` is a second subclass of `Commands`, through `BroadcastListeners` (`broadcast.ts`), which stands in for Python's mixin. `./bluetooth` is the only way in: the root entry and `Vehicle` must never load it (`test/bluetooth/entry.test.ts` walks the imports; `test/consumers/cjs.cjs` checks the built result), so `createBluetooth` lives on `VehiclesBluetooth`. It imports no GATT library or native module, and runs on Node `crypto`: a backend arrives as a `BleTransport` (`transport.ts`, whose header holds the adapter rules) that does raw GATT only.
+- Homey is the weakest backend and the primary consumer, so the contract asks only for what it does: a fixed 5 s `discover()` with no filter, no connect or write timeout, write-with-response only, no MTU (`maxWriteSize` left out means 20 bytes), and `isConnected` and the disconnect event that can both lie. Every backend call is bounded here, and a read timeout, or a failed write followed by a silent reply window, marks the link lost whatever `isConnected` says. Don't gate link loss on `isConnected` alone, or a dead link wedges behind writes that "succeed" as best-effort.
+- An attempt the library gave up on can still land on a backend with no timeout, so `connectOnce` closes it late: the vehicle has three slots. A new connect awaits `teardown`, because a late `disconnect()` on Homey would end the new link to the same peripheral.
+- A timed-out mutating command is unresolved, never failed, and is never sent again. Only `BluetoothTransportError` (an adapter's `BleNotSubmittedError`, or nothing written) and `BluetoothCommandFailed` are safe for a router to replay. A mismatching broadcast proves failure only when the whole window ran out, so a lost link that cuts the window short leaves it unconfirmed.
+- Verify plans (`verify.ts`) compare with `sameFloat`: temperatures and volume are float32 on the wire, so a raw `===` against the caller's double reports a command that ran as failed, and a router replays it. A state field the reply left out proves nothing, so it resolves as an unreadable read. Python compares proto defaults there. Never add a plan for a toggle, a relative step or an ack-only action.
+- `test/helpers/fakeblelink.ts` keeps its own framing, as `FakeVehicle` keeps its own signing, so it must not import `src/bluetooth/framing.ts`. Prove "exactly one" with `FakeVehicle.vcsecCommands`/`infotainmentActions`, which hold decrypted commands, not with frame counts, which include reads.
+
 ## Keys (`src/signing/keys.ts`)
 
 - `TeslaFleetApi.get_private_key` returns, and `Commands` takes, a raw 32-byte `Buffer`; `get_rsa_private_key` returns a `KeyObject`, which is what `EnergySpecific` takes. Both live in native `#private` fields behind accessors. The files are PEMs shared with Python (SEC1 and PKCS#1), so don't change the format.
@@ -42,6 +51,22 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `EnergyDeviceSigner.envelope` takes Python's snake_case names. ts-proto's `fromJSON` reads camelCase and silently drops the rest, so `envelope` converts the keys and `assertParsed` raises on anything dropped, matching Python's `ParseDict`.
 - `set_island_mode`, `go_off_grid` and `reconnect_grid` must never reach the unsigned `grpc_command`: gateways acknowledge it without moving the contactor. They go straight to `_signed_command`, never `_command`.
 - `src/energyparsers.ts` stays free of protobuf, because Homey calls its free functions on raw `@teslemetry/api` replies. A null body raises `InvalidResponse`; it never means "no clients" or "no address".
+
+## Cloud clients (`src/teslemetry.ts`, `src/tessie.ts`)
+
+- `TeslemetryVehicle` and `TessieVehicle` extend `VehicleSpecific`, and `vehicles.create(vin)` is their only factory. `TeslemetryVehicles`/`TessieVehicles` must still extend `Vehicle`, so the base factories can't be removed: they are shadowed as `undefined as never` fields, which makes calling one a compile error and leaves it undefined at run time. `test/factories.types.ts` enforces that through `npx tsc -p tsconfig.test.json --noEmit`, which CI runs over `test/*.types.ts`; plain `tsc` and vitest never typecheck `test/`.
+- Python call sites use keyword arguments, so a Python method with many optional arguments becomes an options object here (with `start`/`end`, sent as `from`/`to`); short ones stay positional, in Python's order. Tessie's `tessie_*` commands take `max_attempts` before `wait_for_completion`, the reverse of every other Tessie command.
+- `_request` log lines go through `redactedJson`/`redactedQuery` in `src/log.ts`, matched by key name: `migrate_to_oauth` sends a token in a body, Tessie sends PINs in the query string, and Fleet's `set_pin_to_drive` and `set_valet_mode` call their PIN `password`. A new secret-bearing key belongs in `SECRET_KEYS`. Error lines log a message only for `TeslaFleetError`, whose message is fixed per class; anything else logs its type alone, and error `data` is never logged.
+
+## Router (`src/router/`)
+
+- Port of Python's `router/`; design in Linear document 02. `./router` imports only `exceptions` at run time (`test/router.test.ts` enforces it): a backend that cannot be imported (Bluetooth, Powerwall) marks its own errors with a boolean `failover_safe`. No `Proxy` and no method list: methods come from the backends' prototypes at construction (`methodNames`), and `Routed<B>` types them. The two must agree on what is skipped (`_` names, `then`).
+- `BluetoothUnconfirmedCommand` is checked before `on_result` and before the policy, by `instanceof` **and** the `unconfirmed` field. `instanceof` alone fails across the dual-package hazard; `test/consumers/esm.mjs` proves this with both real copies. Unlike Python, `is_failover_safe` itself also answers false for it.
+- Backend methods must not use overloads (`infer` reads only the last one). `test/router.types.ts` runs in CI through `tsconfig.test.json`; `test/*.test.ts` is not typechecked at all.
+
+## Observation funnel (`src/funnel.ts`)
+
+A funnel, not a selector: do not add source health, availability, grace windows, priority or per-field selection. Unavailability is a value a source reports, never inferred from a dropped link. The module stays synchronous and never originates a request (`test/funnel.test.ts` checks its syntax tree); polling belongs to the consumer. Translations are positive allowlists: an unmapped value emits nothing.
 
 ## Local Powerwall (`src/powerwall/`)
 
@@ -65,22 +90,6 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `LiveStatusMerge` and `SiteInfoMerge` own no timer, and `test/powerwall/merge.test.ts` fails if they start one: the caller drives `poll()`. A `SiteInfoMerge` read that a command landed in is discarded by `generation`, because it predates the command's value, but it still updates `healthy`.
 - `connect_gateway` persists nothing: `moved` hands the caller a `host` to save. Every outcome returns a client, so a stale one fails over to the cloud rather than breaking the site. Registration and discovery use the cloud backend directly, never the router.
 - `scripts/powerwall-readonly-check.ts` runs on a real home's gateway, so it must stay unable to write and must print only key names, types and pass or fail. `test/powerwall/readonly-check.test.ts` checks this on its source, at run time and on the wire, from an allowlist: a new client or site method counts as a write until added to `READS` there, and a new write must join the table in `docs/powerwall.md`. `tsconfig.test.json` also compiles `scripts/*.ts`, so the script's `Pick` types make a write a compile error.
-
-## Cloud clients (`src/teslemetry.ts`, `src/tessie.ts`)
-
-- `TeslemetryVehicle` and `TessieVehicle` extend `VehicleSpecific`, and `vehicles.create(vin)` is their only factory. `TeslemetryVehicles`/`TessieVehicles` must still extend `Vehicle`, so the base factories can't be removed: they are shadowed as `undefined as never` fields, which makes calling one a compile error and leaves it undefined at run time. `test/factories.types.ts` enforces that through `npx tsc -p tsconfig.test.json --noEmit`, which CI runs over `test/*.types.ts`; plain `tsc` and vitest never typecheck `test/`.
-- Python call sites use keyword arguments, so a Python method with many optional arguments becomes an options object here (with `start`/`end`, sent as `from`/`to`); short ones stay positional, in Python's order. Tessie's `tessie_*` commands take `max_attempts` before `wait_for_completion`, the reverse of every other Tessie command.
-- `_request` log lines go through `redactedJson`/`redactedQuery` in `src/log.ts`, matched by key name: `migrate_to_oauth` sends a token in a body, Tessie sends PINs in the query string, and Fleet's `set_pin_to_drive` and `set_valet_mode` call their PIN `password`. A new secret-bearing key belongs in `SECRET_KEYS`. Error lines log a message only for `TeslaFleetError`, whose message is fixed per class; anything else logs its type alone, and error `data` is never logged.
-
-## Router (`src/router/`)
-
-- Port of Python's `router/`; design in Linear document 02. `./router` imports only `exceptions` at run time (`test/router.test.ts` enforces it): a backend that cannot be imported (Bluetooth, Powerwall) marks its own errors with a boolean `failover_safe`. No `Proxy` and no method list: methods come from the backends' prototypes at construction (`methodNames`), and `Routed<B>` types them. The two must agree on what is skipped (`_` names, `then`).
-- `BluetoothUnconfirmedCommand` is checked before `on_result` and before the policy, by `instanceof` **and** the `unconfirmed` field. `instanceof` alone fails across the dual-package hazard; `test/consumers/esm.mjs` proves this with both real copies. Unlike Python, `is_failover_safe` itself also answers false for it.
-- Backend methods must not use overloads (`infer` reads only the last one). `test/router.types.ts` runs in CI through `tsconfig.test.json`; `test/*.test.ts` is not typechecked at all.
-
-## Observation funnel (`src/funnel.ts`)
-
-A funnel, not a selector: do not add source health, availability, grace windows, priority or per-field selection. Unavailability is a value a source reports, never inferred from a dropped link. The module stays synchronous and never originates a request (`test/funnel.test.ts` checks its syntax tree); polling belongs to the consumer. Translations are positive allowlists: an unmapped value emits nothing.
 
 ## Errors (`src/exceptions.ts`)
 
