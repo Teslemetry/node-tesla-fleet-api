@@ -1,7 +1,9 @@
 import { is_valid_region } from "./const.js";
 import { InvalidResponse, TeslemetryRegistrationError } from "./exceptions.js";
 import TeslaFleetApi, { AccessToken, Logger } from "./teslafleetapi.js";
+import { TeslemetryVehicles } from "./teslemetryvehicle.js";
 import { Scope } from "./types/commands.js";
+import Vehicle from "./vehicle.js";
 
 type Region = "na" | "eu" | "api";
 
@@ -85,6 +87,10 @@ export async function register_client(
 }
 
 export default class Teslemetry extends TeslaFleetApi {
+  static override Vehicles: new (parent: TeslaFleetApi) => Vehicle = TeslemetryVehicles;
+
+  declare vehicles: TeslemetryVehicles;
+
   override readonly _transport_name: string = "teslemetry";
 
   constructor(accessToken: AccessToken, region: Region = "api", options: TeslemetryOptions = {}) {
