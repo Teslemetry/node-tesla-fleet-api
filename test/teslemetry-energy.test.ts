@@ -60,6 +60,40 @@ describe("TeslemetryEnergySites", () => {
     });
 });
 
+describe("keyless set_island_mode refusals", () => {
+    it.each([0, 2, 3, 5, 7, 99, -1, 1.5, NaN, Infinity, "6", "1", null, undefined, true, false, {}, [6]])("refuses mode %j before any request", async (mode) => {
+        const { site, fetchMock } = makeSite();
+        await expect(site.set_island_mode(mode as number)).rejects.toBeInstanceOf(TypeError);
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    // Teslemetry's route decodes the envelope and answers with the leaf, as `{ response: { result } }`.
+    it.each<[string, number | string, number]>([
+        ["a number", 4, 4],
+        ["an enum name", "TEG_SET_ISLAND_MODE_RESULT_REJECTED_LOW_ENERGY", 4],
+    ])("raises on a rejection given as %s", async (_name, result, code) => {
+        const { site } = makeSite(undefined, { response: { result } });
+
+        const error = await site.go_off_grid().catch((caught: unknown) => caught);
+
+        expect(error).toBeInstanceOf(DeviceUnexpectedResponse);
+        expect((error as DeviceUnexpectedResponse).data).toEqual({
+            code,
+            message: "TEG_SET_ISLAND_MODE_RESULT_REJECTED_LOW_ENERGY",
+        });
+    });
+
+    it.each<[string, unknown]>([
+        ["accepted", { response: { result: 1 } }],
+        ["true", { response: { result: true } }],
+        ["unknown", { response: { result: 99 } }],
+        ["empty", { response: {} }],
+    ])("returns on an %s reply", async (_name, reply) => {
+        const { site } = makeSite(undefined, reply);
+        await expect(site.reconnect_grid()).resolves.toEqual(reply);
+    });
+});
+
 describe("keyless Teslemetry routes", () => {
     it("never falls back to the parent's RSA key", async () => {
         const { fetchMock } = makeSite();
