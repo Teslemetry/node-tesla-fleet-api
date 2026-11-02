@@ -192,6 +192,11 @@ export class FakeVehicle {
         this.omitRequestUuidEcho = true;
     }
 
+    /** The `request_uuid` a reply to `msg` carries. */
+    private echoOf(msg: RoutableMessage): Uint8Array {
+        return this.omitRequestUuidEcho ? new Uint8Array(0) : msg.uuid;
+    }
+
     private stateFor(domain: Domain): DomainState {
         let state = this.domainState.get(domain);
         if (!state) {
@@ -440,6 +445,7 @@ export class FakeVehicle {
             this.nextOutcome = "ok";
             const reply = RoutableMessage.create({
                 fromDestination: { domain },
+                requestUuid: this.echoOf(msg),
                 signedMessageStatus: { operationStatus: MessageOperationStatusE.OPERATIONSTATUS_OK, signedMessageFault: MessageFaultE.MESSAGEFAULT_ERROR_INVALID_SIGNATURE },
                 uuid: crypto.randomBytes(16),
             });
@@ -463,6 +469,7 @@ export class FakeVehicle {
             if (opened === null) {
                 const reply = RoutableMessage.create({
                     fromDestination: { domain },
+                    requestUuid: this.echoOf(msg),
                     signedMessageStatus: { operationStatus: MessageOperationStatusE.OPERATIONSTATUS_OK, signedMessageFault: MessageFaultE.MESSAGEFAULT_ERROR_INVALID_SIGNATURE },
                     uuid: crypto.randomBytes(16),
                 });
@@ -490,6 +497,7 @@ export class FakeVehicle {
             if (!expectedTag.equals(Buffer.from(hmacData!.tag))) {
                 const reply = RoutableMessage.create({
                     fromDestination: { domain },
+                    requestUuid: this.echoOf(msg),
                     signedMessageStatus: { operationStatus: MessageOperationStatusE.OPERATIONSTATUS_OK, signedMessageFault: MessageFaultE.MESSAGEFAULT_ERROR_INVALID_SIGNATURE },
                     uuid: crypto.randomBytes(16),
                 });
@@ -502,6 +510,7 @@ export class FakeVehicle {
             this.waitCountRemaining--;
             const reply = RoutableMessage.create({
                 fromDestination: { domain },
+                requestUuid: this.echoOf(msg),
                 signedMessageStatus: { operationStatus: MessageOperationStatusE.OPERATIONSTATUS_WAIT, signedMessageFault: MessageFaultE.MESSAGEFAULT_ERROR_NONE },
                 uuid: crypto.randomBytes(16),
             });
@@ -548,7 +557,7 @@ export class FakeVehicle {
 
         const reply = RoutableMessage.create({
             fromDestination: { domain },
-            requestUuid: msg.uuid,
+            requestUuid: this.echoOf(msg),
             protobufMessageAsBytes: sealed?.ciphertext ?? payload,
             flags: this.replyFlags,
             sessionInfo: resync?.sessionInfo,

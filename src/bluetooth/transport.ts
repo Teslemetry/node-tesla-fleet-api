@@ -22,7 +22,7 @@
  * - `isConnected` and `onDisconnect` may both lie: Homey's state goes stale on
  *   a silent drop, and its event is not guaranteed. Neither has to be right,
  *   since a failed or timed-out operation is what the library treats as a dead
- *   link.
+ *   link. A rejection with `BleNotSubmittedError` is the exception.
  *
  * Adapter rules, each worth a test in the adapter's own suite:
  *
@@ -36,7 +36,9 @@
  * 4. Subscribe again on every connect. Subscriptions end with the link.
  * 5. `write` is always with response.
  * 6. Throw `BleNotSubmittedError` only when the failure is provably before any
- *    radio I/O. All other failures stay plain errors.
+ *    radio I/O, as a read of a characteristic that was never resolved is on a
+ *    stack that hides Generic Access. It leaves the link up. All other failures
+ *    stay plain errors, and the library treats them as a lost link.
  * 7. Pass notifications unchanged and in order. The library copies them, so a
  *    reused backend buffer is safe once the handler returns.
  * 8. Do not retry writes. A retry can run a command twice.

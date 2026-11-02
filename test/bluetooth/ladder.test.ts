@@ -26,6 +26,7 @@ import { INFOTAINMENT, VCSEC, BleHarnessOptions, TestVehicle, bleHarness, finish
 const OK = { response: { result: true, reason: "" } };
 const LOCKED = VehicleLockStateE.VEHICLELOCKSTATE_LOCKED;
 const UNLOCKED = VehicleLockStateE.VEHICLELOCKSTATE_UNLOCKED;
+const SELECTIVE_UNLOCKED = VehicleLockStateE.VEHICLELOCKSTATE_SELECTIVE_UNLOCKED;
 
 async function ready(options: BleHarnessOptions = {}) {
     const harness = bleHarness(options);
@@ -251,20 +252,12 @@ describe('confirmation: "verify"', () => {
         expect(harness.link.commands(VCSEC)).toHaveLength(2);
     });
 
-    it("turns a matching read into success on unlock", async () => {
-        const harness = await ready(verify);
-        harness.fakeVehicle.vehicleStatus = VehicleStatus.create({ vehicleLockState: UNLOCKED });
-        harness.link.dropNextReply();
-
-        await expect(finish(harness.vehicle.door_unlock())).resolves.toEqual(OK);
-    });
-
     it.each([true, false])("raises BluetoothCommandFailed on a mismatch (raise_unconfirmed: %s)", async (raise_unconfirmed) => {
         const harness = await ready({ confirmation: "verify", raise_unconfirmed });
-        harness.fakeVehicle.vehicleStatus = VehicleStatus.create({ vehicleLockState: UNLOCKED });
+        harness.fakeVehicle.vehicleStatus = VehicleStatus.create({ vehicleLockState: LOCKED });
         harness.link.dropNextReply();
 
-        const { error } = await timed(() => harness.vehicle.door_lock());
+        const { error } = await timed(() => harness.vehicle.door_unlock());
 
         expect(error).toBeInstanceOf(BluetoothCommandFailed);
         expect(error).not.toBeInstanceOf(BluetoothTimeout);
@@ -449,17 +442,6 @@ describe('confirmation: "optimistic"', () => {
 });
 
 describe("the broadcast race", () => {
-    it("confirms a lock from a broadcast that arrives during the write", async () => {
-        const { vehicle, link } = await ready({ raise_unconfirmed: true });
-        link.writeDelayMs = 20;
-        link.dropNextReply();
-        const lock = vehicle.door_lock();
-        await vi.advanceTimersByTimeAsync(5);
-        link.injectVehicleStatus({ vehicleLockState: LOCKED });
-
-        await expect(finish(lock)).resolves.toEqual(OK);
-    });
-
     it("confirms a lock before the ack timeout", async () => {
         const { vehicle, link } = await ready({ raise_unconfirmed: true });
         link.dropNextReply();
@@ -472,22 +454,12 @@ describe("the broadcast race", () => {
         expect(Date.now() - started).toBeLessThan(500);
     });
 
-    it("confirms an unlock", async () => {
-        const { vehicle, link } = await ready({ raise_unconfirmed: true });
-        link.dropNextReply();
-        const unlock = vehicle.door_unlock();
-        await vi.advanceTimersByTimeAsync(100);
-        link.injectVehicleStatus({ vehicleLockState: UNLOCKED });
-
-        await expect(finish(unlock)).resolves.toEqual(OK);
-    });
-
     it("lets a car-side rejection win over mismatching broadcasts", async () => {
         const { vehicle, link } = await ready({ raise_unconfirmed: true });
         link.rewriteNextReply(() => [{ message: addressed(vehicle, rejection), delayMs: 500 }]);
         const lock = vehicle.door_lock();
         await vi.advanceTimersByTimeAsync(100);
-        link.injectVehicleStatus({ vehicleLockState: UNLOCKED });
+        link.injectVehicleStatus({ vehicleLockState: SELECTIVE_UNLOCKED });
 
         await expect(finish(lock)).resolves.toMatchObject({ response: { result: false } });
     });
@@ -513,7 +485,7 @@ describe("the broadcast race", () => {
         link.dropNextReply();
         const lock = vehicle.door_lock();
         await vi.advanceTimersByTimeAsync(5);
-        link.injectVehicleStatus({ vehicleLockState: UNLOCKED });
+        link.injectVehicleStatus({ vehicleLockState: SELECTIVE_UNLOCKED });
 
         await expect(finish(lock)).rejects.toBeInstanceOf(BluetoothUnconfirmedCommand);
     });
@@ -523,7 +495,7 @@ describe("the broadcast race", () => {
         link.dropNextReply();
         const lock = vehicle.door_lock();
         await vi.advanceTimersByTimeAsync(100);
-        link.injectVehicleStatus({ vehicleLockState: UNLOCKED });
+        link.injectVehicleStatus({ vehicleLockState: SELECTIVE_UNLOCKED });
 
         const started = Date.now();
         const { error } = await timed(() => lock);
@@ -537,7 +509,7 @@ describe("the broadcast race", () => {
         link.dropNextReply();
         const lock = vehicle.door_lock();
         await vi.advanceTimersByTimeAsync(100);
-        link.injectVehicleStatus({ vehicleLockState: UNLOCKED });
+        link.injectVehicleStatus({ vehicleLockState: SELECTIVE_UNLOCKED });
         link.dropLink();
 
         await expect(finish(lock)).rejects.toBeInstanceOf(BluetoothUnconfirmedCommand);
@@ -548,7 +520,7 @@ describe("the broadcast race", () => {
         link.dropNextReply();
         const lock = vehicle.door_lock();
         await vi.advanceTimersByTimeAsync(100);
-        link.injectVehicleStatus({ vehicleLockState: UNLOCKED });
+        link.injectVehicleStatus({ vehicleLockState: SELECTIVE_UNLOCKED });
         await vi.advanceTimersByTimeAsync(100);
         link.injectVehicleStatus({ vehicleLockState: LOCKED });
 
@@ -819,6 +791,100 @@ describe("the outcome table", () => {
         const { error } = await timed(() => vehicle.climate_state());
 
         expect(error).toBeInstanceOf(BluetoothTimeout);
+    });
+});
+
+// UNLOCKED is the proto3 zero value, so it never appears on the wire: a status
+// that says nothing about the lock decodes to it. Python compares it anyway.
+describe("the zero lock state", () => {
+    const SLEEP_ONLY = { vehicleSleepStatus: VehicleSleepStatusE.VEHICLE_SLEEP_STATUS_AWAKE };
+
+    it("does not confirm an unlock from a broadcast about something else", async () => {
+        const { vehicle, link } = await ready({ raise_unconfirmed: true });
+        link.dropNextReply();
+        const unlock = vehicle.door_unlock();
+        await vi.advanceTimersByTimeAsync(100);
+        link.injectVehicleStatus(SLEEP_ONLY);
+
+        await expect(finish(unlock)).rejects.toBeInstanceOf(BluetoothUnconfirmedCommand);
+    });
+
+    it("does not confirm an unlock from a read", async () => {
+        const { vehicle, link, fakeVehicle } = await ready({ confirmation: "verify", raise_unconfirmed: true });
+        fakeVehicle.vehicleStatus = VehicleStatus.create({ vehicleLockState: UNLOCKED });
+        link.dropNextReply();
+
+        await expect(finish(vehicle.door_unlock())).rejects.toBeInstanceOf(BluetoothUnconfirmedCommand);
+    });
+
+    it("still takes the ack as proof of an unlock", async () => {
+        const { vehicle } = await ready({ raise_unconfirmed: true });
+
+        await expect(finish(vehicle.door_unlock())).resolves.toEqual(OK);
+    });
+
+    it("does not fail a lock on a broadcast about something else", async () => {
+        const { vehicle, link } = await ready({ raise_unconfirmed: true });
+        link.dropNextReply();
+        const lock = vehicle.door_lock();
+        await vi.advanceTimersByTimeAsync(100);
+        link.injectVehicleStatus(SLEEP_ONLY);
+
+        await expect(finish(lock)).rejects.toBeInstanceOf(BluetoothUnconfirmedCommand);
+    });
+
+    it("does not fail a lock on a read", async () => {
+        const { vehicle, link, fakeVehicle } = await ready({ confirmation: "verify", raise_unconfirmed: true });
+        fakeVehicle.vehicleStatus = VehicleStatus.create({ vehicleLockState: UNLOCKED });
+        link.dropNextReply();
+
+        await expect(finish(vehicle.door_lock())).rejects.toBeInstanceOf(BluetoothUnconfirmedCommand);
+    });
+
+    it("leaves a real lock state proving an unlock did not apply", async () => {
+        const { vehicle, link } = await ready({ raise_unconfirmed: true });
+        link.dropNextReply();
+        const unlock = vehicle.door_unlock();
+        await vi.advanceTimersByTimeAsync(100);
+        link.injectVehicleStatus({ vehicleLockState: LOCKED });
+
+        await expect(timed(() => unlock).then(({ error }) => error)).resolves.toBeInstanceOf(BluetoothCommandFailed);
+    });
+});
+
+describe("a broadcast from before the write finished", () => {
+    it("does not confirm the command", async () => {
+        const { vehicle, link } = await ready({ raise_unconfirmed: true });
+        link.writeDelayMs = 20;
+        link.dropNextReply();
+        const lock = vehicle.door_lock();
+        await vi.advanceTimersByTimeAsync(5);
+        link.injectVehicleStatus({ vehicleLockState: LOCKED });
+
+        await expect(finish(lock)).rejects.toBeInstanceOf(BluetoothUnconfirmedCommand);
+    });
+
+    it("does not stop a later one confirming it", async () => {
+        const { vehicle, link } = await ready({ raise_unconfirmed: true });
+        link.writeDelayMs = 20;
+        link.dropNextReply();
+        const lock = vehicle.door_lock();
+        await vi.advanceTimersByTimeAsync(5);
+        link.injectVehicleStatus({ vehicleLockState: LOCKED });
+        await vi.advanceTimersByTimeAsync(500);
+        link.injectVehicleStatus({ vehicleLockState: LOCKED });
+
+        await expect(finish(lock)).resolves.toEqual(OK);
+    });
+
+    it("counts a status after a failed write, as the frame may have landed", async () => {
+        const { vehicle, link } = await ready({ raise_unconfirmed: true });
+        link.failNextWrite("before");
+        const lock = vehicle.door_lock();
+        await vi.advanceTimersByTimeAsync(100);
+        link.injectVehicleStatus({ vehicleLockState: LOCKED });
+
+        await expect(finish(lock)).resolves.toEqual(OK);
     });
 });
 

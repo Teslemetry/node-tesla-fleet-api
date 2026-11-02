@@ -11,6 +11,7 @@ import {
     VehicleStatus,
 } from "@teslemetry/tesla-protocol/command/vcsec";
 import { VehicleData } from "@teslemetry/tesla-protocol/command/vehicle";
+import { BleNotSubmittedError } from "../../src/bluetooth/transport.js";
 import { BluetoothVehicleData, VehicleDataEndpoint, VehicleImageType } from "../../src/const.js";
 import { BluetoothCloudUnavailableError, InvalidResponse, TeslaFleetMessageFaultResponseSizeExceedsMTU } from "../../src/exceptions.js";
 import { BleHarnessOptions, INFOTAINMENT, VCSEC, bareAck, bleHarness, finish } from "../helpers/blevehicle.js";
@@ -236,12 +237,23 @@ describe("GATT characteristics", () => {
     it("fails softly when 0x2A00 is unreachable", async () => {
         const { vehicle, link } = bleHarness();
         for (let i = 0; i < 5; i++) {
-            link.failNextRead(new Error("characteristic not found"));
+            link.failNextRead(new BleNotSubmittedError("characteristic not resolved"));
         }
 
         await expect(finish(vehicle.query_display_name())).resolves.toBeNull();
 
+        expect(link.connections).toHaveLength(1);
         expect(link.openConnections).toBe(1);
+    });
+
+    it("reconnects after a read that really failed, and still fails softly", async () => {
+        const { vehicle, link } = bleHarness();
+        link.failNextRead(new Error("gatt error"));
+        link.genericAccess.deviceName = named("Road Runner");
+
+        await expect(finish(vehicle.query_display_name())).resolves.toBe("Road Runner");
+
+        expect(link.connections).toHaveLength(2);
     });
 
     it("fails softly with no link at all", async () => {

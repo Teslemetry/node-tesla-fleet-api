@@ -9,6 +9,7 @@ import { Response } from "@teslemetry/tesla-protocol/command/car_server";
 import { VehicleData } from "@teslemetry/tesla-protocol/command/vehicle";
 import { VehicleRouter, is_failover_safe } from "../../src/router/index.js";
 import { DEFAULT_CONNECT_ATTEMPTS } from "../../src/bluetooth/constants.js";
+import { BluetoothVehicleData } from "../../src/const.js";
 import {
     BluetoothCloudUnavailableError,
     BluetoothCommandFailed,
@@ -249,21 +250,29 @@ describe("failing over", () => {
         expect(link.calls).toEqual([]);
     });
 
-    it("on the size faults", async () => {
-        for (const [fault, expected] of [
-            [MessageFaultE.MESSAGEFAULT_ERROR_RESPONSE_MTU_EXCEEDED, TeslaFleetMessageFaultResponseSizeExceedsMTU],
-            [MessageFaultE.MESSAGEFAULT_ERROR_REQUEST_MTU_EXCEEDED, TeslaFleetMessageFaultFieldExceedsMTU],
-        ] as const) {
-            const { vehicle, link } = await ready();
-            const cloud = fakeCloud();
+    it("on a request too big for the MTU, which the car refused unread", async () => {
+        const { vehicle, link } = await ready();
+        const cloud = fakeCloud();
 
-            faultNextReply(link, fault);
-            await expect(finish(new VehicleRouter([vehicle, cloud]).honk_horn())).resolves.toEqual(CLOUD);
-            expect(cloud.honk_horn).toHaveBeenCalledOnce();
+        faultNextReply(link, MessageFaultE.MESSAGEFAULT_ERROR_REQUEST_MTU_EXCEEDED);
+        await expect(finish(new VehicleRouter([vehicle, cloud]).honk_horn())).resolves.toEqual(CLOUD);
+        expect(cloud.honk_horn).toHaveBeenCalledOnce();
 
-            faultNextReply(link, fault);
-            await expect(finish(vehicle.honk_horn())).rejects.toBeInstanceOf(expected);
-        }
+        faultNextReply(link, MessageFaultE.MESSAGEFAULT_ERROR_REQUEST_MTU_EXCEEDED);
+        await expect(finish(vehicle.honk_horn())).rejects.toBeInstanceOf(TeslaFleetMessageFaultFieldExceedsMTU);
+    });
+
+    it("on a read whose reply was too big, as reading again changes nothing", async () => {
+        const { vehicle, link } = await ready();
+        const cloud = fakeCloud();
+        const endpoints = [BluetoothVehicleData.CHARGE_STATE, BluetoothVehicleData.CLIMATE_STATE];
+
+        faultNextReply(link, MessageFaultE.MESSAGEFAULT_ERROR_RESPONSE_MTU_EXCEEDED);
+        await expect(finish(new VehicleRouter([vehicle, cloud]).vehicle_data(endpoints))).resolves.toEqual(CLOUD);
+        expect(cloud.vehicle_data).toHaveBeenCalledOnce();
+
+        faultNextReply(link, MessageFaultE.MESSAGEFAULT_ERROR_RESPONSE_MTU_EXCEEDED);
+        await expect(finish(vehicle.vehicle_data(endpoints))).rejects.toBeInstanceOf(TeslaFleetMessageFaultResponseSizeExceedsMTU);
     });
 
     it("on SignedCommandRequired, as an energy backend raises it", async () => {

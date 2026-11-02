@@ -22,7 +22,7 @@ type Executed<State> = (state: State) => boolean | undefined;
 /** A lock or unlock's check, which a status broadcast can also answer. */
 export interface VcsecVerifyPlan {
     reader: "vehicle_state";
-    executed: (state: VehicleStatus) => boolean;
+    executed: Executed<VehicleStatus>;
 }
 
 /** Which reader proves a timed-out command, and how. */
@@ -60,13 +60,27 @@ export function chargePortConnected(state: ChargeState): boolean | null {
     return disconnected ? false : null;
 }
 
-/** The plan for a VCSEC actuation. Only lock and unlock have one. */
+/**
+ * The plan for a VCSEC actuation. Only lock and unlock have one.
+ *
+ * `UNLOCKED` is the proto3 zero value, so it is never on the wire: a status that
+ * says nothing about the lock decodes to it, as a sleep-only broadcast does. It
+ * proves nothing either way, which Python's comparison misses. So a status can
+ * never confirm an unlock, which needs its ack, and it can only rule one out.
+ */
 export function vcsecVerifyPlan(command: UnsignedMessage): VcsecVerifyPlan | null {
+    const { VEHICLELOCKSTATE_INTERNAL_LOCKED, VEHICLELOCKSTATE_LOCKED, VEHICLELOCKSTATE_UNLOCKED } = VehicleLockStateE;
     if (command.RKEAction === RKEActionE.RKE_ACTION_LOCK) {
-        return { reader: "vehicle_state", executed: (state) => state.vehicleLockState === VehicleLockStateE.VEHICLELOCKSTATE_LOCKED };
+        return {
+            reader: "vehicle_state",
+            executed: ({ vehicleLockState: state }) => (state === VEHICLELOCKSTATE_UNLOCKED ? undefined : state === VEHICLELOCKSTATE_LOCKED),
+        };
     }
     if (command.RKEAction === RKEActionE.RKE_ACTION_UNLOCK) {
-        return { reader: "vehicle_state", executed: (state) => state.vehicleLockState === VehicleLockStateE.VEHICLELOCKSTATE_UNLOCKED };
+        return {
+            reader: "vehicle_state",
+            executed: ({ vehicleLockState: state }) => (state === VEHICLELOCKSTATE_LOCKED || state === VEHICLELOCKSTATE_INTERNAL_LOCKED ? false : undefined),
+        };
     }
     return null;
 }

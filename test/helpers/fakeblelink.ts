@@ -69,9 +69,12 @@ class FakeConnection implements BleConnection {
 
     async disconnect(): Promise<void> {
         this.link.calls.push({ kind: "disconnect" });
-        this.live = false;
-        this.reported = false;
-        this.handlers.onDisconnect();
+        // On a backend with one peripheral object, closing any handle closes the link.
+        for (const connection of this.link.sharesPeripheral ? this.link.connections : [this]) {
+            connection.live = false;
+            connection.reported = false;
+            connection.handlers.onDisconnect();
+        }
     }
 }
 
@@ -115,8 +118,12 @@ export class FakeBleLink implements BleTransport {
     scanWindowMs = 0;
     /** How long each write takes. */
     writeDelayMs = 0;
+    /** How long each read takes. */
+    readDelayMs = 0;
     /** How a dead link treats a write it was not told about. */
     silentlyDroppedWrites: "hang" | "reject" = "hang";
+    /** Every connect returns the one peripheral, so closing any of them ends all of them, as on Homey. */
+    sharesPeripheral = false;
     /** Frames that reach the radio but no computer that answers, as infotainment is while the car sleeps. */
     deafTo: ((request: RoutableMessage) => boolean) | null = null;
 
@@ -357,12 +364,15 @@ export class FakeBleLink implements BleTransport {
     /** @internal */
     async onRead(connection: FakeConnection, characteristic: BleCharacteristic): Promise<Uint8Array> {
         this.calls.push({ kind: "read", characteristic });
+        if (this.readDelayMs > 0) {
+            await sleep(this.readDelayMs);
+        }
         const fault = this.readFaults.shift();
+        if (fault instanceof Error) {
+            throw fault;
+        }
         if (fault === "hang" || !connection.live) {
             await new Promise(() => undefined);
-        }
-        if (fault) {
-            throw fault;
         }
         return characteristic === "version" ? this.version : this.genericAccess[characteristic];
     }

@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { Domain, RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
+import { Domain, MessageFaultE, OperationStatusE as MessageOperationStatusE, RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
 import { Role } from "@teslemetry/tesla-protocol/command/keys";
 import {
     ClosureMoveRequest,
@@ -8,6 +8,7 @@ import {
     InformationRequest,
     InformationRequestType,
     KeyFormFactor,
+    OperationStatusE as VcsecOperationStatusE,
     RKEActionE,
     UnsignedMessage,
     VehicleSleepStatusE,
@@ -83,11 +84,13 @@ import {
     BluetoothTransportError,
     BluetoothUnconfirmedCommand,
     InvalidResponse,
+    NotOnWhitelistFault,
     SessionInfoAuthenticationFault,
     SignedCommandResponseReplayed,
     SigningDisabled,
     TeslaFleetError,
     TeslaFleetMessageFaultResponseSizeExceedsMTU,
+    WhitelistOperationStatus,
 } from "../exceptions.js";
 import { AsyncLock, BleCallTimeout, ReplyQueue, abortable, sleep, withTimeout } from "./async.js";
 import { BroadcastListeners, ListenerRegistry, Unsubscribe, decodeVcsecStatus } from "./broadcast.js";
@@ -190,6 +193,8 @@ interface BroadcastWatcher {
     confirmation?: RoutableMessage;
     /** Whether a broadcast after the write showed something else. */
     mismatched: boolean;
+    /** The write returned, well or badly. A status from before then says nothing. */
+    writeEnded: boolean;
     writeComplete: boolean;
 }
 
@@ -395,6 +400,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
             let cause: unknown;
             for (let attempt = 1; attempt <= maxAttempts; attempt++) {
                 try {
+                    await this.teardown;
                     await this.connectOnce(device);
                     return;
                 } catch (error) {
@@ -426,11 +432,15 @@ export default class VehicleBluetooth extends BroadcastListeners {
             link.close();
             if (error instanceof BleCallTimeout) {
                 // A backend with no connect timeout can still land this attempt.
-                // The vehicle has three slots, so it must not keep one.
-                void connecting.then(
+                // The vehicle has three slots, so it must not keep one. This goes
+                // through `teardown`, because on a backend with one peripheral the
+                // late close would end the next link. It may never land, so the
+                // wait is bounded. One that lands later still gets closed.
+                const closing = connecting.then(
                     (late) => this.closeConnection(late),
                     () => undefined,
                 );
+                this.teardown = Promise.all([this.teardown, withTimeout(() => closing, LINK_TEARDOWN_TIMEOUT_MS).catch(() => undefined)]);
             }
             throw error;
         }
@@ -602,23 +612,39 @@ export default class VehicleBluetooth extends BroadcastListeners {
     }
 
     /** Write one frame, with its chunks together, each bounded. */
-    private writeFrame(link: Link, frame: Uint8Array): Promise<void> {
+    private writeFrame(link: Link, frame: Uint8Array, signal?: AbortSignal): Promise<void> {
         const { connection } = link;
         const maxWriteSize = connection.maxWriteSize === undefined ? DEFAULT_MAX_WRITE_SIZE : connection.maxWriteSize;
         return link.gatt.run(async () => {
+            // Here, past the last wait, and never between chunks: a frame goes whole.
+            signal?.throwIfAborted();
+            let written = 0;
             for (const chunk of splitFrame(frame, maxWriteSize)) {
                 if (link.lost) {
                     throw new BleNotSubmittedError("The link was lost before the frame was fully written.");
                 }
-                await withTimeout(() => connection.write(chunk), GATT_WRITE_TIMEOUT_MS, link.closed.signal);
+                try {
+                    await withTimeout(() => connection.write(chunk), GATT_WRITE_TIMEOUT_MS, link.closed.signal);
+                } catch (error) {
+                    // The car never gets a whole frame, but it is holding part of one,
+                    // which would corrupt the next frame on this link.
+                    if (error instanceof BleNotSubmittedError && written > 0) {
+                        this.loseLink(link, "a frame stopped part way");
+                    }
+                    throw error;
+                }
+                written++;
                 this.lastActivity = performance.now();
             }
         });
     }
 
     /**
-     * Read a characteristic, bounded. A timeout is what finds a silently dead
-     * link, so it marks the link lost, as a failure does once the backend agrees.
+     * Read a characteristic, bounded. A rejected or timed-out read marks the link
+     * lost, whatever `isConnected` says, as that is how a dead link is found on a
+     * backend that misreports it. The exception is `BleNotSubmittedError` with the
+     * link reported up: no radio I/O happened, and a stack that hides Generic
+     * Access rejects those reads that way on a healthy link.
      * @throws BluetoothTransportError when there is no link.
      */
     protected async gattRead(characteristic: BleCharacteristic, timeoutMs: number = GATT_READ_TIMEOUT_MS): Promise<Uint8Array> {
@@ -634,7 +660,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
             try {
                 return await withTimeout(() => connection.read(characteristic), timeoutMs, link.closed.signal);
             } catch (error) {
-                if (error instanceof BleCallTimeout || !connection.isConnected) {
+                if (!(error instanceof BleNotSubmittedError) || !connection.isConnected) {
                     this.loseLink(link, `read failed: ${describe(error)}`);
                 }
                 throw error;
@@ -643,7 +669,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
     }
 
     protected async _send(msg: RoutableMessage, requires: SendRequires, options: SendOptions = {}): Promise<RoutableMessage> {
-        const { expectsData = true, optimistic = false, confirmBroadcast } = options;
+        const { expectsData = true, optimistic = false, confirmBroadcast, onSubmitted, signal } = options;
         const timeoutMs = options.timeoutMs ?? (expectsData ? this.defaultTimeoutMs : this.actuationTimeoutMs);
         const domain = msg.toDestination?.domain;
         const lock = domain === undefined ? undefined : this.domainSendLock[domain];
@@ -675,11 +701,20 @@ export default class VehicleBluetooth extends BroadcastListeners {
 
             try {
                 try {
-                    await this.writeFrame(link, frame);
+                    await this.writeFrame(link, frame, signal);
                 } catch (error) {
+                    if (signal?.aborted && error === signal.reason) {
+                        throw error;
+                    }
                     if (error instanceof BleNotSubmittedError) {
-                        this.loseLink(link, describe(error));
+                        if (!link.connection.isConnected) {
+                            this.loseLink(link, describe(error));
+                        }
                         throw new BluetoothTransportError(null, null, { cause: error });
+                    }
+                    onSubmitted?.();
+                    if (watcher) {
+                        watcher.writeEnded = true;
                     }
                     if (optimistic) {
                         this.loseLink(link, `write failed: ${describe(error)}`);
@@ -702,7 +737,9 @@ export default class VehicleBluetooth extends BroadcastListeners {
                     }
                 }
 
+                onSubmitted?.();
                 if (watcher) {
+                    watcher.writeEnded = true;
                     watcher.writeComplete = true;
                 }
                 if (optimistic) {
@@ -719,10 +756,10 @@ export default class VehicleBluetooth extends BroadcastListeners {
 
     /**
      * Watch for broadcasts showing the requested state. A lost ack does not stop
-     * the car broadcasting the change it caused. A broadcast that shows anything
-     * else only counts after the write, as one from before it says nothing.
+     * the car broadcasting the change it caused. Only a status after the write
+     * counts, as one from before it says nothing.
      */
-    private armBroadcastWatcher(domain: Domain, matches: (status: VehicleStatus) => boolean): BroadcastWatcher {
+    private armBroadcastWatcher(domain: Domain, matches: NonNullable<SendOptions["confirmBroadcast"]>): BroadcastWatcher {
         let resolve!: (message: RoutableMessage) => void;
         const confirmed = new Promise<RoutableMessage>((done) => {
             resolve = done;
@@ -730,16 +767,18 @@ export default class VehicleBluetooth extends BroadcastListeners {
         const watcher: BroadcastWatcher = {
             confirmed,
             mismatched: false,
+            writeEnded: false,
             writeComplete: false,
             onBroadcast: (message) => {
                 const status = decodeVcsecStatus(message);
-                if (status === null || watcher.confirmation) {
+                if (status === null || watcher.confirmation || !watcher.writeEnded) {
                     return;
                 }
-                if (matches(status)) {
+                const executed = matches(status);
+                if (executed) {
                     watcher.confirmation = message;
                     resolve(message);
-                } else if (watcher.writeComplete) {
+                } else if (executed === false && watcher.writeComplete) {
                     watcher.mismatched = true;
                 }
             },
@@ -814,6 +853,10 @@ export default class VehicleBluetooth extends BroadcastListeners {
             if (resp === null) {
                 throw new BluetoothTimeout();
             }
+            if (this.isForeignReply(resp, msg, expectsData)) {
+                this.log(`BLE ignored a reply that is not for this request, domain ${resp.fromDestination?.domain}`);
+                continue;
+            }
             this.validate_msg(resp, uuid, domain);
             if (hasRequired(resp)) {
                 return resp;
@@ -836,11 +879,49 @@ export default class VehicleBluetooth extends BroadcastListeners {
                     }
                     return resp;
                 }
+                if (this.isForeignReply(followup, msg, expectsData)) {
+                    this.log(`BLE ignored a reply that is not for this request, domain ${followup.fromDestination?.domain}`);
+                    continue;
+                }
                 this.validate_msg(followup, uuid, domain);
                 if (hasRequired(followup)) {
                     return followup;
                 }
             }
+        }
+    }
+
+    /**
+     * Whether a reply must be ignored rather than acted on. The link is shared, so
+     * an addressed reply can be a late answer to an earlier request, and acting on
+     * one can resend a command or report one that never ran.
+     *
+     * A reply naming another request is never ours. One naming no request must
+     * still be heard, because real VCSEC leaves `request_uuid` empty, but nothing
+     * ties it to this request unless its session-info tag or its encryption does,
+     * and both of those are checked later. So it may ack a command or answer a
+     * read, and it may not make anything happen: not a resend or a fault, and a
+     * status does not stand in for an actuation's ack.
+     */
+    private isForeignReply(resp: RoutableMessage, msg: RoutableMessage, expectsData: boolean): boolean {
+        if (resp.requestUuid.length > 0) {
+            return !Buffer.from(msg.uuid).equals(resp.requestUuid);
+        }
+        if (msg.sessionInfoRequest || (resp.sessionInfo && resp.sessionInfo.length > 0)) {
+            return false;
+        }
+        const status = resp.signedMessageStatus;
+        if (status?.operationStatus === MessageOperationStatusE.OPERATIONSTATUS_WAIT || (status && status.signedMessageFault !== MessageFaultE.MESSAGEFAULT_ERROR_NONE)) {
+            return true;
+        }
+        if (msg.toDestination?.domain !== VCSEC || !resp.protobufMessageAsBytes || resp.signatureData?.AESGCMResponseData) {
+            return false;
+        }
+        try {
+            const reply = FromVCSECMessage.decode(resp.protobufMessageAsBytes);
+            return reply.commandStatus?.operationStatus === VcsecOperationStatusE.OPERATIONSTATUS_WAIT || (!expectsData && reply.vehicleStatus !== undefined);
+        } catch {
+            return false;
         }
     }
 
@@ -969,15 +1050,17 @@ export default class VehicleBluetooth extends BroadcastListeners {
         // kept as the cause. Pre-submission failures and explicit car-side
         // rejections stay as they are.
         let cause: unknown;
+        let submitted = false;
         try {
             const result = await super.sendVehicleSecurity(
                 UnsignedMessage.create({ closureMoveRequest: ClosureMoveRequest.create({ chargePort: ClosureMoveTypeE.CLOSURE_MOVE_TYPE_OPEN }) }),
+                { onSubmitted: () => (submitted = true) },
             );
             if (result.response.result === false) {
                 return result;
             }
         } catch (error) {
-            if (!leavesOpeningAmbiguous(error)) {
+            if (!submitted || !leavesOutcomeUnknown(error)) {
                 throw error;
             }
             cause = error;
@@ -1096,13 +1179,14 @@ export default class VehicleBluetooth extends BroadcastListeners {
             return this.sendOptimistic(VCSEC, Buffer.from(UnsignedMessage.encode(command).finish()), name);
         }
         const plan = vcsecVerifyPlan(command);
+        let submitted = false;
         try {
-            return await super.sendVehicleSecurity(command, { confirmBroadcast: plan?.executed });
+            return await super.sendVehicleSecurity(command, { confirmBroadcast: plan?.executed, onSubmitted: () => (submitted = true) });
         } catch (error) {
-            if (!(error instanceof BluetoothTimeout)) {
+            if (!submitted || !leavesOutcomeUnknown(error)) {
                 throw error;
             }
-            const unconfirmed = new BluetoothUnconfirmedCommand(error.data, error.status, { cause: error });
+            const unconfirmed = new BluetoothUnconfirmedCommand(null, null, { cause: error });
             return (await this.verifyTimeout(name, plan, unconfirmed)) ?? this.unconfirmedOutcome(name, unconfirmed);
         }
     }
@@ -1154,13 +1238,14 @@ export default class VehicleBluetooth extends BroadcastListeners {
         if (this.confirmation === "optimistic" && mutating) {
             return this.sendOptimistic(INFOTAINMENT, Buffer.from(Action.encode(action).finish()), name);
         }
+        let submitted = false;
         try {
-            return await super.sendInfotainment(action);
+            return await super.sendInfotainment(action, { onSubmitted: () => (submitted = true) });
         } catch (error) {
-            if (!(error instanceof BluetoothTimeout) || !mutating) {
+            if (!mutating || !submitted || !leavesOutcomeUnknown(error)) {
                 throw error;
             }
-            const unconfirmed = new BluetoothUnconfirmedCommand(error.data, error.status, { cause: error });
+            const unconfirmed = new BluetoothUnconfirmedCommand(null, null, { cause: error });
             const verified = await this.verifyTimeout(name, infotainmentVerifyPlan(action.vehicleAction), unconfirmed);
             if (verified) {
                 return verified;
@@ -1169,9 +1254,9 @@ export default class VehicleBluetooth extends BroadcastListeners {
             // VCSEC, which answers while asleep, whether this could have run at all.
             if (!this.raise_unconfirmed && (await this.vehicleAsleep())) {
                 if (!wake) {
-                    throw new BluetoothCommandFailed(error.data, error.status, { cause: error });
+                    throw new BluetoothCommandFailed(null, null, { cause: error });
                 }
-                await this.wakeForCommand(error);
+                await this.wakeForCommand(unconfirmed);
                 return this.infotainmentLadder(action, mutating, false);
             }
             return this.unconfirmedOutcome(name, unconfirmed);
@@ -1485,6 +1570,10 @@ export default class VehicleBluetooth extends BroadcastListeners {
      * handshake only succeeds once this key is whitelisted, and it reconnects, so
      * the wait survives a dropped link.
      *
+     * Success needs positive evidence: an explicit success reply, or an
+     * authenticated handshake with this key. Python takes any reply without a
+     * whitelist fault, which a WAIT or a bare ack satisfies before the tap.
+     *
      * Tesla's Go SDK sends a bare `ToVCSECMessage` here. This wraps the
      * `UnsignedMessage` in a `RoutableMessage`, as Python does, and that has paired
      * a real car. If pairing fails on another vehicle, look there first.
@@ -1541,16 +1630,18 @@ export default class VehicleBluetooth extends BroadcastListeners {
         try {
             const send = this._send(msg, "protobuf_message_as_bytes", {
                 timeoutMs: Math.max(0, Math.min(pollIntervalMs, deadline - performance.now())),
+                signal,
             });
-            this.raiseForWhitelistReply(await abortable(send, signal));
-            return;
+            if (this.whitelistReplyConfirms(await abortable(send, signal))) {
+                return;
+            }
         } catch (error) {
             if (!(error instanceof BluetoothTimeout)) {
                 throw error;
             }
         }
 
-        const confirmed = async () => this.consumeLateWhitelistReply() || (await abortable(this.pairProbe(), signal));
+        const confirmed = async () => this.consumeLateWhitelistReply() || (await abortable(this.pairProbe(signal), signal));
         while (performance.now() < deadline) {
             signal?.throwIfAborted();
             if (await confirmed()) {
@@ -1575,12 +1666,15 @@ export default class VehicleBluetooth extends BroadcastListeners {
      * link. It sends one request, unlike `handshake`, because the next poll is the
      * retry, and nothing may be written after a `pair` is aborted.
      */
-    private async pairProbe(): Promise<boolean> {
+    private async pairProbe(signal?: AbortSignal): Promise<boolean> {
         const session = this.sessionFor(VCSEC);
         try {
             return await session.withLock(async () => {
-                await this._send(this.sessionInfoRequest(VCSEC), "session_info");
-                return session.ready;
+                // `_send` also returns a bare ack, and a session can be ready from
+                // before, so only a reply that carried session info counts. That
+                // one passed `validate_msg`, so its tag proved this key.
+                const reply = await this._send(this.sessionInfoRequest(VCSEC), "session_info", { signal });
+                return session.ready && (reply.sessionInfo?.length ?? 0) > 0;
             });
         } catch (error) {
             if (error instanceof TeslaFleetError) {
@@ -1594,7 +1688,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
      * Look for a whitelist reply that arrived after `_send` stopped waiting. This
      * must run before a probe, whose `_send` discards what is queued. Anything else
      * in the queue stays there.
-     * @returns Whether one was there and reported success.
+     * @returns Whether one was there and explicitly reported success.
      * @throws WhitelistOperationStatus or a subclass when it reported a refusal.
      */
     private consumeLateWhitelistReply(): boolean {
@@ -1607,16 +1701,30 @@ export default class VehicleBluetooth extends BroadcastListeners {
                 queue.push(queued);
             }
         }
-        if (reply === undefined) {
-            return false;
-        }
-        this.raiseForWhitelistReply(reply);
-        return true;
+        return reply !== undefined && this.whitelistReplyConfirms(reply);
     }
 
-    private raiseForWhitelistReply(reply: RoutableMessage): void {
-        const message = FromVCSECMessage.decode(reply.protobufMessageAsBytes ?? new Uint8Array());
-        this.raiseWhitelistFault(message.commandStatus?.whitelistOperationStatus?.whitelistOperationInformation);
+    /**
+     * Whether a reply to the whitelist operation says the key was added. Only an
+     * OK with a whitelist status and no failure does. A WAIT means the car is
+     * still waiting for the tap, and a bare ack, a status or anything else says
+     * nothing, so `pair` goes on polling.
+     * @throws WhitelistOperationStatus or a subclass when the reply is a refusal.
+     */
+    private whitelistReplyConfirms(reply: RoutableMessage): boolean {
+        let message: FromVCSECMessage;
+        try {
+            message = FromVCSECMessage.decode(reply.protobufMessageAsBytes ?? new Uint8Array());
+        } catch {
+            return false;
+        }
+        const whitelist = message.commandStatus?.whitelistOperationStatus;
+        this.raiseWhitelistFault(whitelist?.whitelistOperationInformation);
+        const { OPERATIONSTATUS_ERROR, OPERATIONSTATUS_OK } = VcsecOperationStatusE;
+        if (message.nominalError || message.commandStatus?.operationStatus === OPERATIONSTATUS_ERROR || whitelist?.operationStatus === OPERATIONSTATUS_ERROR) {
+            throw new WhitelistOperationStatus("The vehicle refused the whitelist operation.");
+        }
+        return message.commandStatus?.operationStatus === OPERATIONSTATUS_OK && whitelist?.operationStatus === OPERATIONSTATUS_OK;
     }
 
     /**
@@ -1708,15 +1816,21 @@ function isWhitelistReply(reply: RoutableMessage): boolean {
 }
 
 /**
- * Whether a failed opening may still have run. An unauthenticated, replayed or
- * undecodable reply says nothing about that, nor does a backend failure, and a
- * reply too big for the MTU can follow execution. Only a proven pre-submission
- * failure or an explicit car-side rejection, both `TeslaFleetError`s, rule it out.
+ * Whether a failure after a write says nothing about whether the command ran.
+ * Only a car-side refusal rules that out, as the only `TeslaFleetError`s not
+ * listed here are. A silent, unauthenticated, replayed or undecodable reply
+ * proves nothing, a key fault may be a stale reply, a reply too big for the MTU
+ * can follow execution, and a transport failure now belongs to a resend, after
+ * the first frame was written. A router fails over on several of these, which is
+ * right before a write and a double execution after one, so the ladders turn all
+ * of them into an unresolved outcome first.
  */
-function leavesOpeningAmbiguous(error: unknown): boolean {
+function leavesOutcomeUnknown(error: unknown): boolean {
     return (
         !(error instanceof TeslaFleetError) ||
         error instanceof BluetoothTimeout ||
+        error instanceof BluetoothTransportError ||
+        error instanceof NotOnWhitelistFault ||
         error instanceof SessionInfoAuthenticationFault ||
         error instanceof SignedCommandResponseReplayed ||
         error instanceof TeslaFleetMessageFaultResponseSizeExceedsMTU
