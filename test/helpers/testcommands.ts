@@ -18,7 +18,7 @@ export class FakeVehicleCommands extends Commands {
 
     protected async _send(msg: RoutableMessage): Promise<RoutableMessage> {
         const reply = RoutableMessage.decode(this.fakeVehicle.handle(Buffer.from(RoutableMessage.encode(msg).finish())));
-        this.validate_msg(reply, Buffer.from(msg.uuid));
+        this.validate_msg(reply, Buffer.from(msg.uuid), msg.toDestination?.domain);
         return reply;
     }
 }
