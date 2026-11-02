@@ -400,6 +400,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
             let cause: unknown;
             for (let attempt = 1; attempt <= maxAttempts; attempt++) {
                 try {
+                    await this.teardown;
                     await this.connectOnce(device);
                     return;
                 } catch (error) {
@@ -431,11 +432,15 @@ export default class VehicleBluetooth extends BroadcastListeners {
             link.close();
             if (error instanceof BleCallTimeout) {
                 // A backend with no connect timeout can still land this attempt.
-                // The vehicle has three slots, so it must not keep one.
-                void connecting.then(
+                // The vehicle has three slots, so it must not keep one. This goes
+                // through `teardown`, because on a backend with one peripheral the
+                // late close would end the next link. It may never land, so the
+                // wait is bounded. One that lands later still gets closed.
+                const closing = connecting.then(
                     (late) => this.closeConnection(late),
                     () => undefined,
                 );
+                this.teardown = Promise.all([this.teardown, withTimeout(() => closing, LINK_TEARDOWN_TIMEOUT_MS).catch(() => undefined)]);
             }
             throw error;
         }
