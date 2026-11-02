@@ -52,7 +52,7 @@ export function redactedQuery(query: URLSearchParams): string {
  * outside (a token function, a transport) and may hold a secret, so only its
  * type is logged.
  */
-function errorText(error: unknown): string {
+export function errorText(error: unknown): string {
   if (error instanceof TeslaFleetError) {
     return `${error.name}: ${error.message}`;
   }

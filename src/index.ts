@@ -47,6 +47,8 @@ export {
     parse_gateway_address,
 } from "./teslemetryenergy.js";
 export type { AuthorizedClient, AuthorizedClients } from "./teslemetryenergy.js";
+export { CLOSURE_STATES, FieldPath, LOCK_STATES, ObservationFunnel, TeslemetryStreamPublisher, VehicleDataResultPublisher } from "./funnel.js";
+export type { Clock, Observation, ObservationSink, Publisher, Unsubscribe, Value } from "./funnel.js";
 export { Session } from "./signing/session.js";
 export * as jws from "./signing/jws.js";
 export {
