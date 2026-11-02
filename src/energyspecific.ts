@@ -1,6 +1,8 @@
 import { KeyObject } from "crypto";
+import { TeslaEnergyPeriod } from "./const.js";
 import Energy from "./energy.js";
 import { LiveStatusResponse } from "./types/live_status.js";
+import { ResponseEnvelope } from "./types/responses.js";
 import { SiteInfoResponse } from "./types/site_info.js";
 
 // Energy Class
@@ -38,40 +40,47 @@ export default class EnergySpecific {
 
     /**
      * Returns the backup (off-grid) event history of the site in duration of seconds.
-     * @param kind The kind of history to be requested. 'backup', 'charge', 'energy' are all supported.
+     * @param period Period of the window to retrieve backup events. This can be day, week, month, year, lifetime and should align with the window requested.
      * @param start_date Start date of the window to retrieve backup events in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
      * @param end_date End date of the window to retrieve backup events in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
-     * @param period Period of the window to retrieve backup events. This can be day, week, month, year, lifetime and should align with the window requested.
      * @param time_zone Timezone of the requested window in IANA name format. i.e. 'America/Los_Angeles'
      * @returns
      */
-    async backup_history(kind: string, start_date: string, end_date: string, period: string, time_zone: string): Promise<Record<string, any>> {
-        return this.parent.backup_history(this.energy_site_id, kind, start_date, end_date, period, time_zone);
+    async backup_history(
+        period: TeslaEnergyPeriod | string | null,
+        start_date?: string | null,
+        end_date?: string | null,
+        time_zone?: string | null,
+    ): Promise<Record<string, any>> {
+        return this.parent.backup_history(this.energy_site_id, period, start_date, end_date, time_zone);
     }
 
     /**
      * Returns the charging history of a wall connector.
-     * @param kind The kind of history to be requested. 'backup', 'charge', 'energy' are all supported.
-     * @param start_date Start date of the window to retrieve backup events in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
-     * @param end_date End date of the window to retrieve backup events in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
+     * @param start_date Start date of the window to retrieve charging events in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
+     * @param end_date End date of the window to retrieve charging events in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
      * @param time_zone Timezone of the requested window in IANA name format. i.e. 'America/Los_Angeles'
      * @returns
      */
-    async charge_history(kind: string, start_date: string, end_date: string, time_zone: string): Promise<Record<string, any>> {
-        return this.parent.charge_history(this.energy_site_id, kind, start_date, end_date, time_zone);
+    async charge_history(start_date: string, end_date: string, time_zone?: string | null): Promise<Record<string, any>> {
+        return this.parent.charge_history(this.energy_site_id, start_date, end_date, time_zone);
     }
 
     /**
-     * Returns the energy history of the site in duration of seconds.
-     * @param kind The kind of history to be requested. 'backup', 'charge', 'energy' are all supported.
-     * @param start_date Start date of the window to retrieve backup events in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
-     * @param end_date End date of the window to retrieve backup events in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
-     * @param period Period of the window to retrieve backup events. This can be day, week, month, year, lifetime and should align with the window requested.
+     * Returns the energy measurements of the site, aggregated to the requested period.
+     * @param period Period of the window to retrieve energy measurements. This can be day, week, month, year, lifetime and should align with the window requested.
+     * @param start_date Start date of the window to retrieve energy measurements in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
+     * @param end_date End date of the window to retrieve energy measurements in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
      * @param time_zone Timezone of the requested window in IANA name format. i.e. 'America/Los_Angeles'
      * @returns
      */
-    async energy_history(kind: string, start_date: string, end_date: string, period: string, time_zone: string): Promise<Record<string, any>> {
-        return this.parent.energy_history(this.energy_site_id, kind, start_date, end_date, period, time_zone);
+    async energy_history(
+        period: TeslaEnergyPeriod | string | null,
+        start_date?: string | null,
+        end_date?: string | null,
+        time_zone?: string | null,
+    ): Promise<Record<string, any>> {
+        return this.parent.energy_history(this.energy_site_id, period, start_date, end_date, time_zone);
     }
 
     /**
@@ -91,7 +100,7 @@ export default class EnergySpecific {
      * Returns the live status of the site.
      * @returns
      */
-    async live_status(): Promise<LiveStatusResponse> {
+    async live_status(): Promise<ResponseEnvelope<LiveStatusResponse>> {
         return this.parent.live_status(this.energy_site_id);
     }
 
@@ -116,7 +125,7 @@ export default class EnergySpecific {
     /**
      * Returns information about the site. Things like assets (has solar, etc), settings (backup reserve, etc), and features (storm_mode_capable, etc).
      */
-    async site_info(): Promise<SiteInfoResponse> {
+    async site_info(): Promise<ResponseEnvelope<SiteInfoResponse>> {
         return this.parent.site_info(this.energy_site_id);
     }
 
@@ -127,5 +136,19 @@ export default class EnergySpecific {
      */
     async storm_mode(enabled: boolean): Promise<Record<string, any>> {
         return this.parent.storm_mode(this.energy_site_id, enabled);
+    }
+
+    /**
+     * Update the time of use settings for the energy site.
+     * @param settings The `tariff_content_v2` document.
+     * @returns
+     */
+    async time_of_use_settings(settings: Record<string, any>): Promise<Record<string, any>> {
+        return this.parent.parent._request(
+            "POST",
+            `api/1/energy_sites/${this.energy_site_id}/time_of_use_settings`,
+            null,
+            { tou_settings: { tariff_content_v2: settings } },
+        );
     }
 }

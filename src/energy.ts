@@ -1,7 +1,9 @@
 import { KeyObject } from "crypto";
+import { TeslaEnergyPeriod } from "./const.js";
 import EnergySpecific from "./energyspecific.js";
 import TeslaFleetApi from "./teslafleetapi.js";
 import { LiveStatusResponse } from "./types/live_status.js";
+import { ResponseEnvelope } from "./types/responses.js";
 import { SiteInfoResponse } from "./types/site_info.js";
 
 // Energy Class
@@ -65,73 +67,67 @@ export default class Energy {
   /**
    * Returns the backup (off-grid) event history of the site in duration of seconds.
    * @param energy_site_id ID field of an energy site from /api/1/products endpoint.
-   * @param kind The kind of history to be requested. 'backup', 'charge', 'energy' are all supported.
+   * @param period Period of the window to retrieve backup events. This can be day, week, month, year, lifetime and should align with the window requested.
    * @param start_date Start date of the window to retrieve backup events in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
    * @param end_date End date of the window to retrieve backup events in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
-   * @param period Period of the window to retrieve backup events. This can be day, week, month, year, lifetime and should align with the window requested.
    * @param time_zone Timezone of the requested window in IANA name format. i.e. 'America/Los_Angeles'
    * @returns
    */
   async backup_history(
     energy_site_id: number,
-    kind: string,
-    start_date: string,
-    end_date: string,
-    period: string,
-    time_zone: string,
+    period: TeslaEnergyPeriod | string | null,
+    start_date?: string | null,
+    end_date?: string | null,
+    time_zone?: string | null,
   ): Promise<Record<string, any>> {
     return this.parent._request(
       "GET",
       `api/1/energy_sites/${energy_site_id}/calendar_history`,
-      { kind, start_date, end_date, period, time_zone },
+      { kind: "backup", start_date, end_date, period, time_zone },
     );
   }
 
   /**
    * Returns the charging history of a wall connector.
    * @param energy_site_id ID field of an energy site from /api/1/products endpoint.
-   * @param kind The kind of history to be requested. 'backup', 'charge', 'energy' are all supported.
-   * @param start_date Start date of the window to retrieve backup events in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
-   * @param end_date End date of the window to retrieve backup events in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
+   * @param start_date Start date of the window to retrieve charging events in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
+   * @param end_date End date of the window to retrieve charging events in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
    * @param time_zone Timezone of the requested window in IANA name format. i.e. 'America/Los_Angeles'
    * @returns
    */
   async charge_history(
     energy_site_id: number,
-    kind: string,
     start_date: string,
     end_date: string,
-    time_zone: string,
+    time_zone?: string | null,
   ): Promise<Record<string, any>> {
     return this.parent._request(
       "GET",
       `api/1/energy_sites/${energy_site_id}/telemetry_history`,
-      { kind, start_date, end_date, time_zone },
+      { kind: "charge", start_date, end_date, time_zone },
     );
   }
 
   /**
    * Returns the energy measurements of the site, aggregated to the requested period.
    * @param energy_site_id ID field of an energy site from /api/1/products endpoint.
-   * @param kind The kind of history to be requested. 'backup', 'charge', 'energy' are all supported.
-   * @param start_dateStart date of the window to retrieve backup events in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
-   * @param end_date End date of the window to retrieve backup events in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
-   * @param period Period of the window to retrieve backup events. This can be day, week, month, year, lifetime and should align with the window requested.
+   * @param period Period of the window to retrieve energy measurements. This can be day, week, month, year, lifetime and should align with the window requested.
+   * @param start_date Start date of the window to retrieve energy measurements in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
+   * @param end_date End date of the window to retrieve energy measurements in RFC3339 format. i.e. 2023-01-01T00:00:00-08:00
    * @param time_zone Timezone of the requested window in IANA name format. i.e. 'America/Los_Angeles'
    * @returns
    */
   async energy_history(
     energy_site_id: number,
-    kind: string,
-    start_date: string,
-    end_date: string,
-    period: string,
-    time_zone: string,
+    period: TeslaEnergyPeriod | string | null,
+    start_date?: string | null,
+    end_date?: string | null,
+    time_zone?: string | null,
   ): Promise<Record<string, any>> {
     return this.parent._request(
       "GET",
       `api/1/energy_sites/${energy_site_id}/calendar_history`,
-      { kind, start_date, end_date, period, time_zone },
+      { kind: "energy", start_date, end_date, period, time_zone },
     );
   }
 
@@ -163,10 +159,8 @@ export default class Energy {
    * @param energy_site_id
    * @returns
    */
-  async live_status(energy_site_id: number): Promise<LiveStatusResponse> {
-    return this.parent
-      ._request("GET", `api/1/energy_sites/${energy_site_id}/live_status`)
-      .then(({ response }) => response);
+  async live_status(energy_site_id: number): Promise<ResponseEnvelope<LiveStatusResponse>> {
+    return this.parent._request("GET", `api/1/energy_sites/${energy_site_id}/live_status`);
   }
 
   /**
@@ -212,10 +206,8 @@ export default class Energy {
    * @param energy_site_id ID field of an energy site from /api/1/products endpoint.
    * @returns
    */
-  async site_info(energy_site_id: number): Promise<SiteInfoResponse> {
-    return this.parent
-      ._request("GET", `api/1/energy_sites/${energy_site_id}/site_info`)
-      .then(({ response }) => response);
+  async site_info(energy_site_id: number): Promise<ResponseEnvelope<SiteInfoResponse>> {
+    return this.parent._request("GET", `api/1/energy_sites/${energy_site_id}/site_info`);
   }
 
   /**
