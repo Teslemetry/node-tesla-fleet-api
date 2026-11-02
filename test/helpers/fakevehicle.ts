@@ -12,7 +12,7 @@ import {
     Tag,
     SignatureType,
 } from "@teslemetry/tesla-protocol/command/signatures";
-import { UnsignedMessage, FromVCSECMessage, CommandStatus, OperationStatusE as VcsecOperationStatusE } from "@teslemetry/tesla-protocol/command/vcsec";
+import { UnsignedMessage, FromVCSECMessage, CommandStatus, OperationStatusE as VcsecOperationStatusE, VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
 import { Action, Response, ActionStatus, OperationStatusE as ActionOperationStatusE } from "@teslemetry/tesla-protocol/command/car_server";
 import { deriveSharedKey, publicKeyFor, uint32BE } from "../../src/signing/crypto.js";
 
@@ -62,6 +62,12 @@ export class FakeVehicle {
     private encryptHmacReplies = false;
     private corruptNextReply = false;
     private replyFlags = 0;
+    /** What a VCSEC status read returns. Unset, it gets the same `commandStatus` OK as any other command. */
+    vehicleStatus: VehicleStatus | null = null;
+    /** Every VCSEC command this vehicle authenticated, decrypted. */
+    readonly vcsecCommands: UnsignedMessage[] = [];
+    /** Every Infotainment action this vehicle authenticated, decrypted. */
+    readonly infotainmentActions: Action[] = [];
     /** Counters of every VCSEC command in the order this FakeVehicle actually received them - for concurrency/ordering tests. */
     readonly vcsecCounterArrivals: number[] = [];
     /** Every accepted VCSEC command, decoded on this side of the wire. */
@@ -329,8 +335,15 @@ export class FakeVehicle {
         return Buffer.from(RoutableMessage.encode(reply).finish());
     }
 
-    /** Process one request `RoutableMessage` exactly as a vehicle would, and return its reply bytes. */
+    /** Process one request `RoutableMessage` exactly as a vehicle would, and return its reply bytes, addressed to its sender. */
     handle(requestBytes: Buffer): Buffer {
+        const routingAddress = RoutableMessage.decode(requestBytes).fromDestination?.routingAddress;
+        const reply = RoutableMessage.decode(this.process(requestBytes));
+        reply.toDestination = { routingAddress };
+        return Buffer.from(RoutableMessage.encode(reply).finish());
+    }
+
+    private process(requestBytes: Buffer): Buffer {
         const msg = RoutableMessage.decode(requestBytes);
         const domain = msg.toDestination?.domain ?? Domain.DOMAIN_BROADCAST;
         const state = this.stateFor(domain);
@@ -433,14 +446,17 @@ export class FakeVehicle {
 
         let payload: Uint8Array;
         if (domain === Domain.DOMAIN_VEHICLE_SECURITY) {
-            this.vcsecCommands.push(UnsignedMessage.decode(command));
+            const unsigned = UnsignedMessage.decode(command);
+            this.vcsecCommands.push(unsigned);
             const scripted = this.nextVcsecReply;
             this.nextVcsecReply = null;
             payload = FromVCSECMessage.encode(
                 scripted ??
-                    FromVCSECMessage.create({
-                        commandStatus: CommandStatus.create({ operationStatus: VcsecOperationStatusE.OPERATIONSTATUS_OK }),
-                    }),
+                    (unsigned.InformationRequest && this.vehicleStatus
+                        ? FromVCSECMessage.create({ vehicleStatus: this.vehicleStatus })
+                        : FromVCSECMessage.create({
+                              commandStatus: CommandStatus.create({ operationStatus: VcsecOperationStatusE.OPERATIONSTATUS_OK }),
+                          })),
             ).finish();
         } else {
             const action = Action.decode(command);

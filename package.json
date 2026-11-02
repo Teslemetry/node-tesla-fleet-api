@@ -103,6 +103,16 @@
                 "default": "./dist/types.cjs"
             }
         },
+        "./bluetooth": {
+            "import": {
+                "types": "./dist/bluetooth.d.mts",
+                "default": "./dist/bluetooth.mjs"
+            },
+            "require": {
+                "types": "./dist/bluetooth.d.cts",
+                "default": "./dist/bluetooth.cjs"
+            }
+        },
         "./package.json": "./package.json"
     },
     "sideEffects": false,

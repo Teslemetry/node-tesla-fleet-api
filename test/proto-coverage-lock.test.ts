@@ -85,15 +85,12 @@ const KNOWN_UNWRAPPED_GET_VEHICLE_DATA_FIELDS = new Set(["getKeepOnAccessoryPort
  * reader lands, and the last test below fails until it does.
  */
 const BLUETOOTH_READERS_NOT_YET_PORTED = new Set([
-    "getChargeState",
-    "getClimateState",
     "getDriveState",
     "getLocationState",
     "getClosuresState",
     "getChargeScheduleState",
     "getPreconditioningScheduleState",
     "getTirePressureState",
-    "getMediaState",
     "getMediaDetailState",
     "getSoftwareUpdateState",
     "getParentalControlsState",
