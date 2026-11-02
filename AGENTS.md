@@ -39,6 +39,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `BluetoothUnconfirmedCommand` is checked before `on_result` and before the policy, by `instanceof` **and** the `unconfirmed` field. `instanceof` alone fails across the dual-package hazard; `test/consumers/esm.mjs` proves this with both real copies. Unlike Python, `is_failover_safe` itself also answers false for it.
 - Backend methods must not use overloads (`infer` reads only the last one). `test/router.types.ts` runs in CI through `tsconfig.test.json`; `test/*.test.ts` is not typechecked at all.
 
+## Observation funnel (`src/funnel.ts`)
+
+A funnel, not a selector: do not add source health, availability, grace windows, priority or per-field selection. Unavailability is a value a source reports, never inferred from a dropped link. The module stays synchronous and never originates a request (`test/funnel.test.ts` checks its syntax tree); polling belongs to the consumer. Translations are positive allowlists: an unmapped value emits nothing.
+
 ## Errors (`src/exceptions.ts`)
 
 - A class-for-class port of `python-tesla-fleet-api`'s `exceptions.py`: same names, parents, and `message`/`status`/`key`/`code` (as statics, copied onto instances). Add new errors there under their Python name, with no aliases; don't reintroduce per-module error files. `message` is always the class message; per-instance detail goes in `data`.

@@ -31,6 +31,8 @@ export type { TeslemetryClientRegistration } from "./teslemetry.js";
 export type { AccessToken } from "./teslafleetapi.js";
 export type { RefreshedToken, TeslaFleetOAuthOptions } from "./oauth.js";
 export type { Logger } from "./log.js";
+export { CLOSURE_STATES, FieldPath, LOCK_STATES, ObservationFunnel, TeslemetryStreamPublisher, VehicleDataResultPublisher } from "./funnel.js";
+export type { Clock, Observation, ObservationSink, Publisher, Unsubscribe, Value } from "./funnel.js";
 export { Session } from "./signing/session.js";
 export {
     ec_private_key_from_pem,
