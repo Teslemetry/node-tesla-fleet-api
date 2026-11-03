@@ -28,7 +28,6 @@ Each adapter is its own entry point, and importing one loads no backend. `npm in
 | -- | -- | -- | -- |
 | `./bluetooth/homey` | `HomeyBleTransport` | `this.homey.ble`, by structural types. No package. | A Homey app |
 | `./bluetooth/noble` | `NobleBleTransport` | `@stoprocent/noble` (native) | Linux, macOS, Windows |
-| `./bluetooth/esphome` | `EsphomeBleTransport` | `@2colors/esphome-native-api` (JS and WASM) | Anywhere with a TCP route to a proxy |
 
 Web Bluetooth is not provided: the core uses Node `crypto` and `Buffer`, so it does not run in a browser.
 
@@ -73,25 +72,6 @@ Limits:
 - macOS needs a Bluetooth permission grant for the host process. Whether that works headless is unknown.
 - Generic Access (`1800`) may be hidden on BlueZ and CoreBluetooth paths. `query_display_name` and `query_appearance` then return `null`.
 - Connecting to a device no scan has seen first runs a scan.
-
-### ESPHome proxy
-
-```ts
-new EsphomeBleTransport({ host, port, encryptionKey, password });  // loads the package on first use
-new EsphomeBleTransport({ connection });                           // a Connection you own
-```
-
-Call `transport.close()` to end an API connection the transport opened. It never closes one you passed in.
-
-Limits:
-
-- **Use a dedicated proxy.** A proxy serves advertisements to one client. If Home Assistant holds it, a scan sees nothing and reports no error.
-- The proxy must scan actively, as the vehicle's name is in the scan response.
-- A proxy has few connection slots, and this adapter does not wait for a free one. If connect fails while scans see the car, free a slot first.
-- Everything shares one queue per proxy, so two vehicles on a proxy slow each other down.
-- A GATT error surfaces as a timeout, and a command then reads as unconfirmed. That is the safe reading.
-- A connect needs an address type, which only an advertisement carries, so a device no scan has seen runs a scan first.
-- One ESP32-S3 board scanned perfectly and could not connect, in Python's trials. A scan proves nothing about the radio's transmit path.
 
 ### Writing your own
 
@@ -204,7 +184,6 @@ A held link receives unsigned `VehicleStatus` broadcasts. Each `listen_*` return
 | -- | -- | -- |
 | Homey | **Never** | Never |
 | noble | **Never** | Direct adapters, through `bleak` |
-| ESPHome proxy | **Never** | Yes, including the charge port trials |
 | `pair` | **Never** | One real key card tap |
 | Signing, framing and sessions | Fake vehicle only, against golden vectors | Yes |
 
@@ -216,11 +195,10 @@ The adapters' decisions come from reading each backend's code and types, and fro
 
 ```bash
 BLE_LIVE_VIN=<vin> BLE_LIVE_KEY_PATH=<file> pnpm ble:live --transport noble
-BLE_LIVE_VIN=<vin> BLE_LIVE_KEY_PATH=<file> BLE_LIVE_PROXY_HOST=<host> \
-  pnpm ble:live --transport esphome --steps charge_limit
+BLE_LIVE_VIN=<vin> BLE_LIVE_KEY_PATH=<file> pnpm ble:live --transport noble --steps charge_limit
 ```
 
-`--list` shows the steps. With no `--steps` it runs the plain reads. `BLE_LIVE_PROXY_PORT`, `BLE_LIVE_PROXY_KEY` and `BLE_LIVE_PROXY_PASSWORD` are optional. Homey has no command line, as it needs a test app.
+`--list` shows the steps. With no `--steps` it runs the plain reads. Homey has no command line, as it needs a test app.
 
 - A setting is snapshotted, changed once, verified by a fresh read, restored by an absolute command, and read again.
 - **A command that times out is never sent again.** The next read decides, and the run stops at the first step that did not end cleanly.

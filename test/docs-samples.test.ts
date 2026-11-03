@@ -21,7 +21,6 @@ const PATHS: Record<string, string[]> = {
     "tesla-fleet-api/bluetooth": ["src/bluetooth/index.ts"],
     "tesla-fleet-api/bluetooth/homey": ["src/bluetooth/adapters/homey.ts"],
     "tesla-fleet-api/bluetooth/noble": ["src/bluetooth/adapters/noble.ts"],
-    "tesla-fleet-api/bluetooth/esphome": ["src/bluetooth/adapters/esphome.ts"],
 };
 
 /** What samples take as given, so that each stays about the library. */

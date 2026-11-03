@@ -46,7 +46,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - A reply is checked against its request first (`isForeignReply`). An empty uuid can only ack or answer a read, because real VCSEC leaves it empty.
 - `pair` writes through `_send` exactly once, and resolves only on an explicit success or an authenticated handshake with this key. An abort is checked in `writeFrame`, the last point before the radio.
 - Attempts on one peripheral share one radio link, so an abandoned attempt must never close or resubscribe a link a newer one owns (`LinkClaims`, `test/bluetooth/adapters/late-connect.test.ts`).
-- Adapters are one file each, with no top-level import of a backend, and `autoInstallPeers: false` keeps native builds out of this repository. Homey's constants follow the BLE-00 probe app, not document 06, and nothing has run on one. ESPHome's reply matching is by type alone, so every call goes through the per-proxy queue; a GATT error there must stay a plain error.
+- Adapters are one file each, with no top-level import of a backend, and `autoInstallPeers: false` keeps native builds out of this repository. Homey's constants follow the BLE-00 probe app, not document 06, and nothing has run on one.
 - `test/bluetooth/coverage.test.ts` locks what falls through to REST. `test/helpers/fakeblelink.ts` keeps its own framing, and `FakeBleLink.vcsecWrites` is how to prove "exactly one".
 - `scripts/ble-live/` is the live harness. `STEPS` is a closed list, and the CLI takes step names, never a command name. Never add a pass-through, a destructive command or a re-send after a timeout.
 

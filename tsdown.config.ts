@@ -13,7 +13,6 @@ export default defineConfig({
         bluetooth: "src/bluetooth/index.ts",
         "bluetooth/homey": "src/bluetooth/adapters/homey.ts",
         "bluetooth/noble": "src/bluetooth/adapters/noble.ts",
-        "bluetooth/esphome": "src/bluetooth/adapters/esphome.ts",
         powerwall: "src/powerwall/index.ts",
     },
     format: ["esm", "cjs"],

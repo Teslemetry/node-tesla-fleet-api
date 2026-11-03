@@ -13,17 +13,6 @@ const COMPACT = {
     version: "00000214b2d143f09b88960cebf8b91e",
 };
 
-/** The same UUIDs as a proxy reports them. */
-const DASHED = {
-    service: "00000211-b2d1-43f0-9b88-960cebf8b91e",
-    write: "00000212-b2d1-43f0-9b88-960cebf8b91e",
-    notify: "00000213-b2d1-43f0-9b88-960cebf8b91e",
-    version: "00000214-b2d1-43f0-9b88-960cebf8b91e",
-    genericAccess: "00001800-0000-1000-8000-00805f9b34fb",
-    deviceName: "00002a00-0000-1000-8000-00805f9b34fb",
-    cccd: "00002902-0000-1000-8000-00805f9b34fb",
-};
-
 /** A tiny `EventEmitter` with the calls a backend's objects offer. */
 class Emitter {
     private listeners = new Map<string, Array<(...args: any[]) => void>>();
@@ -329,109 +318,6 @@ export function stubHomey() {
         peripheral.emit("disconnect");
     };
     return { link, ble, peripheral, advertisement, device: { id: advertisement.uuid } };
-}
-
-export const STUB_ADDRESS = 0xaabbccddeeff;
-export const STUB_MAC = "AA:BB:CC:DD:EE:FF";
-const HANDLES = { write: 3, notify: 8, cccd: 9, version: 12, deviceName: 22 };
-
-/** A stub of the package's `Connection`, answering as the real one maps its replies. */
-export function stubEsphome() {
-    const link = new StubLink();
-    let mtu = 115;
-    const proxy: any = new Emitter();
-
-    const gattReply = (address: number, handle: number) => ({ address, handle });
-    Object.assign(proxy, {
-        connected: true,
-        authorized: true,
-        connect: () => undefined,
-        disconnect: () => undefined,
-        subscribeBluetoothAdvertisementService: () => {
-            link.calls.push({ name: "scan", args: [] });
-            const advert = { address: STUB_ADDRESS, addressType: 1, rssi: -60 };
-            proxy.emit("message.BluetoothLEAdvertisementResponse", { ...advert, name: "" });
-            proxy.emit("message.BluetoothLEAdvertisementResponse", { ...advert, name: STUB_NAME });
-        },
-        unsubscribeBluetoothAdvertisementService: () => {
-            link.calls.push({ name: "stop-scan", args: [] });
-        },
-        connectBluetoothDeviceService: async (address: number, addressType?: number, useCache?: boolean) => {
-            await link.step("connect", address, addressType, useCache);
-            link.open = true;
-            const reply = { address, connected: true, mtu, error: 0 };
-            proxy.emit("message.BluetoothDeviceConnectionResponse", reply);
-            return reply;
-        },
-        disconnectBluetoothDeviceService: async (address: number) => {
-            await link.step("disconnect", address);
-            link.open = false;
-            const reply = { address, connected: false, mtu: 0, error: 0 };
-            proxy.emit("message.BluetoothDeviceConnectionResponse", reply);
-            return reply;
-        },
-        listBluetoothGATTServicesService: async (address: number) => {
-            await link.step("discover", address);
-            return {
-                address,
-                servicesList: [
-                    {
-                        uuid: DASHED.service,
-                        handle: 1,
-                        characteristicsList: [
-                            { uuid: DASHED.write, handle: HANDLES.write, descriptorsList: [] },
-                            { uuid: DASHED.notify, handle: HANDLES.notify, descriptorsList: [{ uuid: DASHED.cccd, handle: HANDLES.cccd }] },
-                            { uuid: DASHED.version, handle: HANDLES.version, descriptorsList: [] },
-                        ],
-                    },
-                    {
-                        uuid: DASHED.genericAccess,
-                        handle: 20,
-                        characteristicsList: [{ uuid: DASHED.deviceName, handle: HANDLES.deviceName, descriptorsList: [] }],
-                    },
-                ],
-            };
-        },
-        readBluetoothGATTCharacteristicService: async (address: number, handle: number) => {
-            await link.step("read", address, handle);
-            const value = handle === HANDLES.version ? Buffer.from([0, 7]) : Buffer.from("name");
-            return { ...gattReply(address, handle), data: value.toString("base64") };
-        },
-        // Its default is false, as in the package.
-        writeBluetoothGATTCharacteristicService: async (address: number, handle: number, value: Uint8Array, response: boolean = false) => {
-            await link.step("write", address, handle, value, response);
-            link.landWrite(Buffer.from(value), response);
-            return gattReply(address, handle);
-        },
-        notifyBluetoothGATTCharacteristicService: async (address: number, handle: number) => {
-            await link.step("subscribe", address, handle);
-            return gattReply(address, handle);
-        },
-        writeBluetoothGATTDescriptorService: async (address: number, handle: number, value: Uint8Array) => {
-            await link.step("cccd", address, handle, value);
-            link.subscriptions++;
-        },
-    });
-
-    link.notify = (chunk) =>
-        proxy.emit("message.BluetoothGATTNotifyDataResponse", {
-            address: STUB_ADDRESS,
-            handle: HANDLES.notify,
-            data: chunk.toString("base64"),
-        });
-    link.drop = () => {
-        link.open = false;
-        proxy.emit("message.BluetoothDeviceConnectionResponse", { address: STUB_ADDRESS, connected: false, mtu: 0, error: 19 });
-    };
-    return {
-        link,
-        proxy,
-        device: { id: STUB_MAC },
-        handles: HANDLES,
-        setMtu: (value: number) => {
-            mtu = value;
-        },
-    };
 }
 
 export function noHandlers(overrides: Partial<BleLinkHandlers> = {}): BleLinkHandlers {

@@ -3,12 +3,9 @@
 // on a fake link.
 //
 //   BLE_LIVE_VIN=<vin> BLE_LIVE_KEY_PATH=<file> pnpm ble:live --transport noble
-//   BLE_LIVE_VIN=<vin> BLE_LIVE_KEY_PATH=<file> BLE_LIVE_PROXY_HOST=<host> \
-//     [BLE_LIVE_PROXY_PORT=<port>] [BLE_LIVE_PROXY_KEY=<base64>] [BLE_LIVE_PROXY_PASSWORD=<password>] \
-//     pnpm ble:live --transport esphome --steps charge_limit
 //
 // Options:
-//   --transport <name>   noble or esphome. Homey has no CLI: it needs a test app.
+//   --transport <name>   noble. Homey has no CLI: it needs a test app.
 //   --steps <a,b,c>      Steps to run. Defaults to every plain read.
 //   --captain-present    Allow steps with a physical effect. Only say so if it is true.
 //   --list               Print the steps, and touch nothing.
@@ -20,7 +17,6 @@
 // Exits 0 when every step ended cleanly, 1 when one did not, 2 on bad setup.
 import { existsSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { EsphomeBleTransport } from "../../src/bluetooth/adapters/esphome.js";
 import { NobleBleTransport } from "../../src/bluetooth/adapters/noble.js";
 import { get_name } from "../../src/bluetooth/names.js";
 import TeslaBluetooth from "../../src/bluetooth/teslabluetooth.js";
@@ -33,17 +29,6 @@ type TransportFactory = (env: Env) => BleTransport;
 
 const TRANSPORTS: Record<string, TransportFactory> = {
     noble: () => new NobleBleTransport(),
-    esphome: (env) => {
-        if (!env.BLE_LIVE_PROXY_HOST) {
-            throw new Error("Set BLE_LIVE_PROXY_HOST.");
-        }
-        return new EsphomeBleTransport({
-            host: env.BLE_LIVE_PROXY_HOST,
-            port: env.BLE_LIVE_PROXY_PORT ? Number(env.BLE_LIVE_PROXY_PORT) : undefined,
-            encryptionKey: env.BLE_LIVE_PROXY_KEY,
-            password: env.BLE_LIVE_PROXY_PASSWORD,
-        });
-    },
 };
 
 interface Arguments {
@@ -140,7 +125,7 @@ export async function main(argv: readonly string[], env: Env, { print = console.
         return 2;
     }
 
-    const output = redactor([vin, get_name(vin).slice(0, -1), keyPath, env.BLE_LIVE_PROXY_HOST, env.BLE_LIVE_PROXY_KEY, env.BLE_LIVE_PROXY_PASSWORD], print);
+    const output = redactor([vin, get_name(vin).slice(0, -1), keyPath], print);
     let transport: BleTransport;
     try {
         transport = factory(env);
@@ -165,9 +150,6 @@ export async function main(argv: readonly string[], env: Env, { print = console.
         return results.length === steps.length && results.every(({ outcome }) => outcome === "ok") ? 0 : 1;
     } finally {
         await vehicle.disconnect();
-        if (transport instanceof EsphomeBleTransport) {
-            transport.close();
-        }
     }
 }
 

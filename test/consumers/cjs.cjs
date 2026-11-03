@@ -28,13 +28,11 @@ assert.equal(typeof router.is_failover_safe, "function");
 // Each adapter must load with no backend installed, and only fail once it is used.
 const { HomeyBleTransport, HOMEY_MAX_WRITE_SIZE } = require("tesla-fleet-api/bluetooth/homey");
 const { NobleBleTransport } = require("tesla-fleet-api/bluetooth/noble");
-const { EsphomeBleTransport } = require("tesla-fleet-api/bluetooth/esphome");
 assert.equal(typeof require("tesla-fleet-api/powerwall").PowerwallClient, "function");
 assert.equal(typeof HomeyBleTransport, "function");
 assert.equal(HOMEY_MAX_WRITE_SIZE, 20);
 (async () => {
     await assert.rejects(new NobleBleTransport().scan({ timeoutMs: 1000 }), /@stoprocent\/noble/);
-    await assert.rejects(new EsphomeBleTransport({ host: "proxy.test" }).scan({ timeoutMs: 1000 }), /@2colors\/esphome-native-api/);
     console.log("CJS consumer OK");
 })().catch((error) => {
     console.error(error);
