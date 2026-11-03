@@ -4,19 +4,28 @@
 // file loads anywhere. It follows what the BLE-00 probe app does on a real Homey
 // (`probe/ble-hw0/app.js` in Teslemetry/homey), not only what the SDK types allow:
 // UUIDs in compact form, characteristics discovered with no filter and matched by
-// normalized UUID. No run of that probe has reported yet, so every value it may
-// change is a named constant below, with its step.
+// normalized UUID. HW-0 ran it on a Homey Pro on 2026-11-03, and
+// its measured values are the named constants below.
 import { withTimeout } from "../async.js";
 import { APPEARANCE_UUID, DEFAULT_CONNECT_TIMEOUT_MS, GENERIC_ACCESS_UUID, NAME_UUID, SERVICE_UUID, VEHICLE_NOTIFY_UUID, VEHICLE_WRITE_UUID, VERSION_UUID } from "../constants.js";
 import { BleCharacteristic, BleConnection, BleDeviceRef, BleLinkHandlers, BleNotSubmittedError, BleScanOptions, BleTransport } from "../transport.js";
 import { compactUuid, LinkClaims, quietly } from "./shared.js";
 
 /**
- * Bytes per write. Homey hides the MTU, so this is the ATT minimum, the one size
- * sure to work. BLE-00 step 6: if a whole 114-byte frame gets a reply, this can
- * become `null`. Otherwise step 7 keeps it, or the MTU estimate less 3 if larger.
+ * Bytes per write: `null`, a whole frame in one write. Homey hides the MTU.
+ * BLE-00 (HW-0, 2026-11-03) measured a 114-byte frame in one write at 232 ms to
+ * a reply, against 562 ms for 6 writes of 20 bytes. Only 114 bytes were tried:
+ * a signed frame (about 200 bytes) is confirmed by HW-5. Pass `maxWriteSize: 20`
+ * to `HomeyBleTransport` to chunk at the ATT minimum if that run shows a failure.
  */
-export const HOMEY_MAX_WRITE_SIZE = 20;
+export const HOMEY_MAX_WRITE_SIZE = null;
+
+/**
+ * Bound on one scan. `discover()` takes a fixed 10.04 s when it is not cached
+ * (HW-0), so the library's 10 s default would time out about 40 ms early.
+ * `VehicleBluetooth` uses this when `scan_timeout_ms` is not set.
+ */
+export const HOMEY_SCAN_TIMEOUT_MS = 15_000;
 
 /**
  * For `connect_timeout_ms` and `max_connect_attempts`, not applied by this
@@ -72,7 +81,7 @@ export interface HomeyAdvertisementLike {
 
 /** What this adapter needs of `this.homey.ble`. */
 export interface HomeyBleManagerLike {
-    /** About 5 s, fixed. Called with no filter, because the vehicle advertises no service. */
+    /** About 10 s, fixed, when not cached (BLE-00 HW-0). Called with no filter, because the vehicle advertises no service. */
     discover(): Promise<HomeyAdvertisementLike[]>;
     find(uuid: string): Promise<HomeyAdvertisementLike>;
 }
@@ -211,6 +220,7 @@ class HomeyConnection implements BleConnection {
 export class HomeyBleTransport implements BleTransport {
     private readonly maxWriteSize: number | null;
     private readonly claims = new LinkClaims<HomeyConnection>();
+    readonly scanTimeoutMs = HOMEY_SCAN_TIMEOUT_MS;
 
     /** @param ble `this.homey.ble`. The app needs the `homey:wireless:ble` permission. */
     constructor(

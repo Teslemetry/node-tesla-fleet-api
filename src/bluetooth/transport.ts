@@ -86,6 +86,8 @@ export interface BleScanOptions {
 }
 
 export interface BleTransport {
+    /** How long one scan needs, for a backend with a fixed window. `scan_timeout_ms` overrides it. */
+    readonly scanTimeoutMs?: number;
     /** Active, unfiltered scan. Resolves once a match is found, or when the scan ends with what was seen. */
     scan(options: BleScanOptions): Promise<BleDeviceRef[]>;
     /** Connect, discover, subscribe to notify. Resolves only when notifications are live. */

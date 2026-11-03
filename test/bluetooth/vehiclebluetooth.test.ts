@@ -79,6 +79,45 @@ describe("a round trip", () => {
         expect(link.writes).toHaveLength(link.frames.length);
     });
 
+    it("keeps a reply that arrives before write() resolves, as Homey's did by 93 ms", async () => {
+        const { link, tesla } = bleHarness();
+        // The car answers at once, but the backend's write only resolves 200 ms later.
+        const slow: BleTransport = {
+            scan: (options) => link.scan(options),
+            async connect(device, handlers) {
+                const connection = await link.connect(device, handlers);
+                return {
+                    get isConnected() {
+                        return connection.isConnected;
+                    },
+                    maxWriteSize: null,
+                    async write(data) {
+                        await connection.write(data);
+                        await new Promise((resolve) => setTimeout(resolve, 200));
+                    },
+                    read: (characteristic) => connection.read(characteristic),
+                    disconnect: () => connection.disconnect(),
+                };
+            },
+        };
+        const early = new TestVehicle(tesla.vehicles, VIN, { keepalive_interval_ms: null, transport: slow });
+        await finish(early.connect());
+        // The wait is shorter than the write, so only a reply held from before the write resolves can answer.
+        const reply = await finish(early.send(early.sessionRequest(VCSEC), "session_info", { timeoutMs: 50 }));
+        expect(reply.sessionInfo).toBeDefined();
+        await finish(early.disconnect());
+    });
+
+    it("scans for the transport's own bound when scan_timeout_ms is not set", async () => {
+        const { link, tesla } = bleHarness();
+        link.scanWindowMs = 12_000;
+        const transport = Object.assign(Object.create(link) as FakeBleLink, { scanTimeoutMs: 15_000 });
+        const long = new TestVehicle(tesla.vehicles, VIN, { keepalive_interval_ms: null, transport });
+        await expect(finish(long.find_vehicle())).resolves.toBeDefined();
+        const short = new TestVehicle(tesla.vehicles, VIN, { keepalive_interval_ms: null, transport: link });
+        await expect(finish(short.find_vehicle())).rejects.toThrow();
+    });
+
     it("never interleaves the chunks of commands on both domains", async () => {
         const { vehicle, link } = bleHarness({ mtu: 23 });
         link.writeDelayMs = 5;

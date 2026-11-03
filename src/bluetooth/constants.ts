@@ -60,7 +60,7 @@ export const DEFAULT_PAIR_POLL_INTERVAL_MS = 5000;
 export const DEFAULT_CONNECT_ATTEMPTS = 3;
 /** One connect attempt. Python takes the same figure from `bleak-retry-connector`. */
 export const DEFAULT_CONNECT_TIMEOUT_MS = 20_000;
-/** One scan. It must outlast the backend's window, which Homey fixes at about 5 s. */
+/** One scan. It must outlast the backend's window, which Homey fixes at about 10 s: its adapter sets its own bound. */
 export const DEFAULT_SCAN_TIMEOUT_MS = 10_000;
 /** Bound on tearing down a link: the failure behind it is what gets reported. */
 export const LINK_TEARDOWN_TIMEOUT_MS = 5000;

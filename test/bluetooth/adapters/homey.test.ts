@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { HOMEY_MAX_WRITE_SIZE, HOMEY_SETUP_TIMEOUT_MS, HOMEY_UNSUBSCRIBE_TIMEOUT_MS, HomeyBleTransport, HomeyPeripheralLike } from "../../../src/bluetooth/adapters/homey.js";
+import { HOMEY_MAX_WRITE_SIZE, HOMEY_SCAN_TIMEOUT_MS, HOMEY_SETUP_TIMEOUT_MS, HOMEY_UNSUBSCRIBE_TIMEOUT_MS, HomeyBleTransport, HomeyPeripheralLike } from "../../../src/bluetooth/adapters/homey.js";
 import { BleNotSubmittedError } from "../../../src/bluetooth/transport.js";
 import { flush, noHandlers, STUB_NAME, stubHomey } from "../../helpers/stubbackends.js";
 
@@ -48,10 +48,21 @@ describe("HomeyBleTransport", () => {
         expect(link.calls.find((call) => call.name === "characteristics")?.args).toEqual([]);
     });
 
-    it("defaults to 20 bytes per write", async () => {
+    it("defaults to one write per frame, as measured by BLE-00 HW-0", async () => {
         const { transport, device } = subject();
-        expect(HOMEY_MAX_WRITE_SIZE).toBe(20);
+        expect(HOMEY_MAX_WRITE_SIZE).toBeNull();
+        expect((await transport.connect(device, noHandlers())).maxWriteSize).toBeNull();
+    });
+
+    it("keeps 20-byte chunking available", async () => {
+        const { transport, device } = subject({ maxWriteSize: 20 });
         expect((await transport.connect(device, noHandlers())).maxWriteSize).toBe(20);
+    });
+
+    it("bounds a scan at 15 s, above the fixed 10 s window", () => {
+        const { transport } = subject();
+        expect(HOMEY_SCAN_TIMEOUT_MS).toBe(15_000);
+        expect(transport.scanTimeoutMs).toBe(HOMEY_SCAN_TIMEOUT_MS);
     });
 
     it("takes a larger write size", async () => {
@@ -59,7 +70,7 @@ describe("HomeyBleTransport", () => {
         expect((await transport.connect(device, noHandlers())).maxWriteSize).toBe(100);
     });
 
-    it("keeps null, which BLE-00 step 6 may choose, instead of falling back to 20", async () => {
+    it("keeps null instead of falling back to the default", async () => {
         const { transport, device } = subject({ maxWriteSize: null });
         expect((await transport.connect(device, noHandlers())).maxWriteSize).toBeNull();
     });
