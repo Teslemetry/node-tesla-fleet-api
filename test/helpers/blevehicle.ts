@@ -19,6 +19,10 @@ export class TestVehicle extends VehicleBluetooth {
         return this._send(msg, requires, options);
     }
 
+    sessionRequest(domain: Domain): RoutableMessage {
+        return this.sessionInfoRequest(domain);
+    }
+
     session(domain: Domain) {
         return this.sessionFor(domain);
     }

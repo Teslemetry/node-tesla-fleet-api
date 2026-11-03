@@ -318,7 +318,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
         this.wake_if_asleep = options.wake_if_asleep ?? true;
         this.maxConnectAttempts = options.max_connect_attempts ?? DEFAULT_CONNECT_ATTEMPTS;
         this.connectTimeoutMs = options.connect_timeout_ms ?? DEFAULT_CONNECT_TIMEOUT_MS;
-        this.scanTimeoutMs = options.scan_timeout_ms ?? DEFAULT_SCAN_TIMEOUT_MS;
+        this.scanTimeoutMs = options.scan_timeout_ms ?? options.transport.scanTimeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS;
         this.wakeProbeTimeoutMs = options.wake_probe_timeout_ms ?? DEFAULT_WAKE_PROBE_TIMEOUT_MS;
         if (this.wakeProbeTimeoutMs <= 0) {
             throw new RangeError("wake_probe_timeout_ms must be greater than 0.");

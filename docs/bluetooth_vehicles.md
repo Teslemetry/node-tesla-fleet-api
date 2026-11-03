@@ -45,18 +45,18 @@ const vehicle = new TeslaBluetooth({ privateKey }).vehicles.createBluetooth(vin,
 });
 ```
 
-The app needs the `homey:wireless:ble` permission. Options: `maxWriteSize`, bytes per write, default 20. `null` sends a whole frame in one write.
+The app needs the `homey:wireless:ble` permission. Options: `maxWriteSize`, bytes per write, default `null`: a whole frame in one write. Pass `20` to chunk at the ATT minimum.
 
 Limits:
 
-- **The BLE-00 probe has not run on a Homey, so these defaults are conservative guesses.** Whether the vehicle's name is visible to `discover()` at all is unknown. If it is not, name matching cannot work, and you pass `device: { id: <peripheral uuid> }` yourself. Every value the probe may change is a constant in `src/bluetooth/adapters/homey.ts` that names its probe step.
-- The scan window is about 5 s and fixed, and `scan` ignores `timeoutMs`.
+- **Measured on a real Homey (BLE-00, HW-0, 2026-11-03).** The vehicle's name is visible to `discover()`, so name matching works. A 114-byte frame goes in one write. A signed frame of about 200 bytes is not yet measured: HW-5 confirms it.
+- The scan window is about 10 s and fixed, and `scan` ignores `timeoutMs`. The adapter sets `scanTimeoutMs` to 15 s, which `scan_timeout_ms` overrides.
 - `discover()` results stay cached for at least 30 s, so a fast retry sees old data. Treat repeated connect failures as a reason to wait, not to retry.
-- The MTU is hidden, so a signed frame takes about 10 writes at 20 bytes.
+- The MTU is hidden, but a frame goes in one write.
 - `isConnected` can stay true after a silent drop, and the `disconnect` event is not guaranteed. So `listen_connection_status(false)` can be as late as the next operation to time out. `true` is reliable.
 - Homey offers no connect, write or read timeout. The library adds them.
 - Range is the largest limit, and nothing can fix it in software. A Homey sits indoors. Expect "in range" to mean parked close to it.
-- `HOMEY_VEHICLE_OPTIONS` (one attempt, 4 s) suits a Flow action. Elsewhere, keep the library's defaults until the probe has measured Homey's connect time, as a link slower than 4 s never lands.
+- `HOMEY_VEHICLE_OPTIONS` (one attempt, 4 s) suits a Flow action. Connect time measured p50 0.4 s and max 1.4 s over 10 connects, so these options suit any caller.
 
 ### noble
 
@@ -110,7 +110,7 @@ Implement `BleTransport` from `tesla-fleet-api/bluetooth`. `src/bluetooth/transp
 | `wake_if_asleep` | `true` | Wake a sleeping car for an infotainment command, instead of raising. |
 | `max_connect_attempts` | `3` | Attempts per connect. |
 | `connect_timeout_ms` | `20000` | One attempt. |
-| `scan_timeout_ms` | `10000` | One scan. It must outlast the backend's window. |
+| `scan_timeout_ms` | `10000` (Homey: `15000`) | One scan. It must outlast the backend's window. |
 | `wake_probe_timeout_ms` | `1000` | The reply wait of one infotainment readiness probe. |
 
 ## Methods

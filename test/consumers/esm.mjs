@@ -15,7 +15,7 @@ import { PowerwallClient } from "tesla-fleet-api/powerwall";
 // Each adapter must load with no backend installed, and only fail once it is used.
 assert.equal(typeof PowerwallClient, "function");
 assert.equal(typeof HomeyBleTransport, "function");
-assert.equal(HOMEY_MAX_WRITE_SIZE, 20);
+assert.equal(HOMEY_MAX_WRITE_SIZE, null);
 await assert.rejects(new NobleBleTransport().scan({ timeoutMs: 1000 }), /@stoprocent\/noble/);
 await assert.rejects(new EsphomeBleTransport({ host: "proxy.test" }).scan({ timeoutMs: 1000 }), /@2colors\/esphome-native-api/);
 

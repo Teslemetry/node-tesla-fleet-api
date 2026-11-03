@@ -187,7 +187,7 @@ class TeslaApp extends Homey.App {
 export default TeslaApp;
 ```
 
-The Homey adapter's defaults are conservative guesses until the BLE-00 probe has run on a Homey. `confirmation` sets how much proof a command needs: `"optimistic"`, `"ack"` (the default) or `"verify"`. New keys are enrolled with `vehicle.pair()`. [docs/bluetooth_vehicles.md](docs/bluetooth_vehicles.md) has every option and each adapter's limits.
+The Homey adapter's defaults come from a BLE-00 run on a real Homey (one write per frame, a 15 s scan bound). `confirmation` sets how much proof a command needs: `"optimistic"`, `"ack"` (the default) or `"verify"`. New keys are enrolled with `vehicle.pair()`. [docs/bluetooth_vehicles.md](docs/bluetooth_vehicles.md) has every option and each adapter's limits.
 
 ## Local Powerwall
 

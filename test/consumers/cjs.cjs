@@ -31,7 +31,7 @@ const { NobleBleTransport } = require("tesla-fleet-api/bluetooth/noble");
 const { EsphomeBleTransport } = require("tesla-fleet-api/bluetooth/esphome");
 assert.equal(typeof require("tesla-fleet-api/powerwall").PowerwallClient, "function");
 assert.equal(typeof HomeyBleTransport, "function");
-assert.equal(HOMEY_MAX_WRITE_SIZE, 20);
+assert.equal(HOMEY_MAX_WRITE_SIZE, null);
 (async () => {
     await assert.rejects(new NobleBleTransport().scan({ timeoutMs: 1000 }), /@stoprocent\/noble/);
     await assert.rejects(new EsphomeBleTransport({ host: "proxy.test" }).scan({ timeoutMs: 1000 }), /@2colors\/esphome-native-api/);
