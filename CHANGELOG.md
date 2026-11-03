@@ -1,5 +1,12 @@
 # tesla-fleet-api
 
+## 0.6.0
+
+### Minor Changes
+
+- 9aebb62: Apply the BLE-00 (HW-0) measurements from a real Homey to the Homey Bluetooth adapter. `HOMEY_MAX_WRITE_SIZE` is now `null`, so a frame goes in one write (only a 114-byte frame was measured; pass `maxWriteSize: 20` to chunk again). The adapter sets a 15 s scan bound, `HOMEY_SCAN_TIMEOUT_MS`, because a fresh `discover()` takes about 10 s. `BleTransport` gains an optional `scanTimeoutMs`, which `scan_timeout_ms` overrides.
+- c231394: Remove the `./bluetooth/esphome` export (`EsphomeBleTransport`) and the optional `@2colors/esphome-native-api` peer dependency. Use `./bluetooth/noble` or `./bluetooth/homey` instead.
+
 ## 0.5.0
 
 ### Minor Changes
