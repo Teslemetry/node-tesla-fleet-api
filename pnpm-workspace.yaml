@@ -2,5 +2,3 @@
 autoInstallPeers: false
 allowBuilds:
   esbuild: false
-minimumReleaseAgeExclude:
-  - '@teslemetry/tesla-protocol@6.1.0'
