@@ -146,6 +146,16 @@
                 "default": "./dist/bluetooth/esphome.cjs"
             }
         },
+        "./powerwall": {
+            "import": {
+                "types": "./dist/powerwall.d.mts",
+                "default": "./dist/powerwall.mjs"
+            },
+            "require": {
+                "types": "./dist/powerwall.d.cts",
+                "default": "./dist/powerwall.cjs"
+            }
+        },
         "./package.json": "./package.json"
     },
     "sideEffects": false,

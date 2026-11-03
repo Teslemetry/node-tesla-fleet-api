@@ -35,11 +35,8 @@ const ENTRIES: Readonly<Record<string, string>> = {
     "./bluetooth/homey": "src/bluetooth/adapters/homey.ts",
     "./bluetooth/noble": "src/bluetooth/adapters/noble.ts",
     "./bluetooth/esphome": "src/bluetooth/adapters/esphome.ts",
+    "./powerwall": "src/powerwall/index.ts",
 };
-/** Built and tested, not in `exports` until PW-17. */
-const GATED_ENTRY = "src/powerwall/index.ts";
-const GATED_REASON = "built, but ./powerwall is not exported until PW-17";
-const GATED_SOURCE = "src/powerwall/";
 
 /** Python class to the Node class that plays its part. */
 const CLASS_MAP: Readonly<Record<string, string>> = {
@@ -283,7 +280,6 @@ type NodeShape = {
     /** Top-level declarations: functions with parameters, object literals with members. */
     decls: Map<string, { file: string; params: NodeParam[] | null; members: Record<string, string | number | null> | null; value: string | number | null; kind: string }>;
     exported: Map<string, string>;
-    gated: Set<string>;
 };
 
 function nodeLiteral(e: ts.Expression | undefined): string | number | null {
@@ -428,8 +424,6 @@ function readNode(): NodeShape {
             if (!exported.has(n)) exported.set(n, path);
         });
     }
-    const gated = new Set<string>();
-    exportsOf(GATED_ENTRY, "", (n) => gated.add(n));
 
     // Pull inherited members down, so a lookup sees the whole chain.
     const resolved = new Set<string>();
@@ -443,7 +437,7 @@ function readNode(): NodeShape {
     };
     for (const c of classes.values()) fill(c);
 
-    return { classes, decls, exported, gated };
+    return { classes, decls, exported };
 }
 
 type Status = "present" | "partial" | "missing";
@@ -578,7 +572,6 @@ function compareMembers(py: Record<string, string | number | null>, node: Record
 function reach(shape: NodeShape, name: string): { ok: boolean; note: string | null } {
     if (shape.exported.has(name)) return { ok: true, note: null };
     const file = shape.classes.get(name)?.file ?? shape.decls.get(name)?.file ?? "";
-    if (shape.gated.has(name) || file.startsWith(GATED_SOURCE)) return { ok: false, note: GATED_REASON };
     return { ok: false, note: "declared, but not exported from any entry" };
 }
 
@@ -723,9 +716,6 @@ function main(): void {
         console.log(line([area, rs.length, count(rs, "present"), count(rs, "partial"), count(rs, "missing")]));
     }
     console.log(line(["Total", results.length, count(results, "present"), count(results, "partial"), count(results, "missing")]));
-    const gated = results.filter((r) => r.note.includes(GATED_REASON));
-    const unblocked = gated.filter((r) => r.note === GATED_REASON).length;
-    console.log(`\nLocal Powerwall: ${gated.length} partial rows are gated on PW-17, and ${unblocked} of them have no other difference.`);
     const unresolved = results.filter((r) => r.status === "missing" && r.note.startsWith("unresolved")).length;
     const listed = results.filter((r) => r.status === "missing" && r.note.startsWith("doc 01")).length;
     console.log(`Missing: ${listed} listed in doc 01, ${count(results, "missing") - listed - unresolved} named here, ${unresolved} unresolved.`);

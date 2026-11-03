@@ -191,7 +191,7 @@ The Homey adapter's defaults are conservative guesses until the BLE-00 probe has
 
 ## Local Powerwall
 
-**Not exported yet.** A client for a Powerwall gateway on your LAN is built and tested in this repository, but `tesla-fleet-api/powerwall` is not in the `exports` map, so it cannot be imported from npm. It ships after a read-only check has passed on a real gateway, and no write has run from Node on real hardware. [docs/powerwall.md](docs/powerwall.md) describes the planned API.
+A client for a Powerwall gateway on your LAN is exported as `tesla-fleet-api/powerwall`. A read-only check has passed on a real gateway, but no write has run from Node on real hardware. [docs/powerwall.md](docs/powerwall.md) describes the API.
 
 ## OAuth
 
