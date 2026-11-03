@@ -1,7 +1,6 @@
 // The core stops waiting for an abandoned connect after `LINK_TEARDOWN_TIMEOUT_MS`
 // and still closes it if it lands. On a backend where every attempt reaches the
-// same peripheral, only the adapter can keep that close off the live link. ESPHome
-// is not here because its reply wait is bounded, so it cannot land this late.
+// same peripheral, only the adapter can keep that close off the live link.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeyBleTransport } from "../../../src/bluetooth/adapters/homey.js";
 import { NobleBleTransport } from "../../../src/bluetooth/adapters/noble.js";

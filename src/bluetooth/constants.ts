@@ -19,8 +19,6 @@ export const NAME_UUID = "00002a00-0000-1000-8000-00805f9b34fb";
 export const APPEARANCE_UUID = "00002a01-0000-1000-8000-00805f9b34fb";
 /** Generic Access, for a backend that needs a service UUID to reach the two above. */
 export const GENERIC_ACCESS_UUID = "00001800-0000-1000-8000-00805f9b34fb";
-/** Client Characteristic Configuration. Only an ESPHome proxy needs it written by hand. */
-export const CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb";
 
 /** Largest frame accepted, length prefix included. Tesla's Go SDK allows 2 more bytes. */
 export const MAX_FRAME_SIZE = 1024;

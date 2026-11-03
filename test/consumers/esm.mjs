@@ -9,7 +9,6 @@ import * as router from "tesla-fleet-api/router";
 import { BleNotSubmittedError, BroadcastListeners, ReassemblingBuffer, SERVICE_UUID } from "tesla-fleet-api/bluetooth";
 import { HOMEY_MAX_WRITE_SIZE, HomeyBleTransport } from "tesla-fleet-api/bluetooth/homey";
 import { NobleBleTransport } from "tesla-fleet-api/bluetooth/noble";
-import { EsphomeBleTransport } from "tesla-fleet-api/bluetooth/esphome";
 import { PowerwallClient } from "tesla-fleet-api/powerwall";
 
 // Each adapter must load with no backend installed, and only fail once it is used.
@@ -17,7 +16,6 @@ assert.equal(typeof PowerwallClient, "function");
 assert.equal(typeof HomeyBleTransport, "function");
 assert.equal(HOMEY_MAX_WRITE_SIZE, null);
 await assert.rejects(new NobleBleTransport().scan({ timeoutMs: 1000 }), /@stoprocent\/noble/);
-await assert.rejects(new EsphomeBleTransport({ host: "proxy.test" }).scan({ timeoutMs: 1000 }), /@2colors\/esphome-native-api/);
 
 assert.equal(typeof TeslaFleetApi, "function");
 for (const exported of [Charging, Partner, User, BroadcastListeners]) assert.equal(typeof exported, "function");

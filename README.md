@@ -27,7 +27,6 @@ It needs Node 22 or later, ships ESM and CommonJS, and has one runtime dependenc
 | `tesla-fleet-api/bluetooth` | `TeslaBluetooth`, `VehicleBluetooth`, the `BleTransport` contract, stream glue |
 | `tesla-fleet-api/bluetooth/homey` | Bluetooth through a Homey app |
 | `tesla-fleet-api/bluetooth/noble` | Bluetooth through `@stoprocent/noble` |
-| `tesla-fleet-api/bluetooth/esphome` | Bluetooth through an ESPHome proxy |
 | `tesla-fleet-api/tariff` | `getTariffPeriods`, `unwrapTariffV2`, with no protobuf code |
 | `tesla-fleet-api/const` | Enums, `Models`, `Region`, `SERVERS` |
 | `tesla-fleet-api/types` | Response types |
@@ -135,7 +134,6 @@ Install the backend you want, and pass its transport to `createBluetooth`. Each 
 | -- | -- | -- | -- |
 | `./bluetooth/homey` | `HomeyBleTransport` | Nothing. It takes `this.homey.ble`. | A Homey app |
 | `./bluetooth/noble` | `NobleBleTransport` | `@stoprocent/noble`, which is native | Linux, macOS, Windows |
-| `./bluetooth/esphome` | `EsphomeBleTransport` | `@2colors/esphome-native-api` | Anything with a TCP route to a dedicated proxy |
 
 On a computer:
 
@@ -150,19 +148,6 @@ await vehicle.wake_up({ wait: true });
 await vehicle.door_lock();
 await vehicle.charge_state();
 await vehicle.disconnect();
-```
-
-Through an ESPHome proxy:
-
-```ts
-import { TeslaBluetooth } from "tesla-fleet-api/bluetooth";
-import { EsphomeBleTransport } from "tesla-fleet-api/bluetooth/esphome";
-
-const transport = new EsphomeBleTransport({ host: proxyHost, encryptionKey });
-const vehicle = new TeslaBluetooth({ privateKey }).vehicles.createBluetooth(vin, { transport });
-await vehicle.door_lock();
-await vehicle.disconnect();
-transport.close();
 ```
 
 In a Homey app, which needs the `homey:wireless:ble` permission:

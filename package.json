@@ -136,16 +136,6 @@
                 "default": "./dist/bluetooth/noble.cjs"
             }
         },
-        "./bluetooth/esphome": {
-            "import": {
-                "types": "./dist/bluetooth/esphome.d.mts",
-                "default": "./dist/bluetooth/esphome.mjs"
-            },
-            "require": {
-                "types": "./dist/bluetooth/esphome.d.cts",
-                "default": "./dist/bluetooth/esphome.cjs"
-            }
-        },
         "./powerwall": {
             "import": {
                 "types": "./dist/powerwall.d.mts",
@@ -167,13 +157,9 @@
         "@teslemetry/tesla-protocol": "~6.1.0"
     },
     "peerDependencies": {
-        "@2colors/esphome-native-api": "^1.3.6",
         "@stoprocent/noble": "^2.8.0"
     },
     "peerDependenciesMeta": {
-        "@2colors/esphome-native-api": {
-            "optional": true
-        },
         "@stoprocent/noble": {
             "optional": true
         }
