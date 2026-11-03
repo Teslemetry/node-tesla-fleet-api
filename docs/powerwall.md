@@ -2,7 +2,7 @@
 
 Control a Powerwall gateway over your LAN, with the cloud as a fallback.
 
-**Status: not published.** `tesla-fleet-api/powerwall` is not in the package's `exports` map yet, so it cannot be imported from npm. It ships after the read-only check below has passed on a real gateway. The examples show the import it will have.
+**Status: published** as `tesla-fleet-api/powerwall`, after the read-only check below passed on a real gateway.
 
 **No write has run from Node on real hardware.** Each write below has only run against a fake gateway in this repository's tests. Python has run the same commands on a Powerwall 3, but that does not prove Node's bytes reach a gateway the same way. Treat every write as not yet verified, and read the state back after using one.
 

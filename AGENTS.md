@@ -73,7 +73,7 @@ A funnel, not a selector: no source health, availability, grace windows or prior
 
 ## Local Powerwall (`src/powerwall/`)
 
-- **Publish gate:** `./powerwall` stays out of `tsdown.config.ts` and `exports` until PW-17, after a read-only run on a real gateway. Writes have only ever run against `test/helpers/fakegateway.ts`, and no autonomous session sends one to a real gateway.
+- `./powerwall` is published (PW-17), after a read-only run on a real gateway. Writes have only ever run against `test/helpers/fakegateway.ts`, and no autonomous session sends one to a real gateway.
 - TLS verification is off on `V1rTransport`'s own `https.Agent` only: `NODE_TLS_REJECT_UNAUTHORIZED` would also disable the cloud's checks.
 - A v1r POST is sent once and never retried. Only REST GETs retry, once, after a re-login. LAN envelopes differ from the cloud's, which is why `EnergyDeviceSigner.envelope` is cloud-only.
 - **Rules that differ from Python on purpose, so do not "fix" them back:** `cancel_max_backup` and `remove_authorized_client` tolerate only an empty reply, plus code 5 on a cancel. An island reply that does not decode raises. `connect_gateway` sends nothing to an address outside `is_lan_address`, and refuses another DIN. `write_config` rejects non-finite numbers and runs one at a time. Doc 08 section 6 has the rest.

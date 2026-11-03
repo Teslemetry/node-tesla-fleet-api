@@ -89,10 +89,10 @@ describe("documentation samples", () => {
         expect(compile(samples)).toEqual([]);
     });
 
-    it("would notice a wrong method and the unexported Powerwall entry", { timeout: 120_000 }, () => {
+    it("would notice a wrong method and an unexported entry", { timeout: 120_000 }, () => {
         const failures = compile([
             { name: "wrong.mts", text: 'import { TeslaFleetApi } from "tesla-fleet-api";\nnew TeslaFleetApi({ accessToken, region: "na" }).no_such_method();\n' },
-            { name: "gated.mts", text: 'import { PowerwallClient } from "tesla-fleet-api/powerwall";\nconsole.log(PowerwallClient);\n' },
+            { name: "gated.mts", text: 'import { nothing } from "tesla-fleet-api/not-exported";\nconsole.log(nothing);\n' },
         ]);
         expect(failures).toHaveLength(2);
     });

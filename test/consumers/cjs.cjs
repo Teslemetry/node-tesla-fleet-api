@@ -29,6 +29,7 @@ assert.equal(typeof router.is_failover_safe, "function");
 const { HomeyBleTransport, HOMEY_MAX_WRITE_SIZE } = require("tesla-fleet-api/bluetooth/homey");
 const { NobleBleTransport } = require("tesla-fleet-api/bluetooth/noble");
 const { EsphomeBleTransport } = require("tesla-fleet-api/bluetooth/esphome");
+assert.equal(typeof require("tesla-fleet-api/powerwall").PowerwallClient, "function");
 assert.equal(typeof HomeyBleTransport, "function");
 assert.equal(HOMEY_MAX_WRITE_SIZE, 20);
 (async () => {
