@@ -571,7 +571,6 @@ function compareMembers(py: Record<string, string | number | null>, node: Record
 
 function reach(shape: NodeShape, name: string): { ok: boolean; note: string | null } {
     if (shape.exported.has(name)) return { ok: true, note: null };
-    const file = shape.classes.get(name)?.file ?? shape.decls.get(name)?.file ?? "";
     return { ok: false, note: "declared, but not exported from any entry" };
 }
 
