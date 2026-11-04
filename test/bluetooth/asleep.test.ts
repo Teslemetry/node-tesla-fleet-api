@@ -71,6 +71,17 @@ describe("an unresolved command on a sleeping car", () => {
         expect(link.frames.at(-2)?.sessionInfoRequest).toBeDefined();
     });
 
+    it("wakes the car and sends it again under verify, whose read does not wake it first", async () => {
+        const harness = await ready({ confirmation: "verify" });
+        const { vehicle, fakeVehicle } = harness;
+        const car = sleepingCar(harness);
+
+        await expect(finish(vehicle.set_charge_limit(80))).resolves.toMatchObject({ response: { result: true } });
+
+        expect(car.wakes).toBeGreaterThanOrEqual(1);
+        expect(fakeVehicle.infotainmentActions.filter((action) => action.vehicleAction?.chargingSetLimitAction)).toHaveLength(1);
+    });
+
     it("sends again once only, so a car that stays asleep reaches the cloud", async () => {
         const { vehicle, link, fakeVehicle } = await ready();
         // Infotainment answers a probe, so the wake seems to work, then ignores the resend.
