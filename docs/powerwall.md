@@ -99,7 +99,7 @@ live.last_error;
 
 ## Writes
 
-[`OBSERVATIONS.md`](../OBSERVATIONS.md) lists which of these have run on a real gateway.
+Every method in this table that is not listed at the top of this page is not yet verified from Node on hardware. [`OBSERVATIONS.md`](../OBSERVATIONS.md) records what ran.
 
 | `PowerwallEnergySite` | `PowerwallClient` | Notes |
 | -- | -- | -- |
