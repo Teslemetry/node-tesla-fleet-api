@@ -2,6 +2,7 @@
 // plus the wake cases of `test_ble_connect_failover.py`. The car is a
 // `FakeVehicle` on a `FakeBleLink` whose infotainment is deaf while it sleeps.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Response } from "@teslemetry/tesla-protocol/command/car_server";
 import { RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
 import { RKEActionE, VehicleSleepStatusE, VehicleStatus } from "@teslemetry/tesla-protocol/command/vcsec";
 import { VehicleRouter } from "../../src/router/index.js";
@@ -68,6 +69,17 @@ describe("an unresolved command on a sleeping car", () => {
         expect(link.commands(INFOTAINMENT)).toHaveLength(2);
         expect(fakeVehicle.infotainmentActions).toHaveLength(1);
         expect(link.frames.at(-2)?.sessionInfoRequest).toBeDefined();
+    });
+
+    it("wakes the car and sends it again under verify, whose read does not wake it first", async () => {
+        const harness = await ready({ confirmation: "verify" });
+        const { vehicle, fakeVehicle } = harness;
+        const car = sleepingCar(harness);
+
+        await expect(finish(vehicle.set_charge_limit(80))).resolves.toMatchObject({ response: { result: true } });
+
+        expect(car.wakes).toBeGreaterThanOrEqual(1);
+        expect(fakeVehicle.infotainmentActions.filter((action) => action.vehicleAction?.chargingSetLimitAction)).toHaveLength(1);
     });
 
     it("sends again once only, so a car that stays asleep reaches the cloud", async () => {
@@ -366,5 +378,62 @@ describe("the probe window", () => {
         await expect(finish(vehicle.wake_up({ wait: true }))).resolves.toEqual(OK);
 
         expect(link.handshakes(INFOTAINMENT).length).toBeGreaterThanOrEqual(3);
+    });
+});
+
+describe("a read from infotainment on a sleeping car", () => {
+    it("wakes the car and reads again, with a session cached", async () => {
+        const harness = await ready();
+        const { vehicle, fakeVehicle } = harness;
+        const car = sleepingCar(harness);
+        fakeVehicle.replyToNextInfotainmentCommandWith(Response.create({ vehicleData: { chargeState: { chargeLimitSoc: 80 } } }));
+
+        await expect(finish(vehicle.charge_state())).resolves.toMatchObject({ chargeLimitSoc: 80 });
+
+        expect(car.wakes).toBeGreaterThanOrEqual(1);
+        expect(fakeVehicle.vcsecCommands.some((command) => command.RKEAction === RKEActionE.RKE_ACTION_WAKE_VEHICLE)).toBe(true);
+    });
+
+    it("wakes the car when the handshake goes unanswered", async () => {
+        const harness = await sessionless();
+        const { vehicle, fakeVehicle } = harness;
+        const car = sleepingCar(harness);
+        fakeVehicle.replyToNextInfotainmentCommandWith(Response.create({ vehicleData: { chargeState: { chargeLimitSoc: 80 } } }));
+
+        await expect(finish(vehicle.charge_state())).resolves.toMatchObject({ chargeLimitSoc: 80 });
+
+        expect(car.wakes).toBeGreaterThanOrEqual(1);
+    });
+
+    it("raises and wakes nothing with wake off", async () => {
+        const harness = await ready({ wake_if_asleep: false });
+        const { vehicle, fakeVehicle } = harness;
+        sleepingCar(harness);
+
+        const { error } = await timed(() => vehicle.charge_state());
+
+        expect(error).toBeInstanceOf(BluetoothTimeout);
+        expect(fakeVehicle.vcsecCommands.some((command) => command.RKEAction === RKEActionE.RKE_ACTION_WAKE_VEHICLE)).toBe(false);
+    });
+
+    it("leaves VCSEC reads alone: vehicle_state never wakes the car", async () => {
+        const harness = await ready();
+        const { vehicle, fakeVehicle } = harness;
+        sleepingCar(harness);
+
+        await expect(finish(vehicle.vehicle_state())).resolves.toMatchObject({ vehicleSleepStatus: VehicleSleepStatusE.VEHICLE_SLEEP_STATUS_ASLEEP });
+
+        expect(fakeVehicle.vcsecCommands.some((command) => command.RKEAction === RKEActionE.RKE_ACTION_WAKE_VEHICLE)).toBe(false);
+    });
+
+    it("raises BluetoothCommandFailed when the car will not wake, having sent the read twice at most", async () => {
+        const harness = await ready();
+        const { vehicle, link } = harness;
+        sleepingCar(harness, -1);
+
+        const { error } = await timed(() => vehicle.charge_state());
+
+        expect(error).toBeInstanceOf(BluetoothCommandFailed);
+        expect(link.commands(INFOTAINMENT).length).toBeLessThanOrEqual(2);
     });
 });
