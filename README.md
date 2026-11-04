@@ -8,7 +8,7 @@ npm install tesla-fleet-api
 
 It needs Node 22 or later, ships ESM and CommonJS, and has one runtime dependency, which is pure JavaScript. Nothing native is installed.
 
-> **Partly proven on hardware.** Vehicle Bluetooth through Homey, pairing included, has run on a real car, and a read-only check has run on a real Powerwall gateway. noble and Powerwall writes have not run on hardware, and are tested against independent fakes in this repository. [OBSERVATIONS.md](OBSERVATIONS.md) records what has been measured.
+> **Partly proven on hardware.** Vehicle Bluetooth through Homey, pairing included, has run on a real car, and a read-only check and a session of writes have run on a real Powerwall gateway. noble has not run on hardware, and everything is also tested against independent fakes in this repository. [OBSERVATIONS.md](OBSERVATIONS.md) records what has been measured.
 
 ## What is in the package
 
@@ -176,7 +176,7 @@ The Homey adapter's defaults come from a BLE-00 run on a real Homey (one write p
 
 ## Local Powerwall
 
-A client for a Powerwall gateway on your LAN is exported as `tesla-fleet-api/powerwall`. A read-only check has passed on a real gateway, but no write has run from Node on real hardware. [docs/powerwall.md](docs/powerwall.md) describes the API.
+A client for a Powerwall gateway on your LAN is exported as `tesla-fleet-api/powerwall`. A read-only check and a session of writes, island mode included, have passed on a real gateway. [docs/powerwall.md](docs/powerwall.md) describes the API.
 
 ## OAuth
 

@@ -4,7 +4,7 @@ Control a Powerwall gateway over your LAN, with the cloud as a fallback.
 
 **Status: published** as `tesla-fleet-api/powerwall`, after the read-only check below passed on a real gateway.
 
-**No write has run from Node on real hardware.** Each write below has only run against a fake gateway in this repository's tests. Python has run the same commands on a Powerwall 3, but that does not prove Node's bytes reach a gateway the same way. Treat every write as not yet verified, and read the state back after using one.
+**Some writes have run from Node on a real Powerwall 3 (PW-16, 2026-11-04):** `set_backup_reserve_raw`, `set_operation_mode`, `set_export_rule`, `set_grid_charging`, `schedule_max_backup`, `cancel_max_backup`, `dispatch_battery_power`, `resume_battery_operation`, `go_off_grid` and `reconnect_grid`. The rest have only run against a fake gateway in this repository's tests. Read the state back after any write.
 
 ## Before you start
 
@@ -99,7 +99,7 @@ live.last_error;
 
 ## Writes
 
-**Every method in this table is not yet verified from Node on hardware.**
+[`OBSERVATIONS.md`](../OBSERVATIONS.md) lists which of these have run on a real gateway.
 
 | `PowerwallEnergySite` | `PowerwallClient` | Notes |
 | -- | -- | -- |

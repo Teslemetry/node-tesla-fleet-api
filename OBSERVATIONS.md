@@ -16,6 +16,7 @@ Stages from design document 06, section 4, and where each stands.
 | HW-4 | Pairing, with the owner at the car. | Done 2026-11-04 |
 | HW-5 | Homey end to end, and a 24 h soak. | Checks done 2026-11-03. Waiting on the 24 h soak, running until 2026-11-04 23:00 UTC |
 | HW-6 | Charge-port acceptance, with the owner present. | Waiting for the owner |
+| PW-16 | Powerwall writes, with the owner present. | Done 2026-11-04 |
 
 ## Homey BLE, probe app (HW-0, BLE-00, 2026-11-03)
 
@@ -125,7 +126,26 @@ Not run. The development host has no Bluetooth adapter. HW-1 is a development pa
 
 **Seen on this gateway:** `live_status` came back with `backup_capable`, `generator_power`, `grid_services_active`, `grid_services_power`, `storm_mode_active`, `timestamp` and `wall_connectors` as null.
 
-**Not covered:** R13 (Python comparison) and R14 (`connect_gateway`) run separately, and no write has run against a real gateway.
+**Not covered:** R13 (Python comparison) and R14 (`connect_gateway`) run separately. Writes are under PW-16 below.
+
+## Local Powerwall writes (PW-16, 2026-11-04)
+
+**Setup:** `tesla-fleet-api` 0.6.1 from npm, run from a LAN host against the same Powerwall 3 as above, with the same paired client key, between 02:27 and 02:30 UTC. The owner was at home and gave the go for the whole session. Each step read the state, sent one write and never retried it, read again, restored the setting with one write and read again. The site was on grid, Self-Powered, with the reserve at 0 %, at 68 to 69 % charge and charging at about 6.7 kW from solar.
+
+**Result:** every write was acknowledged in 24 to 361 ms, and every state read afterwards showed it applied and then restored.
+
+| Step | Result |
+| -- | -- |
+| `set_backup_reserve_raw` 5, 6, 5 | Applied and restored |
+| `set_operation_mode` `self_consumption`, `autonomous`, `self_consumption` | Applied and restored |
+| `set_export_rule` `battery_ok`, `pv_only`, `battery_ok` | Applied and restored |
+| `set_grid_charging` off, on | Applied and restored. Turning it back on removed `disallow_charge_from_grid_with_solar_installed` from the config, as the gateway is documented to do. |
+| `schedule_max_backup(60)`, then `cancel_max_backup` after 5 s | Battery charging rose from 6.7 to 10.8 kW with 4.0 kW from the grid, and the event appeared in `get_backup_events`. After the cancel, both were as before. |
+| `dispatch_battery_power(1000, 60)`, then `resume_battery_operation` after 15 s | The battery cut its charging from 6.7 to about 1.7 kW, with export flat at 5.0 kW, so it never reached a 1 kW discharge. A site export limit is the likely reason. After the release, charging returned to 6.6 kW. |
+| `go_off_grid` | `islanding.contactorClosed` was false within 5 s, `customerIslandMode` was `INTENTIONAL_RECONNECT_FAILSAFE`, and grid power was 0 W for the 30 s watched. |
+| `reconnect_grid` | `contactorClosed` was true within 5 s and `customerIslandMode` back to `BACKUP`. |
+
+A final read matched the starting state. Not run: disabling batteries, `trigger_islanding` (black start), curtailment, limits, `set_tou_mode`, `remove_authorized_client`, calibration delay and OCPP.
 
 ## Offline checks of backend packages (2026-11-02)
 
