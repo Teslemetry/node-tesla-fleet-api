@@ -56,9 +56,25 @@ describe("write_config", () => {
         const other = new PowerwallClient({ host: gateway.host, gatewayPassword: GATEWAY_PASSWORD, rsaPrivateKeyPem: TEST_KEY_PEM });
         await Promise.all([client.connect(), other.connect()]);
         const reads = gateway.posts.length;
+        // Hold each config read until both clients have sent one, so the order
+        // the requests arrive in cannot decide the test. A client queue that
+        // blocked the other client would leave one read waiting: give up after 1 s.
+        let arrived = 0;
+        let release!: () => void;
+        const bothRead = new Promise<void>((resolve) => (release = resolve));
+        const giveUp = setTimeout(release, 1000);
+        gateway.holdReply = async (envelope) => {
+            if (envelope.filestore?.readFileRequest && ++arrived === 2) {
+                release();
+            }
+            if (envelope.filestore?.readFileRequest) {
+                await bothRead;
+            }
+        };
         const first = client.write_config({ a: 1 });
         const second = other.write_config({ b: 2 });
         await Promise.allSettled([first, second]);
+        clearTimeout(giveUp);
         other.close();
         expect(gateway.posts.slice(reads, reads + 2).every((post) => post.envelope.filestore?.readFileRequest)).toBe(true);
     });

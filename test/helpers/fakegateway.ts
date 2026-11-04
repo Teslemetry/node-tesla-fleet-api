@@ -78,6 +78,8 @@ export class FakeGateway {
         ComponentsQuery: '{"components":{}}',
     };
     systemInfo: Json = {};
+    /** Awaited after a v1r request is recorded and before it is answered, to hold replies back. */
+    holdReply?: (envelope: MessageEnvelope) => Promise<void>;
     /** Answer a v1r request by its content: a body for the envelope, or nothing for the default. */
     respond?: (envelope: MessageEnvelope) => Json | undefined;
     /** `config.json` as stored. Its hash is SHA-256, which is opaque to a client. */
@@ -169,7 +171,7 @@ export class FakeGateway {
         if (request.method === "POST" && path === "/api/login/Basic") {
             this.#login(body, response);
         } else if (request.method === "POST" && path === "/tedapi/v1r") {
-            this.#v1r(request, body, response);
+            await this.#v1r(request, body, response);
         } else if (request.method === "GET") {
             this.#get(path, request, response);
         } else {
@@ -276,8 +278,9 @@ export class FakeGateway {
             : MessageFaultE.MESSAGEFAULT_ERROR_NONE;
     }
 
-    #v1r(request: IncomingMessage, body: Buffer, response: ServerResponse): void {
+    async #v1r(request: IncomingMessage, body: Buffer, response: ServerResponse): Promise<void> {
         const post = this.#record(request, body);
+        await this.holdReply?.(post.envelope);
         const fault = this.#checkSignature(post);
         const reply = this.#replies.shift();
         if (fault !== MessageFaultE.MESSAGEFAULT_ERROR_NONE) {
