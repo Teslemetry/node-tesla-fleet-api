@@ -14,7 +14,7 @@ Stages from design document 06, section 4, and where each stands.
 | HW-1 | The library on noble. | Not run: the development host has no Bluetooth adapter |
 | HW-3 | Rare paths: image paging, readers only Python's mocks cover. | Readers done 2026-11-03. Image paging not provable on this car |
 | HW-4 | Pairing, with the owner at the car. | Done 2026-11-04 |
-| HW-5 | Homey end to end, and a 24 h soak. | Done 2026-11-03. The 24 h soak is running until 2026-11-04 23:00 UTC |
+| HW-5 | Homey end to end, and a 24 h soak. | Checks done 2026-11-03. Waiting on the 24 h soak, running until 2026-11-04 23:00 UTC |
 | HW-6 | Charge-port acceptance, with the owner present. | Waiting for the owner |
 
 ## Homey BLE, probe app (HW-0, BLE-00, 2026-11-03)
