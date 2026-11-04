@@ -88,7 +88,7 @@ Implement `BleTransport` from `tesla-fleet-api/bluetooth`. `src/bluetooth/transp
 | `raise_unconfirmed` | `false` | `true` raises `BluetoothUnconfirmedCommand` when nothing resolved a command. |
 | `keepalive_interval_ms` | `20000` | Read a characteristic after this much idle time. `null` or `0` disables it. It delays an awake car's sleep. |
 | `idle_disconnect_ms` | `null` (Homey: `30000`) | Close the link after this long with no command in progress, so it does not hold one of the car's slots. The next command reconnects. Keepalive reads do not count as use. |
-| `wake_if_asleep` | `true` | Wake a sleeping car for an infotainment command, instead of raising. |
+| `wake_if_asleep` | `true` | Wake a sleeping car for an infotainment command or read, instead of raising. |
 | `max_connect_attempts` | `3` | Attempts per connect. |
 | `connect_timeout_ms` | `20000` | One attempt. |
 | `scan_timeout_ms` | `10000` (Homey: `15000`) | One scan. It must outlast the backend's window. |
@@ -120,6 +120,8 @@ On the client: `tesla.valid_name(name)`, `tesla.get_name(vin)`, `tesla.name_matc
 `vehicle_state()` answers from VCSEC, even while the car sleeps, and never wakes it. Each of these sends one signed request to infotainment and returns one block:
 
 `charge_state`, `climate_state`, `drive_state`, `location_state`, `closures_state`, `charge_schedule_state`, `preconditioning_schedule_state`, `tire_pressure_state`, `media_state`, `media_detail_state`, `software_update_state`, `parental_controls_state`, `gui_settings`, `parked_accessory_state`, `legacy_vehicle_state`, `current_vehicle_state`, `vehicle_config`, `soh_state`, `vehicle_detail_state`, `display_state`, `alert_state`, `light_show_state`, `suspension_state`, `child_presence_detection_state`.
+
+On a sleeping car, with `wake_if_asleep` on, an infotainment reader wakes the car and reads again, so it can take as long as a wake. With it off, it raises `BluetoothTimeout`. Python's readers always raise.
 
 A reader for a feature the car lacks raises `InvalidResponse`, because the reply has no block for it: on a Model 3, `parked_accessory_state`, `suspension_state` and `display_state`. `legacy_vehicle_state` alone exceeds the MTU on a Model 3 and raises `TeslaFleetMessageFaultResponseSizeExceedsMTU`.
 

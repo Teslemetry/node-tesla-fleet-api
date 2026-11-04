@@ -144,7 +144,7 @@ export interface VehicleBluetoothOptions {
      * broadcasts needs it off.
      */
     idle_disconnect_ms?: number | null;
-    /** Wakes a sleeping vehicle for an infotainment command, instead of raising. Defaults to `true`. */
+    /** Wakes a sleeping vehicle for an infotainment command or read, instead of raising. VCSEC reads never wake it. Defaults to `true`. */
     wake_if_asleep?: boolean;
     /** Connect attempts per connect. Defaults to 3. */
     max_connect_attempts?: number;
@@ -1279,7 +1279,34 @@ export default class VehicleBluetooth extends BroadcastListeners {
         return this.infotainmentLadder(action, mutating, this.wake_if_asleep);
     }
 
-    private async infotainmentLadder(action: Action, mutating: boolean, wake: boolean): Promise<SignedCommandResponse> {
+    /**
+     * A read from infotainment wakes a sleeping car, as a command does. Reads from
+     * VCSEC never do, and `vehicle_state` answers while the car sleeps. A read
+     * changes nothing, so it is sent again once the car is awake.
+     */
+    protected override async _getInfotainment(action: Action): Promise<VehicleData> {
+        return this.readInfotainment(action, this.wake_if_asleep);
+    }
+
+    private async readInfotainment(action: Action, wake: boolean): Promise<VehicleData> {
+        wake = await this.readyInfotainment(wake);
+        try {
+            return await super._getInfotainment(action);
+        } catch (error) {
+            if (!wake || !(error instanceof BluetoothTimeout) || !(await this.vehicleAsleep())) {
+                throw error;
+            }
+            await this.wakeForCommand(error);
+            return this.readInfotainment(action, false);
+        }
+    }
+
+    /**
+     * Make sure infotainment can answer: handshake, waking a sleeping car if
+     * `wake` allows, or waiting out a boot.
+     * @returns `wake`, or `false` once this has woken the car.
+     */
+    private async readyInfotainment(wake: boolean): Promise<boolean> {
         try {
             await this.ensureHandshake(INFOTAINMENT);
         } catch (error) {
@@ -1313,6 +1340,11 @@ export default class VehicleBluetooth extends BroadcastListeners {
                 throw error;
             }
         }
+        return wake;
+    }
+
+    private async infotainmentLadder(action: Action, mutating: boolean, wake: boolean): Promise<SignedCommandResponse> {
+        wake = await this.readyInfotainment(wake);
 
         const name = infotainment_command_name(action);
         if (this.confirmation === "optimistic" && mutating) {

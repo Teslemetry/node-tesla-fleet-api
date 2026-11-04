@@ -131,6 +131,7 @@ const DELIBERATE: ReadonlyArray<[RegExp, string]> = [
 /** Differences the checks below cannot see. These rows are partial whatever else they pass. */
 const UNSEEN: ReadonlyArray<[RegExp, string]> = [
     [/:VehicleFleet\.fleet_telemetry_config_create$/, "takes the inner `config` and wraps this VIN, where Python takes `{ vins, config }`. VehicleSigned takes both"],
+    [/^tesla\/vehicle\/bluetooth\.py:VehicleBluetooth\.(charge_state|climate_state|drive_state|location_state|closures_state|charge_schedule_state|preconditioning_schedule_state|tire_pressure_state|media_state|media_detail_state|software_update_state|parental_controls_state|gui_settings|parked_accessory_state|legacy_vehicle_state|current_vehicle_state|vehicle_config|soh_state|vehicle_detail_state|display_state|alert_state|light_show_state|suspension_state|child_presence_detection_state|vehicle_data)$/, "with `wake_if_asleep`, wakes a sleeping car and reads again, where Python raises"],
 ];
 
 type PyParam = { name: string; optional: boolean };
