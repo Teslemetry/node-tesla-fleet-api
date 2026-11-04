@@ -14,9 +14,9 @@ import { compactUuid, LinkClaims, quietly } from "./shared.js";
 /**
  * Bytes per write: `null`, a whole frame in one write. Homey hides the MTU.
  * BLE-00 (HW-0, 2026-11-03) measured a 114-byte frame in one write at 232 ms to
- * a reply, against 562 ms for 6 writes of 20 bytes. Only 114 bytes were tried:
- * a signed frame (about 200 bytes) is confirmed by HW-5. Pass `maxWriteSize: 20`
- * to `HomeyBleTransport` to chunk at the ATT minimum if that run shows a failure.
+ * a reply, against 562 ms for 6 writes of 20 bytes. HW-5 (2026-11-03) sent signed
+ * frames up to 195 bytes in one write each. Pass `maxWriteSize: 20` to
+ * `HomeyBleTransport` to chunk at the ATT minimum.
  */
 export const HOMEY_MAX_WRITE_SIZE = null;
 
