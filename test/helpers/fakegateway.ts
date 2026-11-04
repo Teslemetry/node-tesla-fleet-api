@@ -280,9 +280,10 @@ export class FakeGateway {
 
     async #v1r(request: IncomingMessage, body: Buffer, response: ServerResponse): Promise<void> {
         const post = this.#record(request, body);
-        await this.holdReply?.(post.envelope);
         const fault = this.#checkSignature(post);
+        // Taken in arrival order, before any hold, as `reply()` promises.
         const reply = this.#replies.shift();
+        await this.holdReply?.(post.envelope);
         if (fault !== MessageFaultE.MESSAGEFAULT_ERROR_NONE) {
             this.#sendRoutable(response, { fault });
         } else if (reply === undefined) {
