@@ -132,7 +132,7 @@ Not run. The development host has no Bluetooth adapter. HW-1 is a development pa
 
 **Setup:** `tesla-fleet-api` 0.6.1 from npm, run from a LAN host against the same Powerwall 3 as above, with the same paired client key, between 02:27 and 02:30 UTC. The owner was at home and gave the go for the whole session. Each step read the state, sent one write and never retried it, read again, restored the setting with one write and read again. The site was on grid, Self-Powered, with the reserve at 0 %, at 68 to 69 % charge and charging at about 6.7 kW from solar.
 
-**Result:** every write was acknowledged in 24 to 361 ms, and every state read afterwards showed it applied and then restored.
+**Result:** every write was acknowledged in 24 to 361 ms. Each setting read back as applied and then restored, and the backup event and island steps took effect. The battery dispatch took effect only in part, as below, and the site returned to its starting state after every step.
 
 | Step | Result |
 | -- | -- |
