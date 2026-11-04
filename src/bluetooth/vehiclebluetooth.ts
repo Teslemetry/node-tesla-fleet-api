@@ -257,6 +257,9 @@ class Link {
  * - Best-effort success, when `raise_unconfirmed` is off and nothing resolved it.
  *   `charge_port_door_open` under `"verify"` is the exception, and raises.
  */
+/** The longest delay `setTimeout` holds; a longer one fires at once. */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 export default class VehicleBluetooth extends BroadcastListeners {
     readonly _transport_name: string = "bluetooth";
     protected override authMethod: "hmac" | "aes" = "aes";
@@ -330,6 +333,9 @@ export default class VehicleBluetooth extends BroadcastListeners {
         this.keepalive_interval_ms =
             options.keepalive_interval_ms === undefined ? DEFAULT_KEEPALIVE_INTERVAL_MS : options.keepalive_interval_ms;
         this.idle_disconnect_ms = options.idle_disconnect_ms || null;
+        if (this.idle_disconnect_ms !== null && !(Number.isFinite(this.idle_disconnect_ms) && this.idle_disconnect_ms > 0)) {
+            throw new RangeError("idle_disconnect_ms must be a positive finite number, or null.");
+        }
         this.wake_if_asleep = options.wake_if_asleep ?? true;
         this.maxConnectAttempts = options.max_connect_attempts ?? DEFAULT_CONNECT_ATTEMPTS;
         this.connectTimeoutMs = options.connect_timeout_ms ?? DEFAULT_CONNECT_TIMEOUT_MS;
@@ -584,7 +590,8 @@ export default class VehicleBluetooth extends BroadcastListeners {
         if (!idleMs || !link || this.inUse > 0) {
             return;
         }
-        const remaining = Math.max(0, idleMs - (performance.now() - this.lastUse));
+        // A longer delay than a timer can hold would fire at once: wait in steps instead.
+        const remaining = Math.min(MAX_TIMER_DELAY_MS, Math.max(0, idleMs - (performance.now() - this.lastUse)));
         this.idleTimer = setTimeout(() => void this.idleClose(link), remaining);
         // An idle link is no reason to hold a process open.
         this.idleTimer.unref?.();
@@ -639,7 +646,8 @@ export default class VehicleBluetooth extends BroadcastListeners {
             return;
         }
         try {
-            await this.gattRead("version", this.keepaliveTimeoutMs);
+            // Not `gattRead`: a keepalive is not use, or it would hold the link forever.
+            await this.readCharacteristic("version", this.keepaliveTimeoutMs);
         } catch (error) {
             this.log(`BLE keepalive read failed: ${describe(error)}`);
         }
@@ -711,7 +719,11 @@ export default class VehicleBluetooth extends BroadcastListeners {
      * Access rejects those reads that way on a healthy link.
      * @throws BluetoothTransportError when there is no link.
      */
-    protected async gattRead(characteristic: BleCharacteristic, timeoutMs: number = GATT_READ_TIMEOUT_MS): Promise<Uint8Array> {
+    protected gattRead(characteristic: BleCharacteristic, timeoutMs: number = GATT_READ_TIMEOUT_MS): Promise<Uint8Array> {
+        return this.inUseBy(() => this.readCharacteristic(characteristic, timeoutMs));
+    }
+
+    private async readCharacteristic(characteristic: BleCharacteristic, timeoutMs: number): Promise<Uint8Array> {
         const link = this.link;
         if (!link) {
             throw new BluetoothTransportError();
