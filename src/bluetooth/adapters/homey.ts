@@ -28,13 +28,14 @@ export const HOMEY_MAX_WRITE_SIZE = null;
 export const HOMEY_SCAN_TIMEOUT_MS = 15_000;
 
 /**
- * For `connect_timeout_ms` and `max_connect_attempts`, not applied by this
- * adapter. `ble.find` runs its own 10 s discovery once the 30 s cache has
+ * For `connect_timeout_ms`, `max_connect_attempts` and `idle_disconnect_ms`, not
+ * applied by this adapter. A Homey app connects per command, so a link closes
+ * 30 s after its last use rather than hold one of the vehicle's slots. `ble.find` runs its own 10 s discovery once the 30 s cache has
  * expired, so a connect with no recent scan takes about 12 s (measured 12.05 to
  * 12.36 s, against 1.5 to 2.3 s warm), and a shorter bound fails every one.
  * One attempt: `discover()` caches for 30 s, so a fast retry sees old data.
  */
-export const HOMEY_VEHICLE_OPTIONS = { connect_timeout_ms: 15_000, max_connect_attempts: 1 } as const;
+export const HOMEY_VEHICLE_OPTIONS = { connect_timeout_ms: 15_000, max_connect_attempts: 1, idle_disconnect_ms: 30_000 } as const;
 
 /**
  * Bound on discovery and subscribing once a link is up. Homey has no timeout of

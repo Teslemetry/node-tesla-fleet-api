@@ -87,6 +87,7 @@ Implement `BleTransport` from `tesla-fleet-api/bluetooth`. `src/bluetooth/transp
 | `confirmation` | `"ack"` | See [Confirmation](#confirmation). |
 | `raise_unconfirmed` | `false` | `true` raises `BluetoothUnconfirmedCommand` when nothing resolved a command. |
 | `keepalive_interval_ms` | `20000` | Read a characteristic after this much idle time. `null` or `0` disables it. It delays an awake car's sleep. |
+| `idle_disconnect_ms` | `null` (Homey: `30000`) | Close the link after this long with no command in progress, so it does not hold one of the car's slots. The next command reconnects. Keepalive reads do not count as use. |
 | `wake_if_asleep` | `true` | Wake a sleeping car for an infotainment command, instead of raising. |
 | `max_connect_attempts` | `3` | Attempts per connect. |
 | `connect_timeout_ms` | `20000` | One attempt. |

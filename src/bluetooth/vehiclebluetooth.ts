@@ -136,6 +136,14 @@ export interface VehicleBluetoothOptions {
      * an awake car's sleep, so a consumer that wants it to sleep disables them.
      */
     keepalive_interval_ms?: number | null;
+    /**
+     * Close the link after this long with no command, read or connect in
+     * progress, so it does not hold one of the vehicle's few slots. The next
+     * command reconnects. Keepalive reads do not count as use. Defaults to
+     * `null`, which keeps the link until `disconnect`. A link held only to hear
+     * broadcasts needs it off.
+     */
+    idle_disconnect_ms?: number | null;
     /** Wakes a sleeping vehicle for an infotainment command, instead of raising. Defaults to `true`. */
     wake_if_asleep?: boolean;
     /** Connect attempts per connect. Defaults to 3. */
@@ -249,6 +257,9 @@ class Link {
  * - Best-effort success, when `raise_unconfirmed` is off and nothing resolved it.
  *   `charge_port_door_open` under `"verify"` is the exception, and raises.
  */
+/** The longest delay `setTimeout` holds; a longer one fires at once. */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 export default class VehicleBluetooth extends BroadcastListeners {
     readonly _transport_name: string = "bluetooth";
     protected override authMethod: "hmac" | "aes" = "aes";
@@ -278,6 +289,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
     readonly raise_unconfirmed: boolean;
     wake_if_asleep: boolean;
     readonly keepalive_interval_ms: number | null;
+    readonly idle_disconnect_ms: number | null;
     protected readonly transport: BleTransport;
     protected readonly queues: Partial<Record<Domain, ReplyQueue<RoutableMessage>>> = {
         [VCSEC]: new ReplyQueue(),
@@ -298,6 +310,11 @@ export default class VehicleBluetooth extends BroadcastListeners {
     /** Closing a lost link. A new connect waits for it: a late disconnect could end the new link. */
     private teardown: Promise<unknown> = Promise.resolve();
     private keepaliveTimer: ReturnType<typeof setTimeout> | null = null;
+    private idleTimer: ReturnType<typeof setTimeout> | null = null;
+    /** Caller operations in progress, which an idle close must never cut. */
+    private inUse = 0;
+    /** When the last caller operation ended, on the monotonic clock. */
+    private lastUse = 0;
     /** When GATT traffic last moved, on the monotonic clock. */
     private lastActivity = 0;
     private connected = false;
@@ -315,6 +332,10 @@ export default class VehicleBluetooth extends BroadcastListeners {
         this.device = options.device;
         this.keepalive_interval_ms =
             options.keepalive_interval_ms === undefined ? DEFAULT_KEEPALIVE_INTERVAL_MS : options.keepalive_interval_ms;
+        this.idle_disconnect_ms = options.idle_disconnect_ms || null;
+        if (this.idle_disconnect_ms !== null && !(Number.isFinite(this.idle_disconnect_ms) && this.idle_disconnect_ms > 0)) {
+            throw new RangeError("idle_disconnect_ms must be a positive finite number, or null.");
+        }
         this.wake_if_asleep = options.wake_if_asleep ?? true;
         this.maxConnectAttempts = options.max_connect_attempts ?? DEFAULT_CONNECT_ATTEMPTS;
         this.connectTimeoutMs = options.connect_timeout_ms ?? DEFAULT_CONNECT_TIMEOUT_MS;
@@ -453,6 +474,8 @@ export default class VehicleBluetooth extends BroadcastListeners {
         link.connection = connection;
         this.link = link;
         this.startKeepalive();
+        this.lastUse = performance.now();
+        this.scheduleIdleClose();
         this.setConnected(true);
     }
 
@@ -477,6 +500,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
         this.link = null;
         this.log(`BLE link lost: ${reason}`);
         this.stopKeepalive();
+        this.stopIdleClose();
         this.teardown = Promise.all([this.teardown, this.closeConnection(link.connection)]);
         this.setConnected(false);
     }
@@ -540,6 +564,53 @@ export default class VehicleBluetooth extends BroadcastListeners {
         }
     }
 
+    /** Run a caller operation, holding off an idle close until it ends. */
+    private async inUseBy<T>(operation: () => Promise<T>): Promise<T> {
+        this.inUse++;
+        try {
+            return await operation();
+        } finally {
+            this.inUse--;
+            this.lastUse = performance.now();
+            this.scheduleIdleClose();
+        }
+    }
+
+    private stopIdleClose(): void {
+        if (this.idleTimer !== null) {
+            clearTimeout(this.idleTimer);
+            this.idleTimer = null;
+        }
+    }
+
+    private scheduleIdleClose(): void {
+        this.stopIdleClose();
+        const idleMs = this.idle_disconnect_ms;
+        const link = this.link;
+        if (!idleMs || !link || this.inUse > 0) {
+            return;
+        }
+        // A longer delay than a timer can hold would fire at once: wait in steps instead.
+        const remaining = Math.min(MAX_TIMER_DELAY_MS, Math.max(0, idleMs - (performance.now() - this.lastUse)));
+        this.idleTimer = setTimeout(() => void this.idleClose(link), remaining);
+        // An idle link is no reason to hold a process open.
+        this.idleTimer.unref?.();
+    }
+
+    /** Checked again under the connect lock, so it never closes a link a command has just started on. */
+    private async idleClose(link: Link): Promise<void> {
+        this.idleTimer = null;
+        await this.connectLock.run(async () => {
+            if (this.link !== link || this.inUse > 0 || performance.now() - this.lastUse < (this.idle_disconnect_ms ?? 0)) {
+                return;
+            }
+            await this.dropLink("idle");
+        });
+        if (this.link === link) {
+            this.scheduleIdleClose();
+        }
+    }
+
     private scheduleKeepalive(intervalMs: number): void {
         const idleMs = performance.now() - this.lastActivity;
         this.keepaliveTimer = setTimeout(() => void this.keepaliveTick(intervalMs), Math.max(0, intervalMs - idleMs));
@@ -575,7 +646,8 @@ export default class VehicleBluetooth extends BroadcastListeners {
             return;
         }
         try {
-            await this.gattRead("version", this.keepaliveTimeoutMs);
+            // Not `gattRead`: a keepalive is not use, or it would hold the link forever.
+            await this.readCharacteristic("version", this.keepaliveTimeoutMs);
         } catch (error) {
             this.log(`BLE keepalive read failed: ${describe(error)}`);
         }
@@ -647,7 +719,11 @@ export default class VehicleBluetooth extends BroadcastListeners {
      * Access rejects those reads that way on a healthy link.
      * @throws BluetoothTransportError when there is no link.
      */
-    protected async gattRead(characteristic: BleCharacteristic, timeoutMs: number = GATT_READ_TIMEOUT_MS): Promise<Uint8Array> {
+    protected gattRead(characteristic: BleCharacteristic, timeoutMs: number = GATT_READ_TIMEOUT_MS): Promise<Uint8Array> {
+        return this.inUseBy(() => this.readCharacteristic(characteristic, timeoutMs));
+    }
+
+    private async readCharacteristic(characteristic: BleCharacteristic, timeoutMs: number): Promise<Uint8Array> {
         const link = this.link;
         if (!link) {
             throw new BluetoothTransportError();
@@ -668,7 +744,11 @@ export default class VehicleBluetooth extends BroadcastListeners {
         });
     }
 
-    protected async _send(msg: RoutableMessage, requires: SendRequires, options: SendOptions = {}): Promise<RoutableMessage> {
+    protected _send(msg: RoutableMessage, requires: SendRequires, options: SendOptions = {}): Promise<RoutableMessage> {
+        return this.inUseBy(() => this.sendFrame(msg, requires, options));
+    }
+
+    private async sendFrame(msg: RoutableMessage, requires: SendRequires, options: SendOptions): Promise<RoutableMessage> {
         const { expectsData = true, optimistic = false, confirmBroadcast, onSubmitted, signal } = options;
         const timeoutMs = options.timeoutMs ?? (expectsData ? this.defaultTimeoutMs : this.actuationTimeoutMs);
         const domain = msg.toDestination?.domain;
@@ -1468,6 +1548,10 @@ export default class VehicleBluetooth extends BroadcastListeners {
      * @returns The name, or `null` if it never appeared: a backend may hide Generic Access.
      */
     async query_display_name(max_attempts: number = 5): Promise<string | null> {
+        return this.inUseBy(() => this.readDisplayName(max_attempts));
+    }
+
+    private async readDisplayName(max_attempts: number): Promise<string | null> {
         for (let attempt = 1; attempt <= max_attempts; attempt++) {
             try {
                 await this.connect_if_needed();
@@ -1485,6 +1569,10 @@ export default class VehicleBluetooth extends BroadcastListeners {
 
     /** GATT Appearance, or `null` if it cannot be read. */
     async query_appearance(): Promise<Uint8Array | null> {
+        return this.inUseBy(() => this.readAppearance());
+    }
+
+    private async readAppearance(): Promise<Uint8Array | null> {
         try {
             await this.connect_if_needed();
             return await this.gattRead("appearance");
@@ -1496,6 +1584,10 @@ export default class VehicleBluetooth extends BroadcastListeners {
 
     /** The version characteristic as a big-endian integer, or `null` if it cannot be read. */
     async query_version(): Promise<number | null> {
+        return this.inUseBy(() => this.readVersion());
+    }
+
+    private async readVersion(): Promise<number | null> {
         try {
             await this.connect_if_needed();
             const version = await this.gattRead("version");
@@ -1583,13 +1675,18 @@ export default class VehicleBluetooth extends BroadcastListeners {
      * @throws WhitelistOperationStatus or a subclass when the vehicle refused the key.
      * @throws The reason of `signal`, once it aborts. The link is kept.
      */
-    async pair({
+    async pair(options: PairOptions = {}): Promise<void> {
+        // Its waits between polls must not read as idle.
+        return this.inUseBy(() => this.pairOnce(options));
+    }
+
+    private async pairOnce({
         role = Role.ROLE_OWNER,
         form = KeyFormFactor.KEY_FORM_FACTOR_CLOUD_KEY,
         timeoutMs = DEFAULT_PAIR_TIMEOUT_MS,
         pollIntervalMs = DEFAULT_PAIR_POLL_INTERVAL_MS,
         signal,
-    }: PairOptions = {}): Promise<void> {
+    }: PairOptions): Promise<void> {
         if (pollIntervalMs <= 0) {
             throw new RangeError("pollIntervalMs must be greater than 0");
         }
@@ -1741,7 +1838,12 @@ export default class VehicleBluetooth extends BroadcastListeners {
      * @param options.timeoutMs Deadline for `wait`, in milliseconds. Defaults to 30000.
      * @throws BluetoothTimeout at the deadline, with the link dropped.
      */
-    override async wake_up({ wait = false, timeoutMs = DEFAULT_WAKE_TIMEOUT_MS }: WakeUpOptions = {}): Promise<any> {
+    override async wake_up(options: WakeUpOptions = {}): Promise<any> {
+        // Its waits between polls must not read as idle.
+        return this.inUseBy(() => this.wakeUpOnce(options));
+    }
+
+    private async wakeUpOnce({ wait = false, timeoutMs = DEFAULT_WAKE_TIMEOUT_MS }: WakeUpOptions): Promise<any> {
         if (!wait) {
             return this.sendVehicleSecurity(UnsignedMessage.create({ RKEAction: RKEActionE.RKE_ACTION_WAKE_VEHICLE }));
         }
