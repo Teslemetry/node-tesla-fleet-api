@@ -8,7 +8,7 @@ npm install tesla-fleet-api
 
 It needs Node 22 or later, ships ESM and CommonJS, and has one runtime dependency, which is pure JavaScript. Nothing native is installed.
 
-> **Not yet proven on hardware.** Vehicle Bluetooth and local Powerwall are tested against independent fakes in this repository, and no Node code has run them on a real car, Homey, proxy or gateway. [OBSERVATIONS.md](OBSERVATIONS.md) records what has been measured.
+> **Partly proven on hardware.** Vehicle Bluetooth through Homey, pairing included, has run on a real car, and a read-only check has run on a real Powerwall gateway. noble and Powerwall writes have not run on hardware, and are tested against independent fakes in this repository. [OBSERVATIONS.md](OBSERVATIONS.md) records what has been measured.
 
 ## What is in the package
 

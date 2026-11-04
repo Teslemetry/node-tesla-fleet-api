@@ -2,7 +2,7 @@
 
 Control a Tesla directly over Bluetooth Low Energy, with no cloud. The entry point is `tesla-fleet-api/bluetooth`, and a backend comes in as a `BleTransport`.
 
-> **None of this has run on a real car from Node.** The library is tested against an independent fake vehicle, and each adapter against a stub of its backend. See [What has run on hardware](#what-has-run-on-hardware).
+> **Only the Homey path has run on a real car from Node** (HW-5 and HW-4, `pair` included, 2026-11-03 and 04). noble has not. The library is also tested against an independent fake vehicle, and each adapter against a stub of its backend. See [What has run on hardware](#what-has-run-on-hardware).
 
 ## Quick start
 
@@ -48,7 +48,7 @@ The app needs the `homey:wireless:ble` permission. Options: `maxWriteSize`, byte
 
 Limits:
 
-- **Measured on a real Homey (BLE-00, HW-0, 2026-11-03).** The vehicle's name is visible to `discover()`, so name matching works. A 114-byte frame goes in one write. A signed frame of about 200 bytes is not yet measured: HW-5 confirms it.
+- **Measured on a real Homey (BLE-00, HW-0 and HW-5, 2026-11-03).** The vehicle's name is visible to `discover()`, so name matching works. Every frame the library sent, signed ones up to 195 bytes included, went in one write.
 - The scan window is about 10 s and fixed, and `scan` ignores `timeoutMs`. The adapter sets `scanTimeoutMs` to 15 s, which `scan_timeout_ms` overrides.
 - `discover()` results stay cached for at least 30 s, so a fast retry sees old data. Treat repeated connect failures as a reason to wait, not to retry.
 - The MTU is hidden, but a frame goes in one write.
@@ -120,9 +120,11 @@ On the client: `tesla.valid_name(name)`, `tesla.get_name(vin)`, `tesla.name_matc
 
 `charge_state`, `climate_state`, `drive_state`, `location_state`, `closures_state`, `charge_schedule_state`, `preconditioning_schedule_state`, `tire_pressure_state`, `media_state`, `media_detail_state`, `software_update_state`, `parental_controls_state`, `gui_settings`, `parked_accessory_state`, `legacy_vehicle_state`, `current_vehicle_state`, `vehicle_config`, `soh_state`, `vehicle_detail_state`, `display_state`, `alert_state`, `light_show_state`, `suspension_state`, `child_presence_detection_state`.
 
+A reader for a feature the car lacks raises `InvalidResponse`, because the reply has no block for it: on a Model 3, `parked_accessory_state`, `suspension_state` and `display_state`. `legacy_vehicle_state` alone exceeds the MTU on a Model 3 and raises `TeslaFleetMessageFaultResponseSizeExceedsMTU`.
+
 `vehicle_data(endpoints)` takes `BluetoothVehicleData` values. Ask for one at a time: two or more can raise `TeslaFleetMessageFaultResponseSizeExceedsMTU`. With no list, or REST endpoint names, it raises `BluetoothCloudUnavailableError`, which a router sends to the cloud.
 
-`vehicle_image_state(image_type, chunk_size = 16384)` pages an image. It has not been proven over Bluetooth, and that chunk size cannot fit the 1024-byte frame cap.
+`vehicle_image_state(image_type, chunk_size = 16384)` pages an image. It has not been proven over Bluetooth, and that chunk size cannot fit the 1024-byte frame cap. A car with no custom wrap or plate image answers with an empty list, so it raises `InvalidResponse`.
 
 `query_version()`, `query_appearance()` and `query_display_name(max_attempts = 5)` read GATT directly and return `null` when they cannot.
 
@@ -182,9 +184,9 @@ A held link receives unsigned `VehicleStatus` broadcasts. Each `listen_*` return
 
 | Path | From Node | From Python, same car protocol |
 | -- | -- | -- |
-| Homey | **Never** | Never |
+| Homey | HW-5: reads, quiet signed commands and a soak, on a Model 3 | Never |
 | noble | **Never** | Direct adapters, through `bleak` |
-| `pair` | **Never** | One real key card tap |
+| `pair` | HW-4: one key enrolled through Homey | One real key card tap |
 | Signing, framing and sessions | Fake vehicle only, against golden vectors | Yes |
 
 The adapters' decisions come from reading each backend's code and types, and from what Python measured. Dated results go in [`OBSERVATIONS.md`](../OBSERVATIONS.md), and nothing here should be read as proven until an entry says so.
