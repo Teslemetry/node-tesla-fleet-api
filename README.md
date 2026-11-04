@@ -162,7 +162,7 @@ class TeslaApp extends Homey.App {
         const transport = new HomeyBleTransport(this.homey.ble);
         const vehicle = new TeslaBluetooth({ privateKey }).vehicles.createBluetooth(vin, {
             transport,
-            ...HOMEY_VEHICLE_OPTIONS, // one 4 s attempt, for a Flow action's 9 s window
+            ...HOMEY_VEHICLE_OPTIONS, // one 15 s attempt: a connect with no recent scan takes about 12 s
         });
         await vehicle.door_lock();
         await vehicle.disconnect();
