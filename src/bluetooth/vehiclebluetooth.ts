@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "crypto";
 import { Domain, MessageFaultE, OperationStatusE as MessageOperationStatusE, RoutableMessage } from "@teslemetry/tesla-protocol/command/universal_message";
 import { Role } from "@teslemetry/tesla-protocol/command/keys";
@@ -257,6 +258,9 @@ class Link {
  * - Best-effort success, when `raise_unconfirmed` is off and nothing resolved it.
  *   `charge_port_door_open` under `"verify"` is the exception, and raises.
  */
+/** Set within a verify read, and only there: its reads must not wake the car. */
+const quietReads = new AsyncLocalStorage<boolean>();
+
 /** The longest delay `setTimeout` holds; a longer one fires at once. */
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
@@ -304,8 +308,6 @@ export default class VehicleBluetooth extends BroadcastListeners {
         [INFOTAINMENT]: new AsyncLock(),
     };
     private readonly connectLock = new AsyncLock();
-    /** Verify reads in progress, which must not wake the car. */
-    private quietReads = 0;
     private readonly broadcastWatchers: Partial<Record<Domain, BroadcastWatcher>> = {};
     private device: BleDeviceRef | undefined;
     private link: Link | null = null;
@@ -1086,19 +1088,16 @@ export default class VehicleBluetooth extends BroadcastListeners {
             return null;
         }
         let state: VehicleStatus | ChargeState | MediaState | ClimateState;
-        // A verify read must not wake the car: a sleeping car's silence leaves the
-        // command unresolved, and the ladder then wakes the car and sends it again.
-        this.quietReads++;
         try {
-            state = await this[plan.reader]();
+            // A verify read must not wake the car: a sleeping car's silence leaves the
+            // command unresolved, and the ladder then wakes the car and sends it again.
+            state = await quietReads.run(true, () => this[plan.reader]());
         } catch (error) {
             if (error instanceof TeslaFleetError) {
                 this.log(`command=${name} transport=${this._transport_name} verify_commands=unresolved`);
                 return null;
             }
             throw error;
-        } finally {
-            this.quietReads--;
         }
         const executed = plan.executed(state as never);
         if (executed === undefined) {
@@ -1292,7 +1291,7 @@ export default class VehicleBluetooth extends BroadcastListeners {
      * changes nothing, so it is sent again once the car is awake.
      */
     protected override async _getInfotainment(action: Action): Promise<VehicleData> {
-        return this.readInfotainment(action, this.wake_if_asleep && this.quietReads === 0);
+        return this.readInfotainment(action, this.wake_if_asleep && quietReads.getStore() !== true);
     }
 
     private async readInfotainment(action: Action, wake: boolean): Promise<VehicleData> {
