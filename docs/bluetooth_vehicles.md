@@ -40,7 +40,7 @@ import { HOMEY_VEHICLE_OPTIONS, HomeyBleTransport } from "tesla-fleet-api/blueto
 const transport = new HomeyBleTransport(this.homey.ble);
 const vehicle = new TeslaBluetooth({ privateKey }).vehicles.createBluetooth(vin, {
     transport,
-    ...HOMEY_VEHICLE_OPTIONS, // for a Flow action's 9 s window
+    ...HOMEY_VEHICLE_OPTIONS, // one 15 s attempt
 });
 ```
 
@@ -55,7 +55,7 @@ Limits:
 - `isConnected` can stay true after a silent drop, and the `disconnect` event is not guaranteed. So `listen_connection_status(false)` can be as late as the next operation to time out. `true` is reliable.
 - Homey offers no connect, write or read timeout. The library adds them.
 - Range is the largest limit, and nothing can fix it in software. A Homey sits indoors. Expect "in range" to mean parked close to it.
-- `HOMEY_VEHICLE_OPTIONS` (one attempt, 4 s) suits a Flow action. Connect time measured p50 0.4 s and max 1.4 s over 10 connects, so these options suit any caller.
+- A connect takes about 2 s within 30 s of a scan, and about 12 s otherwise, because `find` then runs its own 10 s discovery. `HOMEY_VEHICLE_OPTIONS` (one attempt, 15 s) allows for that. A caller that must answer faster has to hold the link.
 
 ### noble
 

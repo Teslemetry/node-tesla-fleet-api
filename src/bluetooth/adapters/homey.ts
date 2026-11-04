@@ -29,12 +29,12 @@ export const HOMEY_SCAN_TIMEOUT_MS = 15_000;
 
 /**
  * For `connect_timeout_ms` and `max_connect_attempts`, not applied by this
- * adapter: `discover()` caches for 30 s, so a fast retry sees old data, and
- * these fit Homey's 9 s action window. BLE-00 step 11 sets both, against its
- * target of a connect under 4 s in 9 of 10. A flow with no such window should
- * keep the library's defaults until then, as a link slower than this never lands.
+ * adapter. `ble.find` runs its own 10 s discovery once the 30 s cache has
+ * expired, so a connect with no recent scan takes about 12 s (measured 12.05 to
+ * 12.36 s, against 1.5 to 2.3 s warm), and a shorter bound fails every one.
+ * One attempt: `discover()` caches for 30 s, so a fast retry sees old data.
  */
-export const HOMEY_VEHICLE_OPTIONS = { connect_timeout_ms: 4000, max_connect_attempts: 1 } as const;
+export const HOMEY_VEHICLE_OPTIONS = { connect_timeout_ms: 15_000, max_connect_attempts: 1 } as const;
 
 /**
  * Bound on discovery and subscribing once a link is up. Homey has no timeout of
