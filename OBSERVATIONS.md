@@ -91,11 +91,11 @@ One sample each. Every drop seen here fired Homey's `disconnect` event.
 
 ## Doubled notifications on Homey (2026-11-04)
 
-Twice, Homey delivered every notification from the car to the test app twice, 2 to 5 ms apart: first seen at 00:16 UTC, 12 minutes after a link dropped during a long idle hold, and at 05:15 UTC, when the test app connected a second `VehicleBluetooth` while the first still held the link. A frame of one chunk survived, as the library discarded the copy as a stale reply. Every longer frame was spliced, so handshakes raised `SessionInfoAuthenticationFault` and infotainment reads raised a raw protobuf `Error`. It survived app restarts and stopping the other app on the Homey, and unsubscribing before subscribing did not clear it. A Homey reboot did, both times. Issue #63 tracks what the library can do about it.
+Same setup as HW-5 (Homey Pro 2026, 13.5.4-rc.6, the same Model 3, key and app, keepalive off). Seen twice: Homey delivered every notification from the car to the test app twice, 2 to 5 ms apart: first seen at 00:16 UTC, 12 minutes after a link dropped during a long idle hold, and at 05:15 UTC, when the test app connected a second `VehicleBluetooth` while the first still held the link. A frame of one chunk survived, as the library discarded the copy as a stale reply. Every longer frame was spliced, so handshakes raised `SessionInfoAuthenticationFault` and infotainment reads raised a raw protobuf `Error`. It survived app restarts and stopping the other app on the Homey, and unsubscribing before subscribing did not clear it. A Homey reboot did, both times. Issue #63 tracks what the library can do about it.
 
 ## Charge port (HW-6, 2026-11-04)
 
-**Setup:** the HW-5 test app on `tesla-fleet-api` 0.6.0, with `confirmation: "verify"` and `raise_unconfirmed: true`. The owner was at the charge port. The car was parked at home with an IEC cable in and charging complete. The car reports no shift state while parked (`drive_state.shiftState` is `Invalid` and VCSEC `gear` is `GEAR_UNKNOWN`), so the test app took the owner's word that it was parked once the cable was out.
+**Setup:** as HW-5 (Homey Pro 2026, 13.5.4-rc.6, the same Model 3 on 2026.38.6, the same key, keepalive off), with the test app on `tesla-fleet-api` 0.6.0, `confirmation: "verify"` and `raise_unconfirmed: true`. Sample: two confirmed openings, one of each kind, and no close command. The owner was at the charge port. The car was parked at home with an IEC cable in and charging complete. The car reports no shift state while parked (`drive_state.shiftState` is `Invalid` and VCSEC `gear` is `GEAR_UNKNOWN`), so the test app took the owner's word that it was parked once the cable was out.
 
 | Step | Result |
 | -- | -- |

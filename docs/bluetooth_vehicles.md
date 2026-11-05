@@ -2,7 +2,7 @@
 
 Control a Tesla directly over Bluetooth Low Energy, with no cloud. The entry point is `tesla-fleet-api/bluetooth`, and a backend comes in as a `BleTransport`.
 
-> **Only the Homey path has run on a real car from Node** (HW-5 and HW-4, `pair` included, 2026-11-03 and 04). noble has not. The library is also tested against an independent fake vehicle, and each adapter against a stub of its backend. See [What has run on hardware](#what-has-run-on-hardware).
+> **Only the Homey path has run on a real car from Node** (HW-4, HW-5 and HW-6, `pair` included, 2026-11-03 and 04). noble has not. The library is also tested against an independent fake vehicle, and each adapter against a stub of its backend. See [What has run on hardware](#what-has-run-on-hardware).
 
 ## Quick start
 
