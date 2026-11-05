@@ -14,8 +14,8 @@ Stages from design document 06, section 4, and where each stands.
 | HW-1 | The library on noble. | Not run: the development host has no Bluetooth adapter |
 | HW-3 | Rare paths: image paging, readers only Python's mocks cover. | Readers done 2026-11-03. Image paging not provable on this car |
 | HW-4 | Pairing, with the owner at the car. | Done 2026-11-04 |
-| HW-5 | Homey end to end, and a 24 h soak. | Checks done 2026-11-03. Waiting on the 24 h soak, running until 2026-11-04 23:00 UTC |
-| HW-6 | Charge-port acceptance, with the owner present. | Waiting for the owner |
+| HW-5 | Homey end to end, and a 24 h soak. | Done 2026-11-04 |
+| HW-6 | Charge-port acceptance, with the owner present. | Done 2026-11-04 |
 | PW-16 | Powerwall writes, with the owner present. | Done 2026-11-04 |
 
 ## Homey BLE, probe app (HW-0, BLE-00, 2026-11-03)
@@ -76,7 +76,33 @@ One sample each. Every drop seen here fired Homey's `disconnect` event.
 
 **Broadcasts:** a held link heard VCSEC `VehicleStatus` broadcasts. When the car woke during the 40-minute hold, 10 arrived within 0.6 s, with the sleep status going from asleep to awake.
 
-**24 h soak (running, results so far):** started 2026-11-03 22:59 UTC on the same app. Every 15 minutes it connects, reads `vehicle_state` from VCSEC and disconnects. It never wakes the car and never holds a link. After 13 cycles (to 01:50 UTC): 12 passed, and the one failure was the cached `discover()` described under **Link**. The car was asleep in 9 cycles. Connects took 2.1 to 2.3 s after a scan and 12.2 to 12.5 s without one, and one took 6.2 s. Reads took 0.29 to 0.73 s, and one took 1.95 s. The app's heap stayed at 15 to 16 MB. The app restarted 5 times, every one a reinstall of the test app, not a crash. The final result replaces this paragraph.
+**24 h soak (2026-11-03 22:59 to 2026-11-04 22:59 UTC):** the same app, unattended. Every 15 minutes it connects, reads `vehicle_state` from VCSEC and disconnects, and every fourth cycle, if VCSEC reports the car already awake, it also reads `charge_state` with `wake_if_asleep` off. It never wakes the car and never holds a link.
+
+| Measure | Result |
+| -- | -- |
+| Cycles | 104 run, 98 passed. Another 6 were skipped while another test plan held the link or the soak was paused: for the idle-link holds, the pairing, the other Homey app's tests and HW-6. |
+| Failures | Six cycles. One was the cached `discover()` miss under **Link** (01:35 UTC). Three were `SessionInfoAuthenticationFault` while Homey doubled every notification, between 02:11 and 02:18 UTC (see **Doubled notifications**). Two, at 21:42 and 22:42 UTC, were `vehicle_state` timeouts: the link came up, but no notification at all arrived in the 5 s after the write. Their `connect()` took 1.8 s against the usual 0.4 s. The cause is unknown, and the next cycle passed each time. |
+| Infotainment reads | Three cycles found the car awake and read `charge_state`. One passed, and the other two fell in the doubled period. |
+| Car asleep | In 82 of the 98 passing cycles, so connecting every 15 minutes did not keep it awake. |
+| Connect | 103 connects: 83 with no scan in the previous 30 s took 12.0 to 17.9 s (median 12.4 s), and 20 within 30 s of a scan took 1.2 to 7.2 s. |
+| `vehicle_state` | 98 reads: median 341 ms, 90th percentile 686 ms, at most 1.95 s. |
+| Memory | The app's heap stayed at 15 to 17 MB. |
+| Restarts | 17, each a reinstall of the test app or a Homey reboot made during the session. The soak resumed after each one. |
+
+## Doubled notifications on Homey (2026-11-04)
+
+Same setup as HW-5 (Homey Pro 2026, 13.5.4-rc.6, the same Model 3, key and app, keepalive off). Seen twice: Homey delivered every notification from the car to the test app twice, 2 to 5 ms apart: first seen at 00:16 UTC, 12 minutes after a link dropped during a long idle hold, and at 05:15 UTC, when the test app connected a second `VehicleBluetooth` while the first still held the link. A frame of one chunk survived, as the library discarded the copy as a stale reply. Every longer frame was spliced, so handshakes raised `SessionInfoAuthenticationFault` and infotainment reads raised a raw protobuf `Error`. It survived app restarts and stopping the other app on the Homey, and unsubscribing before subscribing did not clear it. A Homey reboot did, both times. Issue #63 tracks what the library can do about it.
+
+## Charge port (HW-6, 2026-11-04)
+
+**Setup:** as HW-5 (Homey Pro 2026, 13.5.4-rc.6, the same Model 3 on 2026.38.6, the same key, keepalive off), with the test app on `tesla-fleet-api` 0.6.0, `confirmation: "verify"` and `raise_unconfirmed: true`. Sample: two confirmed openings, one of each kind, and no close command. The owner was at the charge port. The car was parked at home with an IEC cable in and charging complete. The car reports no shift state while parked (`drive_state.shiftState` is `Invalid` and VCSEC `gear` is `GEAR_UNKNOWN`), so the test app took the owner's word that it was parked once the cable was out.
+
+| Step | Result |
+| -- | -- |
+| `charge_port_door_open` with the cable in | Acked, and `verify` confirmed the latch released, 4.4 s after the call. The owner pulled the cable out freely. Four seconds later the latch read `Disengaged` and no cable was in, and the car closed the door by itself within the next 4 s. |
+| `charge_port_door_open` with no cable and the door closed | Acked, and `verify` confirmed it, 4.7 s after the call. The owner saw the door open and plugged the cable back in. Within 8 s the latch read `Engaged` and charging read `Complete` again. |
+
+The car ended as it started. `charge_port_door_close` did not run, because the car closed the door itself. An earlier attempt, at 05:15 UTC, was spoiled by the test app opening a second link, which doubled every notification (see **Doubled notifications** below), so its outcome is unknown. A read five minutes later showed the latch `Engaged`.
 
 ## Pairing (HW-4, 2026-11-04)
 

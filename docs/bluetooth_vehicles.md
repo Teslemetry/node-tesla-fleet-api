@@ -2,7 +2,7 @@
 
 Control a Tesla directly over Bluetooth Low Energy, with no cloud. The entry point is `tesla-fleet-api/bluetooth`, and a backend comes in as a `BleTransport`.
 
-> **Only the Homey path has run on a real car from Node** (HW-5 and HW-4, `pair` included, 2026-11-03 and 04). noble has not. The library is also tested against an independent fake vehicle, and each adapter against a stub of its backend. See [What has run on hardware](#what-has-run-on-hardware).
+> **Only the Homey path has run on a real car from Node** (HW-4, HW-5 and HW-6, `pair` included, 2026-11-03 and 04). noble has not. The library is also tested against an independent fake vehicle, and each adapter against a stub of its backend. See [What has run on hardware](#what-has-run-on-hardware).
 
 ## Quick start
 
@@ -187,7 +187,7 @@ A held link receives unsigned `VehicleStatus` broadcasts. Each `listen_*` return
 
 | Path | From Node | From Python, same car protocol |
 | -- | -- | -- |
-| Homey | HW-5: reads and quiet signed commands on a Model 3. Its 24 h soak is still running. | Never |
+| Homey | HW-5: reads, quiet signed commands and a 24 h soak on a Model 3. HW-6: the charge port. | Never |
 | noble | **Never** | Direct adapters, through `bleak` |
 | `pair` | HW-4: one key enrolled through Homey | One real key card tap |
 | Signing, framing and sessions | A Model 3 through Homey (HW-5, HW-4), and the fake vehicle against golden vectors | Yes |
