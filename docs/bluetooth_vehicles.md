@@ -187,7 +187,7 @@ A held link receives unsigned `VehicleStatus` broadcasts. Each `listen_*` return
 
 | Path | From Node | From Python, same car protocol |
 | -- | -- | -- |
-| Homey | HW-5: reads and quiet signed commands on a Model 3. Its 24 h soak is still running. | Never |
+| Homey | HW-5: reads, quiet signed commands and a 24 h soak on a Model 3. HW-6: the charge port. | Never |
 | noble | **Never** | Direct adapters, through `bleak` |
 | `pair` | HW-4: one key enrolled through Homey | One real key card tap |
 | Signing, framing and sessions | A Model 3 through Homey (HW-5, HW-4), and the fake vehicle against golden vectors | Yes |
