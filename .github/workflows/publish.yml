@@ -21,7 +21,18 @@ jobs:
       pull-requests: write
       id-token: write # npm OIDC trusted publishing - no NPM_TOKEN secret needed
     steps:
+      - name: Mint release app token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
       - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
 
       - uses: pnpm/action-setup@v4
         with:
@@ -49,5 +60,5 @@ jobs:
           commit: "chore: version packages"
           title: "chore: version packages"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }} # app token, so the version PR's pushes start CI
           NPM_CONFIG_PROVENANCE: true
