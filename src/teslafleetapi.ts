@@ -86,6 +86,9 @@ export default class TeslaFleetApi {
     this.logger = options.logger ?? null;
     this.#fetch = options.fetch ?? null;
     this.timeout = options.timeout ?? null;
+    if (options.client && !/^[\x20-\x7e]+$/.test(options.client)) {
+      throw new Error("client must contain only printable ASCII characters.");
+    }
     this.client = options.client || null;
     this.accessToken = options.accessToken ?? null;
 

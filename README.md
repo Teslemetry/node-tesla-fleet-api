@@ -51,7 +51,7 @@ await site.live_status();
 
 Replies keep the service's `{ response }` envelope. `api.vehicles.byVin` and `api.energySites.byId` are `Map`s of what each factory created. More: [vehicles](docs/fleet_api_vehicles.md), [energy sites](docs/fleet_api_energy_sites.md).
 
-`accessToken` may be a function returning `Promise<string | null>`, which is called for every request. Other options are `fetch`, `logger`, `debug`, `timeout` (milliseconds) and `client`, a short name for your application sent as the `X-Client` header on every request.
+`accessToken` may be a function returning `Promise<string | null>`, which is called for every request. Other options are `fetch`, `logger`, `debug`, `timeout` (milliseconds) and `client`, a short name for your application sent as the `X-Client` header on every request. It must be printable ASCII, or the constructor throws.
 
 ## Signed commands
 

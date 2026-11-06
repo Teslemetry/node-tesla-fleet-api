@@ -153,6 +153,11 @@ describe("_request", () => {
         expect(headersOf(without).has("X-Client")).toBe(false);
     });
 
+    it("rejects a client that is not printable ASCII", () => {
+        expect(() => makeApi(fakeFetch(), { client: "café" })).toThrow(/printable ASCII/);
+        expect(() => makeApi(fakeFetch(), { client: "app\n" })).toThrow(/printable ASCII/);
+    });
+
     it("raises ResponseError for a non-JSON 2xx", async () => {
         const fetch = fakeFetch(() => new Response("<html>ok</html>", { status: 200, headers: { "Content-Type": "text/html" } }));
 
