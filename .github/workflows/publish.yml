@@ -32,7 +32,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false # changesets/action writes its own credential from the app token
 
       - uses: pnpm/action-setup@v4
         with:
