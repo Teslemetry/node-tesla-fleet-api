@@ -141,6 +141,23 @@ describe("_request", () => {
         expect(headersOf(fetch).get("X-Library")).toBe(`node tesla_fleet_api ${version}`);
     });
 
+    it("sends X-Client only when client is set", async () => {
+        const withClient = fakeFetch();
+        const without = fakeFetch();
+
+        await makeApi(withClient, { client: "node-red-contrib-teslemetry" })._request("GET", "api/1/products");
+        await makeApi(without)._request("GET", "api/1/products");
+
+        expect(headersOf(withClient).get("X-Client")).toBe("node-red-contrib-teslemetry");
+        expect(headersOf(withClient).get("X-Library")).toMatch(/^node tesla_fleet_api /);
+        expect(headersOf(without).has("X-Client")).toBe(false);
+    });
+
+    it("rejects a client that is not printable ASCII", () => {
+        expect(() => makeApi(fakeFetch(), { client: "café" })).toThrow(/printable ASCII/);
+        expect(() => makeApi(fakeFetch(), { client: "app\n" })).toThrow(/printable ASCII/);
+    });
+
     it("raises ResponseError for a non-JSON 2xx", async () => {
         const fetch = fakeFetch(() => new Response("<html>ok</html>", { status: 200, headers: { "Content-Type": "text/html" } }));
 

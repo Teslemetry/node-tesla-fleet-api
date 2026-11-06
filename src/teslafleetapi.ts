@@ -57,6 +57,8 @@ export default class TeslaFleetApi {
   timeout: number | null;
   /** Transport identity for debug logging; Teslemetry and Tessie override this. */
   readonly _transport_name: string = "fleet";
+  /** Sent as `X-Client` on every request when set. */
+  client: string | null;
   #fetch: typeof fetch | null;
   // Native private fields, behind accessors: a key must not be reachable by
   // walking the instance, e.g. in a structured log.
@@ -77,11 +79,17 @@ export default class TeslaFleetApi {
     /** Used for every request in place of the global `fetch`. */
     fetch?: typeof fetch;
     timeout?: number;
+    /** A short name for the application, sent as `X-Client` on every request. */
+    client?: string;
   }) {
     this.debug = !!options.debug;
     this.logger = options.logger ?? null;
     this.#fetch = options.fetch ?? null;
     this.timeout = options.timeout ?? null;
+    if (options.client && !/^[\x20-\x7e]+$/.test(options.client)) {
+      throw new Error("client must contain only printable ASCII characters.");
+    }
+    this.client = options.client || null;
     this.accessToken = options.accessToken ?? null;
 
     if (options.server) {
@@ -221,6 +229,9 @@ export default class TeslaFleetApi {
         Authorization: `Bearer ${accessToken}`,
         "X-Library": `node tesla_fleet_api ${__VERSION__}`,
       };
+      if (this.client) {
+        headers["X-Client"] = this.client;
+      }
 
       // Remove null and undefined values from params and json
       const query = new URLSearchParams();
