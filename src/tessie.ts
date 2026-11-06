@@ -16,6 +16,8 @@ export type TessieOptions = {
     logger?: Logger;
     fetch?: typeof fetch;
     timeout?: number;
+    /** A short name for the application, sent as `X-Client` on every request. */
+    client?: string;
     /** Default for each command's `wait_for_completion`. */
     wait_for_completion?: boolean;
     /** Default for each command's `max_attempts`. */

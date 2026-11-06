@@ -20,6 +20,8 @@ export type TeslemetryOptions = {
   logger?: Logger;
   fetch?: typeof fetch;
   timeout?: number;
+  /** A short name for the application, sent as `X-Client` on every request. */
+  client?: string;
 };
 
 /** Teslemetry's OAuth dynamic client registration endpoint. */
