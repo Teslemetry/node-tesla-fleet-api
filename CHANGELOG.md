@@ -1,5 +1,11 @@
 # tesla-fleet-api
 
+## 0.9.0
+
+### Minor Changes
+
+- 2122ecd: A new `client` option names your application, and is sent as the `X-Client` header on every request. `X-Library` is unchanged.
+
 ## 0.8.0
 
 ### Minor Changes
