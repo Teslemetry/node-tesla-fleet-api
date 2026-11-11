@@ -56,13 +56,9 @@ function settleWithin<T>(step: () => Promise<T>, ms: number, signal?: AbortSigna
  *
  * With a signing key (see `EnergySpecific`), every device command except the
  * four pre-pairing reads is signed with that key and sent through Teslemetry's
- * `device_command` route. Without a key, a command uses its Teslemetry route.
- * The `set_island_mode`, `backup_events` and `config` routes sign with
- * Teslemetry's own key, which must be verified on the gateway, or the route
- * answers 409 `energy_site_not_paired` and sends nothing. As of 2026-10-29 the
- * `dispatch_battery_power`, `resume_battery_operation` and backup-event
- * schedule and cancel routes still send unsigned, so Tesla answers HTTP 400:
- * keyless dispatch does not work until Teslemetry signs those routes.
+ * `device_command` route. Without a key, a command uses its Teslemetry route,
+ * which signs with Teslemetry's own key. That key must be verified on the
+ * gateway, or the route answers 409 `energy_site_not_paired` and sends nothing.
  */
 export class TeslemetryEnergySite extends EnergySpecific {
     /** Send a signed `RoutableMessage` through Teslemetry's route, which takes the flat body and adds Tesla's `data` wrapper itself. */
@@ -280,8 +276,9 @@ export class TeslemetryEnergySite extends EnergySpecific {
 
     /**
      * Request a timed battery power setpoint on the energy gateway. Without a
-     * signing key the Teslemetry route still sends unsigned and gets Tesla's HTTP
-     * 400 (2026-10-29). See `EnergySpecific.dispatch_battery_power`.
+     * signing key the Teslemetry route signs it, and answers 409
+     * `energy_site_not_paired` until Teslemetry's key is verified on the gateway.
+     * See `EnergySpecific.dispatch_battery_power`.
      * @param power_watts Battery power in watts: positive discharges, negative charges.
      * @param duration_seconds Whole seconds from 1 to 86400.
      */
@@ -295,7 +292,8 @@ export class TeslemetryEnergySite extends EnergySpecific {
 
     /**
      * Release a `dispatch_battery_power` setpoint. Without a signing key the
-     * Teslemetry route still sends unsigned and gets Tesla's HTTP 400 (2026-10-29).
+     * Teslemetry route signs it, and answers 409 `energy_site_not_paired` until
+     * Teslemetry's key is verified on the gateway.
      */
     override async resume_battery_operation(): Promise<Record<string, any>> {
         return this.signing ? super.resume_battery_operation() : this._post_route("resume_battery_operation");
