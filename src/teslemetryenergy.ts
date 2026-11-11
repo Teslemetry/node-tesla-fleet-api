@@ -56,9 +56,10 @@ function settleWithin<T>(step: () => Promise<T>, ms: number, signal?: AbortSigna
  *
  * With a signing key (see `EnergySpecific`), every device command except the
  * four pre-pairing reads is signed with that key and sent through Teslemetry's
- * `device_command` route. Without a key, a command uses its Teslemetry route,
- * which signs with Teslemetry's own key. That key must be verified on the
- * gateway, or the route answers 409 `energy_site_not_paired` and sends nothing.
+ * `device_command` route. Without a key, a command uses its Teslemetry route.
+ * Apart from the pre-pairing reads and the authorized-client routes, that route
+ * signs with Teslemetry's own key, which must be verified on the gateway, or it
+ * answers 409 `energy_site_not_paired` and sends nothing.
  */
 export class TeslemetryEnergySite extends EnergySpecific {
     /** Send a signed `RoutableMessage` through Teslemetry's route, which takes the flat body and adds Tesla's `data` wrapper itself. */
